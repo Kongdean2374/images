@@ -104,13 +104,22 @@
     resize();
     start();
 
+    /* 只有首屏看得到星空，捲過去就停掉，手機才不會一直耗電 */
+    var hero = document.querySelector('.hero');
+    if (hero && 'IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        entries[0].isIntersecting ? start() : stop();
+      }, { threshold: 0 }).observe(hero);
+    }
+
     var rt;
     window.addEventListener('resize', function () {
       clearTimeout(rt);
       rt = setTimeout(resize, 180);
     });
     document.addEventListener('visibilitychange', function () {
-      document.hidden ? stop() : start();
+      if (document.hidden) stop();
+      else if (!hero || hero.getBoundingClientRect().bottom > 0) start();
     });
   })();
 
@@ -243,6 +252,8 @@
       lbImg.alt = img.alt || '';
       lbCap.textContent = cap ? cap.textContent : '';
       lb.hidden = false;
+      lb.setAttribute('role', 'dialog');
+      lb.setAttribute('aria-modal', 'true');
       document.body.style.overflow = 'hidden';
       opener = fig;
       if (close) close.focus();
@@ -254,6 +265,16 @@
       document.body.style.overflow = '';
       if (opener) { opener.focus && opener.focus(); opener = null; }
     }
+
+    /* 燈箱開著時把 Tab 鎖在裡面，不然鍵盤使用者會跑到背景迷路 */
+    lb.addEventListener('keydown', function (e) {
+      if (e.key !== 'Tab' || lb.hidden) return;
+      var focusable = $$('button, [href], input, [tabindex]:not([tabindex="-1"])', lb);
+      if (!focusable.length) return;
+      var first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
 
     $$('.wall .ph').forEach(function (fig) {
       fig.setAttribute('tabindex', '0');
