@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>柴柴 ChaiChai｜夜裡還亮著的那盞</title>
+
+<meta name="description" content="柴柴的自介。生理男，2006/03/15 生，台灣現役軍人・海軍陸戰隊，座標台灣南部。標準夜柴子，玩射擊、冒險、合作類遊戲跟音遊，光遇最高 11 翼、常駐巫師。上線時間隨機，不是已讀不回。">
+<meta name="author" content="柴柴 ChaiChai">
+<meta name="theme-color" content="#0b1020">
+<link rel="canonical" href="https://me.chaihome.cc/">
+
+<!-- Open Graph -->
+<meta property="og:type" content="profile">
+<meta property="og:site_name" content="柴柴 ChaiChai">
+<meta property="og:title" content="柴柴 ChaiChai｜夜裡還亮著的那盞">
+<meta property="og:description" content="關於我、遊戲、照片和聯絡方式。台灣現役軍人・海軍陸戰隊，標準夜柴子，光遇最高 11 翼常駐巫師。上線時間隨機，不是已讀不回。">
+<meta property="og:url" content="https://me.chaihome.cc/">
+<meta property="og:image" content="https://me.chaihome.cc/assets/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="深夜無人的街道與路燈">
+<meta property="og:locale" content="zh_TW">
+<meta property="profile:username" content="kongdean_">
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="柴柴 ChaiChai｜夜裡還亮著的那盞">
+<meta name="twitter:description" content="關於我、遊戲、照片和聯絡方式。標準夜柴子，光遇 11 翼常駐巫師。上線時間隨機，不是已讀不回。">
+<meta name="twitter:image" content="https://me.chaihome.cc/assets/og.jpg">
+
+<link rel="icon" href="assets/favicon.png" sizes="64x64" type="image/png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+
+<!-- Person 結構化資料 -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Person",
+  "name": "柴柴",
+  "alternateName": ["ChaiChai", "kongdean", "柴柴大使"],
+  "birthDate": "2006-03-15",
+  "gender": "Male",
+  "jobTitle": "現役軍人（海軍陸戰隊）",
+  "nationality": { "@type": "Country", "name": "Taiwan" },
+  "homeLocation": {
+    "@type": "Place",
+    "address": { "@type": "PostalAddress", "addressRegion": "台灣南部", "addressCountry": "TW" }
+  },
+  "url": "https://me.chaihome.cc/",
+  "image": "https://me.chaihome.cc/assets/og.jpg",
+  "description": "台灣現役軍人，海軍陸戰隊，標準夜柴子。慢熟但不是難相處，熟了幹話量會明顯上升。喜歡直白有內容的聊天，重視信任與陪伴。",
+  "knowsLanguage": ["zh-Hant", "zh-TW"],
+  "knowsAbout": ["Sky 光遇", "Minecraft", "射擊遊戲", "音樂遊戲", "電腦與介面設定"],
+  "sameAs": [
+    "https://www.instagram.com/kongdean_/",
+    "https://www.tiktok.com/@kongdean428",
+    "https://x.com/kongdean430",
+    "https://space.bilibili.com/3493263835138055",
+    "https://discord.com/users/924486588677890159",
+    "https://open.spotify.com/user/31mhutrb3jf4ftdjqhn7qcazobwi",
+    "https://steamcommunity.com/profiles/76561199534116069/",
+    "https://www.facebook.com/share/1BRjbpSgp6/",
+    "https://line.me/ti/p/UFLHPJnqcj",
+    "https://play.chaihome.cc/"
+  ]
+}
+</script>
+</head>
+
+<body>
+<a class="skip" href="#about">跳到主要內容</a>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+
+<!-- 燈桿導覽（桌機） -->
+<nav class="pole" aria-label="頁面章節">
+  <span class="pole__wire" aria-hidden="true"></span>
+  <ul>
+    <li><a href="#top"    data-lamp="top"><i></i><span>首頁</span></a></li>
+    <li><a href="#about"  data-lamp="about"><i></i><span>基本資料</span></a></li>
+    <li><a href="#life"   data-lamp="life"><i></i><span>生活興趣</span></a></li>
+    <li><a href="#sky"    data-lamp="sky"><i></i><span>光遇</span></a></li>
+    <li><a href="#games"  data-lamp="games"><i></i><span>遊戲清單</span></a></li>
+    <li><a href="#photos" data-lamp="photos"><i></i><span>照片牆</span></a></li>
+    <li><a href="#find"   data-lamp="find"><i></i><span>找到柴柴</span></a></li>
+    <li><a href="#words"  data-lamp="words"><i></i><span>柴柴語錄</span></a></li>
+  </ul>
+</nav>
+
+<!-- ══════════ HERO ══════════ -->
+<header class="hero" id="top">
+  <div class="hero__inner">
+
+    <div class="hero__head">
+      <p class="hero__kicker">現役軍人 ・ 海軍陸戰隊</p>
+      <h1 class="hero__name" aria-label="柴柴">
+        <span>柴</span><span>柴</span>
+        <em>ChaiChai</em>
+      </h1>
+      <p class="hero__tagline">夜裡還亮著的那盞，剛好是我。</p>
+      <p class="hero__sub">柴柴的自介。關於我、遊戲、照片和聯絡方式。</p>
+    </div>
+
+    <figure class="hero__photo">
+      <img src="assets/hero.jpg" width="1050" height="1400"
+           alt="柴柴站在吊橋觀景台旁的直式人像照" fetchpriority="high" decoding="async">
+      <figcaption>南部・某個還沒天黑的下午</figcaption>
+    </figure>
+
+    <div class="hero__meta">
+      <dl class="stat">
+        <div><dt>座標</dt><dd>台灣南部</dd></div>
+        <div><dt>年齡</dt><dd><span id="age">—</span> 歲</dd></div>
+        <div><dt>生日</dt><dd><time datetime="2006-03-15">2006 / 03 / 15</time></dd></div>
+        <div><dt>狀態</dt><dd class="stat__live"><span class="dot" aria-hidden="true"></span>當兵中</dd></div>
+      </dl>
+
+      <p class="hero__note">
+        <span class="hero__note-lead">上線時間隨機，不是已讀不回。</span>
+        上午有機率還在睡，晚上反而比較像正式開機。
+      </p>
+    </div>
+
+  </div>
+  <a class="hero__cue" href="#about" aria-label="往下看">
+    <span></span>往下
+  </a>
+</header>
+
+<main>
+
+<!-- ══════════ 基本資料 ══════════ -->
+<section id="about" class="sec">
+  <div class="sec__head">
+    <h2>基本資料</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">about me</b>
+  </div>
+
+  <div class="intro">
+    <h3 class="intro__t">我叫柴柴。</h3>
+    <p class="lede">
+      生理男，座標台灣南部，目前當兵中，所以有時候上線時間很隨機。
+      生日是 2006 / 03 / 15，現在 <b><span id="age2">—</span> 歲</b>，這個數字會自己長大，不需要每年人工搶救。
+    </p>
+    <ul class="tags">
+      <li>夜柴子</li><li>慢熟</li><li>熟了很吵</li><li>嘴砲但不惡意</li>
+    </ul>
+  </div>
+
+  <div class="traits">
+    <article class="trait">
+      <h3>慢熟，但不是難相處</h3>
+      <p>個性算理性偏感性，不太擅長那種為了不冷場硬擠出來的寒暄。剛認識可能比較安靜，熟了之後幹話量會明顯上升，而且通常沒有關閉按鈕。</p>
+    </article>
+    <article class="trait">
+      <h3>喜歡直白、有內容的聊天</h3>
+      <p>有事情直接講反而舒服。拐很多彎、官腔、假客套那類東西，會讓我腦袋自動離線。</p>
+    </article>
+  </div>
+
+  <div class="talk">
+    <h3 class="talk__t">相處這件事，我比較看真不真。</h3>
+    <ul class="talk__list">
+      <li>重視信任與陪伴。</li>
+      <li>不太擅長表面社交，但對認定的人會很認真。</li>
+      <li>不太會硬找話題，但真的聊起來會認真聊。</li>
+      <li>比起很多認識的人，更在意少數真的聊得來的人。</li>
+      <li>如果我突然安靜，可能只是沒電，不一定是生氣。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════ 生活興趣 ══════════ -->
+<section id="life" class="sec sec--life">
+  <div class="sec__head">
+    <h2>生活興趣</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">life / interest</b>
+  </div>
+
+  <h3 class="intro__t">大概就是遊戲、音樂，還有各種奇怪設定。</h3>
+  <p class="lede">
+    玩遊戲偏射擊、冒險、合作類，也會碰音樂遊戲。
+    對電腦、科技、設定、介面之類的東西很容易手癢，看到預設值常常就很想改——
+    不是因為預設值一定不好，只是它存在那裡，看起來很欠動。
+  </p>
+  <p class="lede lede--gap">
+    作息則是標準夜柴子。長時間熬夜代表，上午有機率還在睡，晚上反而比較像正式開機。
+  </p>
+  <ul class="tags">
+    <li>射擊</li><li>冒險</li><li>合作</li><li>音樂遊戲</li>
+    <li>改介面</li><li>調設定</li><li>熬夜代表</li><li>夜柴子</li>
+  </ul>
+</section>
+
+<!-- ══════════ Sky 光遇 ══════════ -->
+<section id="sky" class="sec sec--sky">
+  <div class="sec__head">
+    <h2>Sky 光遇</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">game file / 001</b>
+  </div>
+
+  <div class="save">
+    <div class="save__bar">
+      <span class="save__slot">SAVE&nbsp;FILE</span>
+      <span class="save__title">Sky: Children of the Light</span>
+      <span class="save__ok">已同步</span>
+    </div>
+
+    <div class="save__body">
+      <div class="save__main">
+        <p class="save__label">最高翼數</p>
+        <p class="save__wing"><strong>11</strong><span>翼</span></p>
+        <div class="wings" role="img" aria-label="11 翼">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+      </div>
+
+      <dl class="save__rows">
+        <div><dt>晨島</dt><dd class="is-done">畢業</dd></div>
+        <div><dt>雲野</dt><dd class="is-done">畢業</dd></div>
+        <div><dt>常駐地圖</dt><dd class="is-home">巫師</dd></div>
+        <div><dt>玩法</dt><dd class="is-plain">跑圖 / 帶萌新 / 亂彈琴</dd></div>
+        <div><dt>社交模式</dt><dd class="is-plain">不太主動，但會陪</dd></div>
+        <div><dt>在乎的事</dt><dd class="is-plain">一起玩的人 &gt; 技術</dd></div>
+      </dl>
+    </div>
+
+    <p class="save__note">
+      喜歡跑圖、帶萌新、亂彈琴。不太會主動社交，但會默默陪人。
+      比起技術或效率，更在乎一起玩的人。上線時間隨緣，有看到我基本算抽到了。
+      <b>簡單講，就是一隻會飛的柴柴而已。</b>
+    </p>
+  </div>
+</section>
+
+<!-- ══════════ 遊戲清單 ══════════ -->
+<section id="games" class="sec">
+  <div class="sec__head">
+    <h2>遊戲清單</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">game list</b>
+  </div>
+
+  <h3 class="sub">常駐</h3>
+  <ul class="roster">
+    <li><span class="roster__n">光遇</span><span class="roster__k">社交・冒險</span></li>
+    <li><span class="roster__n">Minecraft</span><span class="roster__k">沙盒</span></li>
+    <li><span class="roster__n">第五人格</span><span class="roster__k">非對稱對抗</span></li>
+    <li><span class="roster__n">激鬥峽谷</span><span class="roster__k">MOBA</span></li>
+    <li><span class="roster__n">VALORANT</span><span class="roster__k">戰術射擊</span></li>
+    <li><span class="roster__n">COD</span><span class="roster__k">射擊</span></li>
+    <li><span class="roster__n">逃離塔科夫</span><span class="roster__k">硬核撤離</span></li>
+    <li><span class="roster__n">Arena Breakout Infinite</span><span class="roster__k">撤離射擊</span></li>
+    <li><span class="roster__n">Delta Force</span><span class="roster__k">戰術射擊</span></li>
+    <li><span class="roster__n">明日方舟：終末地</span><span class="roster__k">策略</span></li>
+  </ul>
+
+  <h3 class="sub sub--beat">音樂遊戲</h3>
+  <div class="chart">
+    <div class="chart__scroll">
+      <div class="chart__track">
+        <span class="chart__line" aria-hidden="true"></span>
+        <ul class="notes">
+          <li style="--o:-26px">Phigros</li>
+          <li style="--o:12px">Phira</li>
+          <li style="--o:-8px">Rotaeno</li>
+          <li style="--o:24px">Milthm</li>
+          <li style="--o:-20px">Paradigm: Reboot</li>
+          <li style="--o:6px">Muse Dash</li>
+          <li style="--o:-14px">RYCEAM</li>
+          <li style="--o:20px">AstroDX</li>
+              <li style="--o:-4px">Takumi³</li>
+        </ul>
+      </div>
+    </div>
+    <p class="chart__hint">可左右滑動</p>
+  </div>
+</section>
+
+<!-- ══════════ 照片牆 ══════════ -->
+<section id="photos" class="sec sec--photos">
+  <div class="sec__head">
+    <h2>照片牆</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">photo wall</b>
+  </div>
+  <p class="lede lede--tight">手機隨手拍的，幾乎都是晚上。路上沒人的時候，燈才是主角。</p>
+
+  <div class="wall">
+    <figure class="ph ph--a"><img src="assets/night-01.jpg" width="1300" height="975" loading="lazy" decoding="async" alt="社區小徑上的夜燈與磚道"><figcaption>回去前的最後一段路</figcaption></figure>
+    <figure class="ph ph--b"><img src="assets/night-02.jpg" width="975" height="1300" loading="lazy" decoding="async" alt="兩棟大樓之間的傍晚雲層"><figcaption>大樓夾出來的一條天空</figcaption></figure>
+    <figure class="ph ph--c"><img src="assets/night-04.jpg" width="975" height="1300" loading="lazy" decoding="async" alt="夜晚河岸的城市燈光倒影"><figcaption>河面把燈都撿走了</figcaption></figure>
+    <figure class="ph ph--d"><img src="assets/night-03.jpg" width="1300" height="975" loading="lazy" decoding="async" alt="深夜無人的柏油路與路燈"><figcaption>整條路只有我跟路燈</figcaption></figure>
+    <figure class="ph ph--e"><img src="assets/night-05.jpg" width="1300" height="975" loading="lazy" decoding="async" alt="夜間廣場的紫色燈飾裝置"><figcaption>會發光的花，比我還晚睡</figcaption></figure>
+    <figure class="ph ph--f"><img src="assets/night-06.jpg" width="975" height="1300" loading="lazy" decoding="async" alt="夜晚港邊的白色造型建築與欄杆"><figcaption>港邊，風很大</figcaption></figure>
+  </div>
+</section>
+
+<!-- ══════════ 找到柴柴 ══════════ -->
+<section id="find" class="sec sec--find">
+  <div class="sec__head">
+    <h2>找到柴柴</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">find chai</b>
+  </div>
+
+  <div class="dir">
+    <div class="dir__col">
+      <h3>SOCIAL</h3>
+      <ul>
+        <li><a href="https://www.instagram.com/kongdean_/" target="_blank" rel="me noopener"><span class="dir__p">Instagram</span><span class="dir__h">@kongdean_</span></a></li>
+        <li><a href="https://www.tiktok.com/@kongdean428" target="_blank" rel="me noopener"><span class="dir__p">TikTok</span><span class="dir__h">@kongdean428</span></a></li>
+        <li><a href="https://x.com/kongdean430" target="_blank" rel="me noopener"><span class="dir__p">X</span><span class="dir__h">@kongdean430</span></a></li>
+        <li><a href="https://space.bilibili.com/3493263835138055" target="_blank" rel="me noopener"><span class="dir__p">Bilibili</span><span class="dir__h">柴柴大使</span></a></li>
+      </ul>
+    </div>
+
+    <div class="dir__col">
+      <h3>ELSEWHERE</h3>
+      <ul>
+        <li><a href="https://discord.com/users/924486588677890159" target="_blank" rel="me noopener"><span class="dir__p">Discord</span><span class="dir__h">@kongdean</span></a></li>
+        <li><a href="https://open.spotify.com/user/31mhutrb3jf4ftdjqhn7qcazobwi" target="_blank" rel="me noopener"><span class="dir__p">Spotify</span><span class="dir__h">ChaiChai</span></a></li>
+        <li><a href="https://steamcommunity.com/profiles/76561199534116069/" target="_blank" rel="me noopener"><span class="dir__p">Steam</span><span class="dir__h">大盜喊不住</span></a></li>
+        <li><a href="https://www.facebook.com/share/1BRjbpSgp6/" target="_blank" rel="me noopener"><span class="dir__p">Facebook</span><span class="dir__h">柴柴</span></a></li>
+        <li><a href="https://line.me/ti/p/UFLHPJnqcj" target="_blank" rel="me noopener"><span class="dir__p">LINE</span><span class="dir__h">加好友</span></a></li>
+      </ul>
+    </div>
+
+    <div class="dir__col dir__col--home">
+      <h3>CHAIHOME</h3>
+      <ul>
+        <li><a href="https://play.chaihome.cc/" target="_blank" rel="noopener"><span class="dir__p">Minecraft 官網</span><span class="dir__h">play.chaihome.cc</span></a></li>
+        <li><a href="https://discord.gg/prW39Wa58n" target="_blank" rel="noopener"><span class="dir__p">Minecraft Discord</span><span class="dir__h">discord.gg</span></a></li>
+      </ul>
+      <p class="dir__hint">自己的窩，慢慢長。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 柴柴語錄 ══════════ -->
+<section id="words" class="sec sec--words">
+  <div class="sec__head">
+    <h2>柴柴語錄</h2><span class="rule" aria-hidden="true"></span><b class="sec__tag">chai quotes</b>
+  </div>
+
+  <figure class="quote">
+    <span class="quote__mark" aria-hidden="true">「</span>
+    <blockquote id="quote-text" aria-live="polite">我不是已讀不回，我是真的在睡。</blockquote>
+    <figcaption>— 柴柴，某個凌晨</figcaption>
+  </figure>
+
+  <div class="quote__btns">
+    <button type="button" id="btn-roll" class="btn btn--main">換一句幹話</button>
+    <button type="button" id="btn-copy" class="btn">複製這句</button>
+    <button type="button" id="btn-egg" class="btn btn--egg" aria-label="隱藏彩蛋">
+      <span class="btn__paw" aria-hidden="true">🐾</span>
+    </button>
+  </div>
+
+  <!-- 把你的音檔放進 assets/ 並命名為 chaichai.mp3 就會自動生效 -->
+  <audio id="egg-audio" preload="none">
+    <source src="assets/chaichai.mp3" type="audio/mpeg">
+  </audio>
+</section>
+
+</main>
+
+<!-- ══════════ FOOTER ══════════ -->
+<footer class="foot">
+  <span class="foot__lamp" aria-hidden="true"></span>
+  <div class="foot__in">
+    <a class="foot__url" href="https://me.chaihome.cc/">me.chaihome.cc</a>
+    <p class="foot__meta">
+      最後更新 <time id="updated" datetime="2026-09-14">2026 / 09 / 14</time>
+      <span aria-hidden="true">·</span> 燈還開著
+    </p>
+    <button type="button" id="btn-top" class="foot__top">回到頂端 <span aria-hidden="true">↑</span></button>
+  </div>
+</footer>
+
+<!-- 燈箱 -->
+<div class="lb" id="lightbox" hidden>
+  <button type="button" class="lb__close" aria-label="關閉">✕</button>
+  <img id="lb-img" src="" alt="">
+  <p id="lb-cap" class="lb__cap"></p>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="script.js" defer></script>
+</body>
+</html>
