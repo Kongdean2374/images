@@ -87,6 +87,20 @@ CI 環境中 **不存放任何憑證或 provisioning profile**，簽名完全在
 
 沒有 iCloud 權限時，App 會自動維持在本機模式，設定頁的「目前狀態」會顯示「僅存在本機」。
 
+## iCloud 同步為什麼會「開了就閃退」（已修）
+
+第一版把 CloudKit 容器直接建下去。側載自簽的 App 通常沒有 iCloud entitlement，SwiftData 這時丟的是
+**Objective-C 例外**，Swift 的 `try?` 攔不住 → 啟動就閃退，而且每次開都掛在同一行，變成閃退迴圈。
+
+現在有三道防線（`Shared/Persistence.swift`）：
+
+1. **前置檢查**：先看 `FileManager.ubiquityIdentityToken`，沒有可用 iCloud 帳號／權限就根本不嘗試。
+2. **閃退自我修復**：嘗試前在 App Group UserDefaults 插旗，成功才拔旗。下次啟動看到旗子還在，
+   代表上次就是掛在這裡 → 自動關閉 iCloud 同步、用本機模式開起來，並在設定頁說明原因。
+3. **雙資料庫檔**：本機 `MoneyLeft.store`、雲端 `MoneyLeft-cloud.store` 分開，CloudKit 失敗不會污染本機那份。
+
+另外切換開關時會**當場**把資料複製到另一個資料庫檔（`StoreCopier`），所以開關 iCloud 不會讓紀錄不見。
+
 ## 隱私
 
 - 資料只寫在裝置本機（App Group 容器內的 SwiftData 資料庫）

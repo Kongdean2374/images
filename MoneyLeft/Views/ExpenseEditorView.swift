@@ -18,6 +18,8 @@ struct ExpenseEditorView: View {
     var onSaved: (() -> Void)?
     /// 內嵌在別的畫面裡（收據確認流程）時不要自己再包一層 NavigationStack
     var embedded: Bool = false
+    /// 首頁「快速記帳」帶進來的預選分類
+    var presetCategory: SpendingCategory?
 
     struct Prefill {
         var amount: Double?
@@ -297,6 +299,14 @@ struct ExpenseEditorView: View {
                 if let prefillDate = prefill.date { date = prefillDate }
                 if let prefillMerchant = prefill.merchant { merchant = prefillMerchant }
                 receiptImageData = AppSettings.keepReceiptImage ? prefill.imageData : nil
+            }
+            if let presetCategory {
+                if let parent = presetCategory.parent {
+                    selectedParent = parent
+                    selectedChild = presetCategory
+                } else {
+                    selectedParent = presetCategory
+                }
             }
             if selectedParent == nil {
                 selectedParent = topLevelCategories.first

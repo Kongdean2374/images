@@ -21,13 +21,6 @@ enum AppGroup {
             ?? URL.temporaryDirectory
     }
 
-    /// SwiftData 資料庫位置。
-    static var storeURL: URL {
-        let base = containerURL
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("MoneyLeft.store")
-    }
-
     /// 共用 UserDefaults（Widget 讀取快照用）。取不到 App Group 時退回 standard。
     static var defaults: UserDefaults {
         UserDefaults(suiteName: identifier) ?? .standard

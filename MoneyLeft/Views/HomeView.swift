@@ -5,56 +5,83 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var liveActivity: LiveActivityController
+
+    @Binding var selection: RootView.Tab
+    @Binding var presetCategory: SpendingCategory?
     @Binding var showingEditor: Bool
-    @Binding var showingReceiptFlow: Bool
 
     @Query(sort: \Expense.date, order: .reverse) private var allExpenses: [Expense]
     @Query private var settings: [BudgetSetting]
+    @Query(sort: \SpendingCategory.sortOrder) private var categories: [SpendingCategory]
 
-    @State private var summary: BudgetSummary = BudgetSummary()
+    @State private var summary = BudgetSummary()
     @State private var editingExpense: Expense?
     @State private var showingBudgetSetup = false
 
-    private var recentExpenses: [Expense] { Array(allExpenses.prefix(12)) }
+    private var recentExpenses: [Expense] { Array(allExpenses.prefix(6)) }
 
     private var todayTotal: Double {
         let start = DateHelper.startOfDay(Date())
         return allExpenses.filter { $0.date >= start }.reduce(0) { $0 + $1.amount }
     }
 
+    private var weekDays: [(date: Date, amount: Double)] {
+        let calendar = DateHelper.calendar
+        let today = DateHelper.startOfDay(Date())
+        return (0..<7).reversed().compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+            let amount = allExpenses
+                .filter { $0.date >= day && $0.date < next }
+                .reduce(0) { $0 + $1.amount }
+            return (date: day, amount: amount)
+        }
+    }
+
+    private var topLevelCategories: [SpendingCategory] {
+        categories.filter { $0.parent == nil }
+    }
+
+    private var spentProgress: Double {
+        guard summary.spendable > 0 else { return 0 }
+        return min(max(summary.variableSpent / summary.spendable, 0), 1)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    remainingCard
-                    if summary.monthlyBudget <= 0 {
-                        setupPrompt
-                    }
-                    quickActions
+                    heroCard
+                    if summary.monthlyBudget <= 0 { setupPrompt }
+                    todayRow
+                    quickAddCard
+                    weekCard
                     burnCard
-                    recentList
-                    Color.clear.frame(height: 72)
+                    recentCard
+                    Color.clear.frame(height: 12)
                 }
                 .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.top, 6)
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("MoneyLeft")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Text(monthLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showingReceiptFlow = true
+                        showingBudgetSetup = true
                     } label: {
-                        Image(systemName: "doc.text.viewfinder")
+                        Image(systemName: "target")
                     }
-                    .accessibilityLabel("掃描收據")
+                    .accessibilityLabel("預算設定")
                 }
             }
-            .overlay(alignment: .bottomTrailing) { floatingButton }
-            .sheet(item: $editingExpense) { expense in
-                ExpenseEditorView(expense: expense)
-            }
+            .sheet(item: $editingExpense) { ExpenseEditorView(expense: $0) }
             .sheet(isPresented: $showingBudgetSetup) {
                 NavigationStack { BudgetSettingsView() }
             }
@@ -64,189 +91,268 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Sections
+    private var monthLabel: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.dateFormat = "M 月"
+        return formatter.string(from: Date())
+    }
 
-    private var remainingCard: some View {
-        VStack(spacing: 8) {
-            Text("本月還可以花")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+    // MARK: - 主視覺
 
-            Text(Money.string(max(summary.remaining, 0)))
-                .font(.system(size: 52, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(summary.remaining < 0 ? Color(hex: "#FF453A") : .primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .contentTransition(.numericText())
+    private var heroCard: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Theme.heroGradient(for: summary.burnLevel))
+                .shadow(color: summary.burnLevel.color.opacity(0.3), radius: 14, y: 6)
 
-            if summary.remaining < 0 {
-                Text("已超支 \(Money.string(-summary.remaining))")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color(hex: "#FF453A"))
-            } else {
-                Text("距離月底還有 \(summary.daysRemaining) 天，平均每天可花 \(Money.string(summary.dailyAllowance))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+            HStack(alignment: .center, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("本月還可以花")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.9))
+
+                    Text(Money.string(max(summary.remaining, 0)))
+                        .font(.system(size: 40, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .contentTransition(.numericText())
+
+                    if summary.remaining < 0 {
+                        Label("已超支 \(Money.string(-summary.remaining))", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Text("剩 \(summary.daysRemaining) 天 · 每天可花 \(Money.string(summary.dailyAllowance))")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+
+                    Label(summary.burnLevel.label, systemImage: burnIcon)
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(.white.opacity(0.22)))
+                        .foregroundStyle(.white)
+                        .padding(.top, 2)
+                }
+
+                ZStack {
+                    RingProgressView(progress: spentProgress, lineWidth: 11)
+                    VStack(spacing: 1) {
+                        Text("\(Int(spentProgress * 100))%")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .monospacedDigit()
+                        Text("已用")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+                .frame(width: 86, height: 86)
             }
-
-            ProgressView(value: min(max(summary.variableSpent / max(summary.spendable, 1), 0), 1))
-                .tint(summary.burnLevel.color)
-                .padding(.top, 4)
-
-            HStack {
-                Text("已花 \(Money.string(summary.variableSpent))")
-                Spacer()
-                Text("可支配 \(Money.string(summary.spendable))")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .padding(20)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var burnIcon: String {
+        switch summary.burnLevel {
+        case .good: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.circle.fill"
+        case .over: return "flame.fill"
+        }
     }
 
     private var setupPrompt: some View {
         Button {
             showingBudgetSetup = true
         } label: {
-            HStack {
+            HStack(spacing: 12) {
                 Image(systemName: "target")
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("先設定這個月的預算").font(.subheadline.weight(.semibold))
+                    Text("先設定這個月的預算").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                     Text("設好之後才算得出「還能花多少」").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
             }
-            .padding(14)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .card(padding: 12, corner: 18)
         }
         .buttonStyle(.plain)
     }
 
-    private var quickActions: some View {
-        HStack(spacing: 10) {
-            StatTile(title: "今日已花", value: Money.string(todayTotal), caption: "每日額度 \(Money.string(summary.dailyAllowance))")
-            StatTile(
+    // MARK: - 今日 / 本週
+
+    private var todayRow: some View {
+        HStack(spacing: 12) {
+            miniTile(
+                title: "今日已花",
+                value: Money.string(todayTotal),
+                caption: summary.dailyAllowance > 0
+                    ? "額度 \(Money.string(summary.dailyAllowance))"
+                    : "尚未設定預算",
+                tint: todayTotal > summary.dailyAllowance && summary.dailyAllowance > 0
+                    ? Color(hex: "#FF453A") : .primary,
+                icon: "sun.max.fill"
+            )
+            miniTile(
                 title: "本月預估",
                 value: Money.compact(summary.projectedMonthTotal),
                 caption: summary.projectedRunOutDay.map { "預算撐到 \($0) 號" } ?? "在預算內",
-                tint: summary.burnLevel.color
+                tint: summary.burnLevel.color,
+                icon: "chart.line.uptrend.xyaxis"
             )
         }
     }
 
-    private var burnCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("燒錢速度", systemImage: "speedometer").font(.headline)
-                Spacer()
-                liveActivityButton
+    private func miniTile(title: String, value: String, caption: String, tint: Color, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.caption2).foregroundStyle(tint)
+                Text(title).font(.caption).foregroundStyle(.secondary)
             }
+            Text(value)
+                .font(.system(.title3, design: .rounded).weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(caption).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 14, corner: 18)
+    }
 
-            HStack(alignment: .center, spacing: 18) {
-                BurnGaugeView(summary: summary)
-                    .frame(width: 150)
-                VStack(alignment: .leading, spacing: 10) {
-                    labeled("理想日均", Money.string(summary.idealDailyPace))
-                    labeled("實際日均", Money.string(summary.actualDailyPace), tint: summary.burnLevel.color)
-                    labeled("該花到", Money.string(summary.idealSpentToDate))
+    // MARK: - 快速記帳
+
+    private var quickAddCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CardHeader(title: "快速記帳", systemImage: "bolt.fill")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(topLevelCategories.prefix(8)) { category in
+                        Button {
+                            presetCategory = category
+                            showingEditor = true
+                        } label: {
+                            VStack(spacing: 6) {
+                                CategoryBadge(iconName: category.iconName, colorHex: category.colorHex, size: 44)
+                                Text(category.name).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .card()
+    }
+
+    // MARK: - 一週
+
+    private var weekCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CardHeader(title: "最近七天", systemImage: "calendar") {
+                Text(Money.string(weekDays.reduce(0) { $0 + $1.amount }))
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            WeekBarStrip(days: weekDays, dailyAllowance: summary.dailyAllowance)
+            if summary.dailyAllowance > 0 {
+                Text("紅色代表那天超過每日額度 \(Money.string(summary.dailyAllowance))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .card()
+    }
+
+    // MARK: - 燒錢速度
+
+    private var burnCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            CardHeader(title: "燒錢速度", systemImage: "speedometer") {
+                Button {
+                    selection = .stats
+                } label: {
+                    Text("完整報表")
+                        .font(.caption.weight(.semibold))
                 }
             }
 
-            Text("理想速度是把可支配預算平均攤到整個月；紅色代表照這個速度月底會超支。")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
-    private var liveActivityButton: some View {
-        Button {
-            if liveActivity.isActive {
-                liveActivity.end()
-            } else {
-                liveActivity.start(context: context)
+            HStack(alignment: .center, spacing: 16) {
+                BurnGaugeView(summary: summary)
+                    .frame(width: 140)
+                VStack(alignment: .leading, spacing: 10) {
+                    labeled("理想日均", Money.string(summary.idealDailyPace))
+                    labeled("實際日均", Money.string(summary.actualDailyPace), tint: summary.burnLevel.color)
+                    labeled("今天該花到", Money.string(summary.idealSpentToDate))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } label: {
-            Label(
-                liveActivity.isActive ? "結束動態島" : "動態島記帳",
-                systemImage: liveActivity.isActive ? "stop.circle.fill" : "capsule.portrait"
-            )
-            .font(.caption.weight(.semibold))
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
+        .card()
     }
 
     private func labeled(_ title: String, _ value: String, tint: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.system(.body, design: .rounded).weight(.semibold)).foregroundStyle(tint).monospacedDigit()
+            Text(value)
+                .font(.system(.body, design: .rounded).weight(.semibold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
         }
     }
 
-    private var recentList: some View {
+    // MARK: - 最近紀錄
+
+    private var recentCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("最近紀錄").font(.headline)
-                Spacer()
-                if !allExpenses.isEmpty {
-                    Text("\(allExpenses.count) 筆").font(.caption).foregroundStyle(.secondary)
+            CardHeader(title: "最近紀錄", systemImage: "clock.arrow.circlepath") {
+                Button {
+                    selection = .list
+                } label: {
+                    Text("看全部 \(allExpenses.count) 筆")
+                        .font(.caption.weight(.semibold))
                 }
             }
 
             if recentExpenses.isEmpty {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     Image(systemName: "tray").font(.title2).foregroundStyle(.secondary)
-                    Text("還沒有紀錄，點右下角 + 記第一筆").font(.footnote).foregroundStyle(.secondary)
+                    Text("還沒有紀錄，點下面中間的「記一筆」開始")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+                .padding(.vertical, 22)
             } else {
                 VStack(spacing: 0) {
                     ForEach(recentExpenses) { expense in
-                        Button {
-                            editingExpense = expense
-                        } label: {
-                            ExpenseRow(expense: expense)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) { delete(expense) } label: {
-                                Label("刪除", systemImage: "trash")
+                        Button { editingExpense = expense } label: { ExpenseRow(expense: expense) }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) { delete(expense) } label: {
+                                    Label("刪除", systemImage: "trash")
+                                }
                             }
-                        }
                         if expense.persistentModelID != recentExpenses.last?.persistentModelID {
-                            Divider().padding(.leading, 56)
+                            Divider().padding(.leading, 52)
                         }
                     }
                 }
-                .padding(.vertical, 4)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
-    }
-
-    private var floatingButton: some View {
-        Button {
-            showingEditor = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 60, height: 60)
-                .background(Color(hex: "#0A84FF"), in: Circle())
-                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
-        }
-        .padding(.trailing, 20)
-        .padding(.bottom, 20)
-        .accessibilityLabel("新增一筆支出")
+        .card(padding: 14)
     }
 
     // MARK: - Actions
@@ -265,45 +371,58 @@ struct HomeView: View {
 
 struct ExpenseRow: View {
     let expense: Expense
+    var showsTime: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
             CategoryBadge(
                 iconName: expense.category?.iconName ?? "questionmark.circle",
-                colorHex: expense.category?.colorHex ?? "#8E8E93"
+                colorHex: expense.category?.colorHex ?? "#8E8E93",
+                size: 38
             )
             VStack(alignment: .leading, spacing: 3) {
                 Text(expense.category?.fullName ?? "未分類")
                     .font(.subheadline.weight(.medium))
-                HStack(spacing: 6) {
-                    Text(DateHelper.shortDate(expense.date))
+                HStack(spacing: 5) {
+                    Text(showsTime ? timeLabel : DateHelper.shortDate(expense.date))
                     if let note = expense.note, !note.isEmpty {
-                        Text("·")
-                        Text(note).lineLimit(1)
+                        Text("·"); Text(note).lineLimit(1)
                     } else if let merchant = expense.merchant, !merchant.isEmpty {
-                        Text("·")
-                        Text(merchant).lineLimit(1)
-                    }
-                    if let tag = expense.emotionTag {
-                        Text("·")
-                        Text(tag.name).foregroundStyle(Color(hex: tag.colorHex))
+                        Text("·"); Text(merchant).lineLimit(1)
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 3) {
+            Spacer(minLength: 6)
+            VStack(alignment: .trailing, spacing: 4) {
                 Text(Money.string(expense.amount))
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
                     .monospacedDigit()
-                Image(systemName: expense.source.iconName)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 4) {
+                    if let tag = expense.emotionTag {
+                        Text(tag.name)
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color(hex: tag.colorHex).opacity(0.18)))
+                            .foregroundStyle(Color(hex: tag.colorHex))
+                    }
+                    Image(systemName: expense.source.iconName)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 9)
         .contentShape(Rectangle())
+    }
+
+    private var timeLabel: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: expense.date)
     }
 }

@@ -8,6 +8,26 @@ enum AppSettings {
         static let quickAmounts = "settings.quickAmounts"
         static let keepReceiptImage = "settings.keepReceiptImage"
         static let didSeedDefaults = "settings.didSeedDefaults"
+        static let cloudLaunchInProgress = "settings.cloudLaunchInProgress"
+        static let cloudFailureNote = "settings.cloudFailureNote"
+    }
+
+    /// 正在嘗試開 CloudKit 容器的旗標。啟動時看到它還是 true，代表上次在這段閃退了。
+    static var cloudLaunchInProgress: Bool {
+        get { AppGroup.defaults.bool(forKey: Key.cloudLaunchInProgress) }
+        set { AppGroup.defaults.set(newValue, forKey: Key.cloudLaunchInProgress) }
+    }
+
+    /// iCloud 開不成時要顯示給使用者看的說明
+    static var cloudFailureNote: String? {
+        get { AppGroup.defaults.string(forKey: Key.cloudFailureNote) }
+        set {
+            if let newValue {
+                AppGroup.defaults.set(newValue, forKey: Key.cloudFailureNote)
+            } else {
+                AppGroup.defaults.removeObject(forKey: Key.cloudFailureNote)
+            }
+        }
     }
 
     /// 可選功能：iCloud 私人同步開關。切換後需要重開 App 才會換容器。
