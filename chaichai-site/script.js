@@ -206,60 +206,122 @@
     });
   })();
 
-  /* ── 常駐播放器（嵌入式 YouTube） ─────────────────────
-     要換歌就改 YT_ID：YouTube 網址 watch?v= 後面那一串。 */
+  /* ── 常駐播放器 ─────────────────────────────────────
+     YouTube 播放器藏在封面底下。封面設 pointer-events:none，
+     所以點擊會直接落在 iframe 裡的播放鍵上 —— 對瀏覽器來說是
+     「iframe 內的真實使用者操作」，iOS 才不會擋掉播放。
+     要換歌就改 YT_ID（YouTube 網址 watch?v= 後面那串）。 */
   (function () {
-    var YT_ID = 'dQw4w9WgXcQ';
+    var YT_ID  = 'dQw4w9WgXcQ';
+    var ORIGIN = 'https://www.youtube-nocookie.com';
 
     var box   = $('#player');
-    var face  = $('#pl-face');
-    var stage = $('#pl-stage');
     var frame = $('#pl-frame');
+    var slot  = $('#pl-slot');
     var close = $('#pl-close');
     var egg   = $('#btn-egg');
-    if (!box || !face || !stage || !frame) return;
+    if (!box || !frame || !slot) return;
 
-    function open() {
-      if (box.classList.contains('is-open')) return;
+    var iframe = null, live = false, ping = null;
 
-      var f = document.createElement('iframe');
-      f.src = 'https://www.youtube-nocookie.com/embed/' + YT_ID +
-              '?autoplay=1&playsinline=1&rel=0&modestbranding=1';
-      f.title = '配著自介一起食用';
-      f.allow = 'autoplay; encrypted-media; picture-in-picture';
-      f.setAttribute('allowfullscreen', '');
-      f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-      frame.appendChild(f);
+    function ratioH() { return Math.round(frame.clientWidth * 9 / 16); }
 
-      stage.hidden = false;
-      box.classList.add('is-open');
-      if (close) close.focus();
+    function sync() {
+      if (!iframe) return;
+      var h = ratioH();
+      iframe.style.height = h + 'px';
+      if (live) frame.style.height = h + 'px';
     }
 
-    function shut() {
-      box.classList.remove('is-open');
-      stage.hidden = true;
-      frame.innerHTML = '';          // 移掉 iframe 才會真的停止播放
-      if (egg) egg.classList.remove('is-on');
-      face.focus();
-    }
+    function build() {
+      iframe = document.createElement('iframe');
+      iframe.id = 'pl-yt';
+      iframe.title = '配著自介一起食用';
+      iframe.src = ORIGIN + '/embed/' + YT_ID +
+                   '?playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=' +
+                   encodeURIComponent(location.origin);
+      iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
+      iframe.setAttribute('allowfullscreen', '');
+      iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      slot.appendChild(iframe);
+      sync();
 
-    face.addEventListener('click', open);
-    if (close) close.addEventListener('click', shut);
-
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && box.classList.contains('is-open') && $('#lightbox').hidden) shut();
-    });
-
-    /* 語錄區那顆 🐾 也接到同一個播放器 */
-    if (egg) {
-      egg.addEventListener('click', function () {
-        if (box.classList.contains('is-open')) { shut(); return; }
-        open();
-        egg.classList.add('is-on');
-        toast('汪。');
+      /* 跟 iframe 要播放狀態，這樣才知道什麼時候把封面收掉 */
+      iframe.addEventListener('load', function () {
+        var n = 0;
+        clearInterval(ping);
+        ping = setInterval(function () {
+          if (!iframe || ++n > 12) { clearInterval(ping); return; }
+          try {
+            iframe.contentWindow.postMessage(
+              '{"event":"listening","id":"chai","channel":"widget"}', ORIGIN);
+          } catch (e) {}
+        }, 500);
       });
     }
+
+    function reveal() {
+      if (live) return;
+      live = true;
+      clearInterval(ping);
+      box.classList.add('is-live');
+      frame.style.height = ratioH() + 'px';
+      if (egg) egg.classList.add('is-on');
+    }
+
+    function reset() {
+      live = false;
+      clearInterval(ping);
+      box.classList.remove('is-live');
+      frame.style.height = '';
+      slot.innerHTML = '';          // 移掉 iframe 才會真的停止播放
+      iframe = null;
+      if (egg) egg.classList.remove('is-on');
+      build();                       // 重新備好，下次還是一點就播
+    }
+
+    /* YouTube 回報的播放狀態：1 = 播放中 */
+    window.addEventListener('message', function (e) {
+      if (e.origin !== ORIGIN) return;
+      var d;
+      try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
+      if (!d) return;
+      var st = (d.event === 'onStateChange') ? d.info
+             : (d.info && typeof d.info.playerState === 'number') ? d.info.playerState
+             : null;
+      if (st === 1) reveal();
+    });
+
+    /* 後備：使用者把焦點點進 iframe 時也視為開始播 */
+    window.addEventListener('blur', function () {
+      setTimeout(function () {
+        if (iframe && document.activeElement === iframe) reveal();
+      }, 0);
+    });
+
+    if (close) close.addEventListener('click', reset);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && live && $('#lightbox').hidden) reset();
+    });
+
+    var rt;
+    window.addEventListener('resize', function () {
+      clearTimeout(rt); rt = setTimeout(sync, 160);
+    });
+
+    /* 語錄區那顆 🐾：捲到播放器並提示 */
+    if (egg) {
+      egg.addEventListener('click', function () {
+        if (live) { reset(); return; }
+        box.animate
+          ? box.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-6px)' },
+                         { transform: 'translateY(0)' }], { duration: 420, iterations: 2 })
+          : null;
+        toast('左下角那塊，點一下就會播。');
+      });
+    }
+
+    build();
   })();
 
   /* ── 社群連結：待補 / 複製 ID ───────────────────────── */
