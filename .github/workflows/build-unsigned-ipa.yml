@@ -1,0 +1,92 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Archive & package (unsigned)
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show available Xcode versions
+        run: ls /Applications | grep -i xcode || true
+
+      - name: Select newest Xcode
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
+          echo "Using $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH"
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Archive (code signing disabled)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project MoneyLeft.xcodeproj \
+            -scheme MoneyLeft \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/MoneyLeft.xcarchive" \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Package .ipa (Payload zip, no signature)
+        run: |
+          set -e
+          ARCHIVE="$RUNNER_TEMP/MoneyLeft.xcarchive"
+          APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name "*.app" | head -n 1)
+          echo "App bundle: $APP"
+          test -n "$APP"
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          # 移除 CI 端殘留的簽名資訊，本機自簽時從乾淨狀態開始
+          find "$RUNNER_TEMP/Payload" -name "_CodeSignature" -type d -exec rm -rf {} + || true
+          find "$RUNNER_TEMP/Payload" -name "embedded.mobileprovision" -delete || true
+          mkdir -p build
+          (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/build/MoneyLeft-unsigned.ipa" Payload)
+          ls -lh build/
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyLeft-unsigned-ipa
+          path: build/MoneyLeft-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ~/Library/Logs/gym
+            /Users/runner/Library/Developer/Xcode/DerivedData/**/Logs/Build/*.xcactivitylog
+          if-no-files-found: ignore
+          retention-days: 7
