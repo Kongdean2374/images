@@ -378,36 +378,35 @@
   <p id="lb-cap" class="lb__cap"></p>
 </div>
 
-<!-- ══════════ 常駐播放器 ══════════
-     把音檔放進 assets/ 並命名為 chaichai.mp3，播放器就會自動出現。
-     找不到檔案時整個播放器會自動隱藏，訪客不會看到壞掉的東西。 -->
-<div class="player" id="player" hidden>
-  <button type="button" class="player__play" id="pl-play" aria-label="播放">
-    <svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.7v10.6L13 8z"/></svg>
-    <svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/></svg>
+<!-- ══════════ 常駐播放器（嵌入式 YouTube） ══════════
+     預設只顯示一張看不出是什麼歌的黑白封面，整塊都可以點。
+     點下去才會載入 YouTube 播放器，就地播放，不會跳走。
+     要換歌：改 script.js 最上面的 YT_ID。 -->
+<div class="player" id="player">
+
+  <button type="button" class="player__face" id="pl-face"
+          aria-label="播放音樂，點這塊任何地方都可以">
+    <span class="player__art" aria-hidden="true">
+      <span class="player__hatch"></span>
+      <svg class="i-play" viewBox="0 0 16 16"><path d="M5 3.2v9.6L13 8z"/></svg>
+      <span class="player__q">？</span>
+    </span>
+    <span class="player__body">
+      <span class="player__label">配著自介一起食用</span>
+      <span class="player__hint">點這塊任何地方就會開始播</span>
+    </span>
   </button>
 
-  <div class="player__body">
-    <p class="player__label">配著自介一起食用</p>
-    <div class="player__seek" id="pl-seek" role="slider" tabindex="0"
-         aria-label="播放進度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-      <span class="player__fill" id="pl-fill"></span>
+  <div class="player__stage" id="pl-stage" hidden>
+    <div class="player__bar">
+      <span class="player__label">配著自介一起食用</span>
+      <button type="button" class="player__close" id="pl-close" aria-label="關掉播放器">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
     </div>
+    <div class="player__frame" id="pl-frame"></div>
   </div>
 
-  <span class="player__time" id="pl-time">0:00</span>
-
-  <div class="player__vol">
-    <button type="button" class="player__mute" id="pl-mute" aria-label="靜音" aria-pressed="false">
-      <svg class="i-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4 4.6 5.2H2v5.6h2.6L8 13.6zM10.4 5.6a3.4 3.4 0 0 1 0 4.8M12.4 3.6a6.2 6.2 0 0 1 0 8.8"/></svg>
-      <svg class="i-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4 4.6 5.2H2v5.6h2.6L8 13.6zM10.8 6.2l3.4 3.6M14.2 6.2l-3.4 3.6"/></svg>
-    </button>
-    <input type="range" class="player__range" id="pl-vol" min="0" max="100" step="1" value="70" aria-label="音量">
-  </div>
-
-  <audio id="pl-audio" preload="none">
-    <source src="assets/chaichai.mp3" type="audio/mpeg">
-  </audio>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

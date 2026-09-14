@@ -206,152 +206,58 @@
     });
   })();
 
-  /* ── 常駐播放器 ─────────────────────────────────────
-     找不到 assets/chaichai.mp3 時整個播放器不會出現，
-     避免訪客看到一個按不動的東西。 */
+  /* ── 常駐播放器（嵌入式 YouTube） ─────────────────────
+     要換歌就改 YT_ID：YouTube 網址 watch?v= 後面那一串。 */
   (function () {
+    var YT_ID = 'dQw4w9WgXcQ';
+
     var box   = $('#player');
-    var audio = $('#pl-audio');
-    if (!box || !audio) return;
+    var face  = $('#pl-face');
+    var stage = $('#pl-stage');
+    var frame = $('#pl-frame');
+    var close = $('#pl-close');
+    var egg   = $('#btn-egg');
+    if (!box || !face || !stage || !frame) return;
 
-    var playBtn = $('#pl-play'), muteBtn = $('#pl-mute');
-    var seek = $('#pl-seek'), fill = $('#pl-fill');
-    var timeEl = $('#pl-time'), vol = $('#pl-vol');
-    var egg = $('#btn-egg');
-    var ready = false;
+    function open() {
+      if (box.classList.contains('is-open')) return;
 
-    function fmt(sec) {
-      if (!isFinite(sec) || sec < 0) sec = 0;
-      var m = Math.floor(sec / 60), s2 = Math.floor(sec % 60);
-      return m + ':' + (s2 < 10 ? '0' : '') + s2;
+      var f = document.createElement('iframe');
+      f.src = 'https://www.youtube-nocookie.com/embed/' + YT_ID +
+              '?autoplay=1&playsinline=1&rel=0&modestbranding=1';
+      f.title = '配著自介一起食用';
+      f.allow = 'autoplay; encrypted-media; picture-in-picture';
+      f.setAttribute('allowfullscreen', '');
+      f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      frame.appendChild(f);
+
+      stage.hidden = false;
+      box.classList.add('is-open');
+      if (close) close.focus();
     }
 
-    /* 音量記憶（無痕視窗可能存取失敗，包起來） */
-    function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-    function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-
-    var savedVol = parseFloat(load('chai.vol'));
-    if (!isFinite(savedVol)) savedVol = 0.7;
-    audio.volume = savedVol;
-    vol.value = Math.round(savedVol * 100);
-
-    var savedMute = load('chai.muted') === '1';
-    audio.muted = savedMute;
-    box.classList.toggle('is-muted', savedMute);
-    if (muteBtn) muteBtn.setAttribute('aria-pressed', savedMute ? 'true' : 'false');
-
-    /* 顯示 / 隱藏 */
-    function show() {
-      if (ready) return;
-      ready = true;
-      box.hidden = false;
-      document.body.classList.add('has-player');
-    }
-    function hide() {
-      ready = false;
-      box.hidden = true;
-      document.body.classList.remove('has-player');
-      if (egg) egg.hidden = true;
+    function shut() {
+      box.classList.remove('is-open');
+      stage.hidden = true;
+      frame.innerHTML = '';          // 移掉 iframe 才會真的停止播放
+      if (egg) egg.classList.remove('is-on');
+      face.focus();
     }
 
-    /* 先確認音檔在不在 */
-    if (location.protocol === 'file:' || !window.fetch) {
-      show();   // 本機直接開檔時無法預檢，先顯示
-    } else {
-      fetch('assets/chaichai.mp3', { method: 'HEAD' })
-        .then(function (r) { r.ok ? show() : hide(); })
-        .catch(hide);
-    }
-    audio.addEventListener('error', hide, true);
+    face.addEventListener('click', open);
+    if (close) close.addEventListener('click', shut);
 
-    /* 播放 / 暫停 */
-    function toggle() {
-      if (audio.paused) {
-        var p = audio.play();
-        if (p && p.catch) p.catch(function () { toast('播不動，重新整理看看'); });
-      } else {
-        audio.pause();
-      }
-    }
-    playBtn.addEventListener('click', toggle);
-
-    audio.addEventListener('play', function () {
-      box.classList.add('is-playing');
-      playBtn.setAttribute('aria-label', '暫停');
-    });
-    audio.addEventListener('pause', function () {
-      box.classList.remove('is-playing');
-      playBtn.setAttribute('aria-label', '播放');
-    });
-    audio.addEventListener('ended', function () {
-      box.classList.remove('is-playing');
-      fill.style.width = '0%';
-    });
-
-    /* 進度 */
-    audio.addEventListener('timeupdate', function () {
-      var d = audio.duration;
-      var pct = (isFinite(d) && d > 0) ? (audio.currentTime / d) * 100 : 0;
-      fill.style.width = pct + '%';
-      seek.setAttribute('aria-valuenow', Math.round(pct));
-      timeEl.textContent = fmt(audio.currentTime);
-    });
-    audio.addEventListener('loadedmetadata', function () {
-      timeEl.textContent = fmt(0);
-    });
-
-    function seekTo(clientX) {
-      var d = audio.duration;
-      if (!isFinite(d) || d <= 0) return;
-      var r = seek.getBoundingClientRect();
-      var ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-      audio.currentTime = ratio * d;
-    }
-    seek.addEventListener('click', function (e) { seekTo(e.clientX); });
-    seek.addEventListener('keydown', function (e) {
-      var d = audio.duration;
-      if (!isFinite(d) || d <= 0) return;
-      if (e.key === 'ArrowRight') { audio.currentTime = Math.min(d, audio.currentTime + 5); e.preventDefault(); }
-      if (e.key === 'ArrowLeft')  { audio.currentTime = Math.max(0, audio.currentTime - 5); e.preventDefault(); }
-    });
-
-    /* 音量 */
-    vol.addEventListener('input', function () {
-      var v = vol.value / 100;
-      audio.volume = v;
-      store('chai.vol', v);
-      if (v > 0 && audio.muted) {
-        audio.muted = false;
-        box.classList.remove('is-muted');
-        store('chai.muted', '0');
-        if (muteBtn) muteBtn.setAttribute('aria-pressed', 'false');
-      }
-    });
-
-    muteBtn.addEventListener('click', function () {
-      /* 手機上滑桿是收起來的，第一下先展開 */
-      if (window.matchMedia('(max-width:600px)').matches && !box.classList.contains('vol-open')) {
-        box.classList.add('vol-open');
-        return;
-      }
-      audio.muted = !audio.muted;
-      box.classList.toggle('is-muted', audio.muted);
-      muteBtn.setAttribute('aria-pressed', audio.muted ? 'true' : 'false');
-      store('chai.muted', audio.muted ? '1' : '0');
-    });
-
-    /* 點播放器以外的地方，手機的音量滑桿收回去 */
-    document.addEventListener('click', function (e) {
-      if (!box.contains(e.target)) box.classList.remove('vol-open');
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && box.classList.contains('is-open') && $('#lightbox').hidden) shut();
     });
 
     /* 語錄區那顆 🐾 也接到同一個播放器 */
     if (egg) {
       egg.addEventListener('click', function () {
-        if (box.hidden) { toast('音檔還沒放上去（assets/chaichai.mp3）'); return; }
-        toggle();
-        egg.classList.toggle('is-on', !audio.paused);
-        if (!audio.paused) toast('汪。');
+        if (box.classList.contains('is-open')) { shut(); return; }
+        open();
+        egg.classList.add('is-on');
+        toast('汪。');
       });
     }
   })();
