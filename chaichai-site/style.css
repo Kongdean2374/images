@@ -655,7 +655,7 @@ button{font:inherit;color:inherit}
 .player__face:hover .player__hint{color:var(--lamp)}
 
 /* ── 展開後：真的 YouTube 播放器 ── */
-.player__stage{width:clamp(260px,30vw,320px)}
+.player__stage{width:min(252px,calc(100vw - 44px))}
 .player__stage[hidden]{display:none}
 .player__bar{
   display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -678,12 +678,12 @@ body{padding-bottom:76px}
 @media (max-width:600px){
   .player{left:10px;right:10px;bottom:10px;margin-bottom:env(safe-area-inset-bottom,0px)}
   .player__face{width:100%;padding:9px 14px 9px 9px}
-  .player__stage{width:100%}
   .player__label{font-size:12px}
-  .player.is-open{left:10px;right:10px}
+  /* 展開時不要撐滿整個螢幕寬，只佔左下角一小塊 */
+  .player.is-open{right:auto;width:min(252px,calc(100vw - 44px))}
 }
 @media (min-width:601px){
-  .player.is-open{width:clamp(260px,30vw,320px)}
+  .player.is-open{width:min(252px,calc(100vw - 44px))}
 }
 @media (prefers-reduced-motion:reduce){
   .player__art,.player__q,.player__art .i-play{transition:none}
