@@ -96,6 +96,8 @@ ZIP 打開後，第一層要**直接看到 `index.html`**，不可以先看到�
 | 社群連結 | `dir__p` | 把對應那行的 `href="..."` 換掉即可 |
 | 遊戲清單 | `roster__n` | 照著現有格式複製一行加上去 |
 | 照片牆說明文字 | `figcaption` | 改 `<figcaption>` 中間的字 |
+| 彩蛋台詞 | `LINES` | 在 **`script.js`** 裡。`ava` 是點柴犬頭像的，`photo` 是點你本人照片的，會依序往下講 |
+| Discord 全名 | `dir__note` | Discord 那行底下的小灰字 |
 
 **年齡不用改。** 網頁會自己用 2006/03/15 算出來，每年生日自動 +1。
 
@@ -132,7 +134,9 @@ ZIP 打開後，第一層要**直接看到 `index.html`**，不可以先看到�
 - 圖片 `loading="lazy"`，不載入任何第三方腳本或播放器
 - 具備 meta description、Open Graph、Twitter Card、JSON-LD (schema.org Person)
 - 尊重 `prefers-reduced-motion`：使用者關閉動畫時，星空與進場效果會自動停用
-- 鍵盤可操作（Tab 導覽、照片可用 Enter 開啟、Esc 關閉燈箱），有 skip link
+- 鍵盤可操作（Tab 導覽、照片與彩蛋可用 Enter 觸發、Esc 關閉燈箱），有 skip link
+- 右下角分享鈕：手機叫出系統分享選單，電腦則複製網址
+- 找不到的網址會落到 `404.html`
 - 字體來自 Google Fonts（思源宋體 / 思源黑體 / JetBrains Mono），
   載不到時會自動退回系統字體，版面不會壞掉
 

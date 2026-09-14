@@ -392,12 +392,12 @@ button{font:inherit;color:inherit}
   position:absolute;left:0;right:0;top:50%;height:1px;
   background:repeating-linear-gradient(90deg,var(--line) 0 7px,transparent 7px 15px);
 }
-.notes{list-style:none;margin:0;padding:0;display:flex;flex-wrap:nowrap;gap:12px;position:relative;align-items:center}
+.notes{list-style:none;margin:0;padding:0;display:flex;flex-wrap:nowrap;gap:9px;position:relative;align-items:center}
 .notes li{
   flex:none;white-space:nowrap;scroll-snap-align:center;
   transform:translateY(var(--o,0));
   font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;
-  padding:8px 15px;color:var(--tx-2);
+  padding:8px 12px;color:var(--tx-2);
   background:var(--n2);border:1px solid var(--line);
   box-shadow:0 8px 22px -12px rgba(0,0,0,.9);
   transition:transform .4s cubic-bezier(.2,.7,.3,1),color .3s,border-color .3s,box-shadow .3s;
@@ -445,6 +445,8 @@ button{font:inherit;color:inherit}
   .ph--d{grid-column:5/11; aspect-ratio:4/3; margin-top:34px}
   .ph--e{grid-column:2/9;  aspect-ratio:4/3; margin-top:18px}
   .ph--f{grid-column:9/13; aspect-ratio:3/4; margin-top:-92px}
+  .ph--g{grid-column:1/6;  aspect-ratio:4/3; margin-top:26px}
+  .ph--h{grid-column:6/12; aspect-ratio:4/3; margin-top:-40px}
 }
 @media (max-width:759px){
   .wall{grid-template-columns:repeat(6,1fr);gap:12px}
@@ -455,6 +457,8 @@ button{font:inherit;color:inherit}
   .ph--d{aspect-ratio:4/3}
   .ph--e{grid-column:1/6;aspect-ratio:4/3}
   .ph--f{grid-column:2/7;aspect-ratio:3/4}
+  .ph--g{grid-column:1/6;aspect-ratio:4/3}
+  .ph--h{grid-column:2/7;aspect-ratio:4/3}
   .ph figcaption{opacity:1;transform:none}
 }
 
@@ -496,6 +500,11 @@ button{font:inherit;color:inherit}
 .dir a[data-pending] .dir__h::after{content:" ·待補";color:var(--tx-3);opacity:.55}
 .dir a[data-pending]{opacity:.62}
 .dir__hint{margin:16px 0 0;font-size:13px;color:var(--tx-3);line-height:1.8}
+.dir__note{
+  margin:-6px 0 12px;padding-right:4px;
+  font-size:10.5px;line-height:1.7;color:var(--tx-3);opacity:.72;
+  letter-spacing:.02em;
+}
 
 /* ══════════ 語錄 ══════════ */
 .sec--words{position:relative}
@@ -594,3 +603,64 @@ button{font:inherit;color:inherit}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 ::selection{background:var(--lamp);color:#2a1704}
+
+/* ══════════ 柴柴頭像（可以摸） ══════════ */
+.ava{
+  display:block;width:64px;height:64px;margin:0 0 16px;padding:0;
+  border:1px solid var(--line);border-radius:50%;overflow:hidden;
+  background:var(--n2);cursor:pointer;
+  transition:transform .3s cubic-bezier(.2,.7,.3,1),border-color .3s,box-shadow .3s;
+}
+.ava img{width:100%;height:100%;object-fit:cover;display:block}
+.ava:hover{transform:rotate(-4deg) scale(1.06);border-color:var(--lamp);
+  box-shadow:0 0 0 4px var(--lamp-glow)}
+.ava:active{transform:scale(.94)}
+.ava.is-poked{animation:poke .45s ease}
+@keyframes poke{
+  0%,100%{transform:rotate(0) scale(1)}
+  25%{transform:rotate(-9deg) scale(1.1)}
+  60%{transform:rotate(7deg) scale(1.06)}
+}
+
+/* 人像照也可以戳 */
+.hero__photo img{cursor:pointer}
+.hero__photo img:active{filter:saturate(.8) contrast(1.06) brightness(1)}
+
+/* ══════════ 對話泡泡（彩蛋） ══════════ */
+.bubble{
+  position:fixed;z-index:88;max-width:min(250px,calc(100vw - 32px));
+  padding:11px 15px;border-radius:16px 16px 16px 4px;
+  background:linear-gradient(160deg,#ffd9a6,#ffb257);
+  color:#2c1802;font-size:13px;line-height:1.6;font-weight:500;letter-spacing:.02em;
+  box-shadow:0 16px 38px -14px rgba(255,178,87,.55),0 2px 0 rgba(255,255,255,.35) inset;
+  opacity:0;transform:translateY(8px) scale(.92);transform-origin:bottom left;
+  transition:opacity .28s ease,transform .28s cubic-bezier(.2,1.4,.4,1);
+  pointer-events:none;
+}
+.bubble[hidden]{display:none}
+.bubble.show{opacity:1;transform:none}
+.bubble::before{content:"🐾 ";}
+
+/* ══════════ 分享鈕 ══════════ */
+.share{
+  position:fixed;z-index:55;right:16px;bottom:16px;
+  width:46px;height:46px;border-radius:50%;
+  display:grid;place-items:center;cursor:pointer;
+  background:rgba(18,25,43,.92);border:1px solid var(--line);color:var(--tx-2);
+  box-shadow:0 16px 40px -16px rgba(0,0,0,.9);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  transition:color .25s,border-color .25s,transform .25s ease;
+}
+.share svg{width:18px;height:18px;fill:currentColor}
+.share:hover{color:var(--lamp);border-color:var(--lamp);transform:translateY(-2px)}
+.share:active{transform:scale(.94)}
+@media (max-width:600px){
+  .share{right:12px;bottom:12px;margin-bottom:env(safe-area-inset-bottom,0px)}
+}
+/* 分享鈕在右下角，頁尾右側留點空間 */
+.foot__in{padding-bottom:clamp(58px,9vw,72px)}
+
+@media (prefers-reduced-motion:reduce){
+  .ava,.share,.bubble{transition:none}
+  .ava.is-poked{animation:none}
+}

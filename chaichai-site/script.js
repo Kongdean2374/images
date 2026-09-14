@@ -116,7 +116,7 @@
 
   /* ── 進場動畫 ───────────────────────────────────────── */
   (function () {
-    var targets = $$('.sec__head, .intro, .intro__t, .traits, .talk, .lede, .tags, .save, .sub, .roster, .chart, .wall .ph, .dir__col, .quote, .quote__btns');
+    var targets = $$('.sec__head, .intro, .ava, .intro__t, .traits, .talk, .lede, .tags, .save, .sub, .roster, .chart, .wall .ph, .dir__col, .quote, .quote__btns');
     if (!targets.length) return;
 
     if (!('IntersectionObserver' in window)) return;
@@ -165,16 +165,16 @@
   /* ── 柴柴語錄 ───────────────────────────────────────── */
   (function () {
     var QUOTES = [
-      '我不是已讀不回，我是真的在睡。',
-      '剛認識的我跟熟了之後的我，建議當成兩個人看。',
-      '幹話沒有關閉按鈕，這件事先講在前面。',
-      '如果我突然安靜，通常是沒電，不是生氣。',
-      '上午有機率還在睡，晚上才比較像正式開機。',
-      '預設值不一定不好，只是它擺在那裡，看起來很欠動。',
-      '講重點，我對客套話過敏。',
-      '我飛得比我走過的路還遠，這句在講光遇，不是人生。',
-      '認定的人我會記很久，得罪我的也是。',
-      '別叫我早點睡，我對這句話已經有抗體了。'
+      '說個小知識，其實你只要錢多，你就會很有錢。',
+      '你不睡覺，就會想睡覺。',
+      '熬夜不會變強，只會變醜。',
+      '當兵教會我一件事：等。',
+      '人生就像更新 Windows，永遠在重開機。',
+      '沒有人回你訊息，是因為沒有人回你訊息。',
+      '打不贏通常是因為對面比較強。',
+      '只要你不點開，那個紅點就會一直在。',
+      '肚子餓就去吃東西，吃完通常就不餓了。',
+      '你現在還醒著，是因為你還沒睡著。'
     ];
 
     var text = $('#quote-text');
@@ -283,6 +283,99 @@
     window.addEventListener('resize', check);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(check);
     window.addEventListener('load', check);
+  })();
+
+  /* ── 彩蛋：戳頭像 / 戳本人照片 ─────────────────────── */
+  (function () {
+    var bubble = $('#bubble');
+    if (!bubble) return;
+
+    var LINES = {
+      ava: [
+        '汪。',
+        '你點我幹嘛啦。',
+        '再點我要開始收摸頭費了。',
+        '好啦我知道我很可愛，不用一直確認。',
+        '第五下了，你手很閒喔。',
+        '再一下我就把你送去站哨。',
+        '……算了，你高興就好，繼續。'
+      ],
+      photo: [
+        '看什麼看。',
+        '對，本人就長這樣。',
+        '你再點，我也不會變帥。',
+        '這張已經是我最好看的一張了。',
+        '拍照那天風超大，別問。',
+        '你比我還認真在看這張照片。',
+        '行了吧，往下看啦。'
+      ]
+    };
+
+    var count = { ava: 0, photo: 0 };
+    var timer;
+
+    function pop(el, kind) {
+      var lines = LINES[kind] || LINES.ava;
+      var i = Math.min(count[kind]++, lines.length - 1);
+      var r = el.getBoundingClientRect();
+
+      bubble.textContent = lines[i];
+      bubble.hidden = false;
+      bubble.classList.remove('show');
+
+      /* 先量尺寸再定位，避免泡泡跑出畫面 */
+      var bw = bubble.offsetWidth, bh = bubble.offsetHeight;
+      var left = Math.min(Math.max(12, r.left + r.width * 0.5 - 20), window.innerWidth - bw - 12);
+      var top  = r.top - bh - 12;
+      if (top < 12) top = Math.min(r.bottom + 12, window.innerHeight - bh - 12);
+      bubble.style.left = Math.round(left) + 'px';
+      bubble.style.top  = Math.round(top) + 'px';
+
+      requestAnimationFrame(function () { bubble.classList.add('show'); });
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        bubble.classList.remove('show');
+        setTimeout(function () { bubble.hidden = true; }, 300);
+      }, 2400);
+    }
+
+    $$('[data-egg]').forEach(function (el) {
+      var kind = el.getAttribute('data-egg');
+      function fire(e) {
+        if (e) e.preventDefault();
+        pop(el, kind);
+        if (el.classList.contains('ava')) {
+          el.classList.remove('is-poked');
+          void el.offsetWidth;
+          el.classList.add('is-poked');
+        }
+      }
+      el.addEventListener('click', fire);
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') fire(e);
+      });
+    });
+  })();
+
+  /* ── 分享這個頁面 ───────────────────────────────────── */
+  (function () {
+    var btn = $('#btn-share');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var data = {
+        title: document.title,
+        text: '帥氣柴柴的自介',
+        url: location.href
+      };
+      if (navigator.share) {
+        navigator.share(data).catch(function () {});
+        return;
+      }
+      copyText(location.href).then(
+        function () { toast('網址複製好了'); },
+        function () { toast('複製失敗，手動複製網址吧'); }
+      );
+    });
   })();
 
   /* ── 最後更新日期：只需改 HTML 裡 datetime 那一處 ───── */
