@@ -45,100 +45,122 @@ struct VoiceEntryView: View {
     private var recordStage: some View {
         VStack(spacing: 20) {
             Spacer()
-
-            ZStack {
-                ForEach(0..<3, id: \.self) { ring in
-                    Circle()
-                        .stroke(Theme.accent.opacity(0.18), lineWidth: 2)
-                        .frame(width: 120 + CGFloat(ring) * 40 * (1 + capture.level))
-                        .animation(.easeOut(duration: 0.25), value: capture.level)
-                }
-                Circle()
-                    .fill(Theme.accent)
-                    .frame(width: 96 + CGFloat(capture.level * 24))
-                    .animation(.easeOut(duration: 0.2), value: capture.level)
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 36, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .frame(height: 240)
-
-            switch capture.state {
-            case .recording:
-                Text(capture.transcript.isEmpty ? "請說話…例如「早餐五十」" : capture.transcript)
-                    .font(capture.transcript.isEmpty ? .subheadline : .title3.weight(.medium))
-                    .foregroundStyle(capture.transcript.isEmpty ? .secondary : .primary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                    .animation(.default, value: capture.transcript)
-                Text("講完停頓一下就會自動結束")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-            case .preparing:
-                ProgressView().controlSize(.large)
-                Text("準備中…").font(.subheadline).foregroundStyle(.secondary)
-
-            case .denied(let message), .unsupported(let message):
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title)
-                        .foregroundStyle(.orange)
-                    Text(message)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 24)
-                }
-
-            case .finished:
-                if parseFailed {
-                    VStack(spacing: 10) {
-                        Text("「\(spokenText)」").font(.subheadline)
-                        Text("沒聽出金額，可以再試一次，或直接手動輸入")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    ProgressView()
-                }
-
-            case .idle:
-                Text("準備開始").font(.subheadline).foregroundStyle(.secondary)
-            }
-
+            micVisual
+            statusArea
             Spacer()
-
-            HStack(spacing: 12) {
-                if capture.isRecording {
-                    Button {
-                        capture.stop()
-                    } label: {
-                        Label("講完了", systemImage: "checkmark")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button {
-                        parseFailed = false
-                        beginRecording()
-                    } label: {
-                        Label("重新錄音", systemImage: "arrow.clockwise")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-            .padding(.horizontal)
-
+            controlButton
             Text("辨識全程在這台裝置上完成，語音不會離開手機")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 8)
+        }
+    }
+
+    private var micVisual: some View {
+        ZStack {
+            Circle()
+                .stroke(Theme.accent.opacity(0.18), lineWidth: 2)
+                .frame(width: 150 + CGFloat(capture.level) * 40)
+            Circle()
+                .stroke(Theme.accent.opacity(0.12), lineWidth: 2)
+                .frame(width: 200 + CGFloat(capture.level) * 60)
+            Circle()
+                .fill(Theme.accent)
+                .frame(width: 96 + CGFloat(capture.level) * 24)
+            Image(systemName: "mic.fill")
+                .font(.system(size: 36, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(height: 240)
+        .animation(.easeOut(duration: 0.2), value: capture.level)
+    }
+
+    @ViewBuilder
+    private var statusArea: some View {
+        switch capture.state {
+        case .recording:
+            recordingText
+        case .preparing:
+            VStack(spacing: 8) {
+                ProgressView().controlSize(.large)
+                Text("準備中…").font(.subheadline).foregroundStyle(.secondary)
+            }
+        case .denied(let message):
+            warningText(message)
+        case .unsupported(let message):
+            warningText(message)
+        case .finished:
+            finishedText
+        case .idle:
+            Text("準備開始").font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+
+    private var recordingText: some View {
+        VStack(spacing: 8) {
+            Text(capture.transcript.isEmpty ? "請說話…例如「早餐五十」" : capture.transcript)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(capture.transcript.isEmpty ? Color.secondary : Color.primary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Text("講完停頓一下就會自動結束")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var finishedText: some View {
+        if parseFailed {
+            VStack(spacing: 8) {
+                Text("「\(spokenText)」").font(.subheadline)
+                Text("沒聽出金額，可以再試一次，或直接手動輸入")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            ProgressView()
+        }
+    }
+
+    private func warningText(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title)
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 24)
+        }
+    }
+
+    @ViewBuilder
+    private var controlButton: some View {
+        if capture.isRecording {
+            Button {
+                capture.stop()
+            } label: {
+                Label("講完了", systemImage: "checkmark")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal)
+        } else {
+            Button {
+                parseFailed = false
+                beginRecording()
+            } label: {
+                Label("重新錄音", systemImage: "arrow.clockwise")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal)
         }
     }
 
