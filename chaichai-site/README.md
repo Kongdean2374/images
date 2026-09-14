@@ -22,24 +22,6 @@ assets/         ← 所有圖片
   shiba.jpg             備用的柴犬頭像
 ```
 
-> 🎵 **音樂播放器**
->
-> 左下角常駐一張 240×135 的小卡片（手機約佔畫面 16%），寫著「配著自介一起食用」，
-> 封面刻意做成黑白、看不出是什麼歌。點一下就開始播，封面淡掉、露出播放器，
-> 右上角出現 ✕。按 ✕ 或 Esc 關掉，關掉時 iframe 會被移除，音樂是真的停。
->
-> **為什麼 iPhone 上只要點一次**：iframe 在開頁時就先載好（`autoplay=0`），
-> 使用者點下去時只是把「同一個既有的 iframe」重新導向到帶 `autoplay=1` 的網址。
-> 對 WebKit 來說這是發生在使用者手勢之中的導向，所以會放行。
-> 如果改成點擊當下才新建 iframe，iOS 會擋掉，就得點兩次 —— 這是很容易踩到的坑，
-> 之後要改這段的話請保留「先建好、再換 src」的順序。
->
-> **要換歌**：`script.js` 最上面 `var YT_ID = 'dQw4w9WgXcQ';`，
-> 換成 YouTube 網址 `watch?v=` 後面那串。
->
-> **要改字**：`index.html` 搜尋 `player__label`（「配著自介一起食用」）
-> 和 `player__hint`（「點這裡任何地方，會直接開始播」）。
-
 ---
 
 ## 二、部署到 Cloudflare（全程用網頁後台，不用打指令）
@@ -147,7 +129,7 @@ ZIP 打開後，第一層要**直接看到 `index.html`**，不可以先看到�
 
 - 純 HTML / CSS / 原生 JavaScript，零相依套件、零建置流程
 - 手機優先的 RWD，測過 320 / 360 / 390 / 430 / 768 / 1024 / 1440px，無橫向捲動
-- 圖片 `loading="lazy"`、音檔 `preload="none"`
+- 圖片 `loading="lazy"`，不載入任何第三方腳本或播放器
 - 具備 meta description、Open Graph、Twitter Card、JSON-LD (schema.org Person)
 - 尊重 `prefers-reduced-motion`：使用者關閉動畫時，星空與進場效果會自動停用
 - 鍵盤可操作（Tab 導覽、照片可用 Enter 開啟、Esc 關閉燈箱），有 skip link

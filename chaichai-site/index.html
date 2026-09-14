@@ -350,9 +350,6 @@
   <div class="quote__btns">
     <button type="button" id="btn-roll" class="btn btn--main">換一句幹話</button>
     <button type="button" id="btn-copy" class="btn">複製這句</button>
-    <button type="button" id="btn-egg" class="btn btn--egg" aria-label="隱藏彩蛋">
-      <span class="btn__paw" aria-hidden="true">🐾</span>
-    </button>
   </div>
 </section>
 
@@ -376,31 +373,6 @@
   <button type="button" class="lb__close" aria-label="關閉">✕</button>
   <img id="lb-img" src="" alt="">
   <p id="lb-cap" class="lb__cap"></p>
-</div>
-
-<!-- ══════════ 常駐播放器 ══════════
-     iframe 在開頁時就先載好（autoplay=0），點下去時只是把同一個 iframe
-     重新導向到帶 autoplay=1 的網址 —— 對 WebKit 來說這是在使用者手勢
-     之中發生的導向，所以 iPhone 會放行，只要點一次。
-     要換歌：改 script.js 最上面的 YT_ID。 -->
-<div class="player" id="player">
-  <div class="player__frame">
-    <div class="player__slot" id="pl-slot"></div>
-
-    <button type="button" class="player__veil" id="pl-veil"
-            aria-label="播放音樂，點這裡任何地方都可以">
-      <span class="player__art">
-        <span class="player__hatch"></span>
-        <span class="player__q">？</span>
-      </span>
-      <span class="player__label">配著自介一起食用</span>
-      <span class="player__hint">點這裡任何地方，會直接開始播</span>
-    </button>
-  </div>
-
-  <button type="button" class="player__close" id="pl-close" aria-label="關掉播放器">
-    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-  </button>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

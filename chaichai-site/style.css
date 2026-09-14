@@ -532,10 +532,6 @@ button{font:inherit;color:inherit}
   box-shadow:0 0 30px -6px rgba(255,178,87,.5);
 }
 .btn--main:hover{background:#ffc079;border-color:#ffc079;color:#2a1704}
-.btn--egg{padding:12px 16px;opacity:.42}
-.btn--egg:hover{opacity:1}
-.btn--egg.is-on{border-color:var(--moon);color:var(--moon);opacity:1}
-.btn__paw{font-size:14px;line-height:1}
 
 /* ══════════ FOOTER ══════════ */
 .foot{
@@ -598,76 +594,3 @@ button{font:inherit;color:inherit}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 ::selection{background:var(--lamp);color:#2a1704}
-
-/* ══════════ 常駐播放器 ══════════
-   iframe 完整鋪滿、不裁切不位移，確保 iOS 觸控座標不會跑掉。 */
-.player{
-  position:fixed;z-index:60;left:16px;bottom:16px;
-  width:min(240px,calc(100vw - 20px));
-  border:1px solid var(--line);
-  box-shadow:0 24px 64px -26px rgba(0,0,0,.95);
-}
-.player__frame{position:relative;aspect-ratio:16/9;background:#05070d}
-.player__slot,.player__slot iframe{
-  position:absolute;inset:0;width:100%;height:100%;border:0;display:block;
-}
-
-/* 封面：黑白、看不出是什麼歌。不吃點擊，手指直接落在底下的播放鍵上 */
-.player__veil{
-  position:absolute;inset:0;z-index:2;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
-  padding:12px;text-align:center;cursor:pointer;
-  background:#101728;border:0;font:inherit;color:inherit;
-  transition:opacity .5s ease,visibility .5s ease;
-}
-.player.is-live .player__veil{opacity:0;visibility:hidden}
-.player__veil::before{
-  content:"";position:absolute;left:0;top:0;width:100%;height:1px;
-  background:linear-gradient(90deg,transparent,var(--lamp),transparent);opacity:.55;
-}
-
-.player__art{
-  position:relative;width:38px;height:38px;overflow:hidden;
-  background:#0a0d16;border:1px solid var(--line-soft);
-  display:grid;place-items:center;filter:grayscale(1);
-}
-.player__hatch{
-  position:absolute;inset:0;opacity:.5;
-  background:repeating-linear-gradient(135deg,#161d2f 0 4px,#0d1220 4px 8px);
-}
-.player__q{
-  position:absolute;inset:0;display:grid;place-items:center;
-  font-family:var(--mono);font-size:14px;color:#3c4763;transition:color .3s ease;
-}
-.player__veil:hover .player__art{filter:grayscale(.2);border-color:var(--lamp)}
-.player__veil:hover .player__q{color:var(--lamp)}
-.player__veil:hover .player__hint{color:var(--lamp)}
-.player__veil:active{transform:scale(.985)}
-
-.player__label{
-  font-size:13px;line-height:1.4;letter-spacing:.03em;color:var(--tx);
-}
-.player__hint{
-  font-family:var(--mono);font-size:10px;letter-spacing:.02em;color:var(--tx-3);
-}
-
-/* 關閉鈕：開始播之後才出現 */
-.player__close{
-  position:absolute;top:5px;right:5px;z-index:5;
-  width:26px;height:26px;display:grid;place-items:center;cursor:pointer;
-  background:rgba(8,12,22,.85);border:1px solid var(--line);color:var(--tx-2);
-  opacity:0;visibility:hidden;transition:opacity .3s ease,visibility .3s ease,color .25s;
-}
-.player.is-live .player__close{opacity:1;visibility:visible}
-.player__close:hover{color:var(--lamp);border-color:var(--lamp)}
-.player__close svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
-
-body{padding-bottom:170px}
-.toast{bottom:180px}
-
-@media (max-width:600px){
-  .player{left:10px;bottom:10px;margin-bottom:env(safe-area-inset-bottom,0px)}
-}
-@media (prefers-reduced-motion:reduce){
-  .player__veil,.player__close{transition:none}
-}
