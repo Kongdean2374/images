@@ -30,6 +30,10 @@
 	<string>拍攝收據做本機文字辨識，照片不會上傳。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>從相簿選擇收據照片做本機文字辨識，照片不會上傳。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>語音記帳用。錄音只在這台裝置上處理，不會儲存也不會上傳。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>把你說的話轉成文字來記帳。全程使用裝置端辨識，語音不會離開這台手機。</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

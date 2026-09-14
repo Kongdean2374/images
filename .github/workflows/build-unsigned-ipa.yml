@@ -38,6 +38,14 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
+      - name: Read app version
+        id: version
+        run: |
+          APP_VERSION=$(grep -m1 'MARKETING_VERSION:' project.yml | sed 's/.*"\(.*\)".*/\1/')
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "Building MoneyLeft v$APP_VERSION build ${{ github.run_number }}"
+
       - name: Archive (code signing disabled)
         run: |
           set -o pipefail
@@ -48,6 +56,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/MoneyLeft.xcarchive" \
             -skipPackagePluginValidation \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -69,14 +78,15 @@ jobs:
           find "$RUNNER_TEMP/Payload" -name "_CodeSignature" -type d -exec rm -rf {} + || true
           find "$RUNNER_TEMP/Payload" -name "embedded.mobileprovision" -delete || true
           mkdir -p build
-          (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/build/MoneyLeft-unsigned.ipa" Payload)
+          IPA_NAME="MoneyLeft-v${{ steps.version.outputs.app_version }}-build${{ github.run_number }}-unsigned.ipa"
+          (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/build/$IPA_NAME" Payload)
           ls -lh build/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MoneyLeft-unsigned-ipa
-          path: build/MoneyLeft-unsigned.ipa
+          name: MoneyLeft-v${{ steps.version.outputs.app_version }}-build${{ github.run_number }}
+          path: build/*.ipa
           if-no-files-found: error
           retention-days: 30
 

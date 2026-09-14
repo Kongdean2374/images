@@ -4,13 +4,16 @@ import SwiftData
 struct RootView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var liveActivity: LiveActivityController
+    @EnvironmentObject private var appLock: AppLockController
 
     @State private var selection: Tab = .home
-    @State private var previousTab: Tab = .home
     @State private var showingEditor = false
     @State private var showingReceiptFlow = false
+    @State private var showingVoice = false
     @State private var showingQuickActions = false
     @State private var presetCategory: SpendingCategory?
+    @State private var migrationNote: String?
+    @State private var showingMigrationNote = false
 
     enum Tab: Hashable { case home, list, add, stats, settings }
 
@@ -21,7 +24,6 @@ struct RootView: View {
                 if newValue == .add {
                     showingQuickActions = true          // 中間那顆不切頁，直接開記帳選單
                 } else {
-                    previousTab = selection
                     selection = newValue
                 }
             }
@@ -29,50 +31,94 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView(selection: tabSelection) {
-            HomeView(selection: $selection, presetCategory: $presetCategory, showingEditor: $showingEditor)
-                .tabItem { Label("首頁", systemImage: "house.fill") }
-                .tag(Tab.home)
+        ZStack {
+            TabView(selection: tabSelection) {
+                HomeView(selection: $selection, presetCategory: $presetCategory, showingEditor: $showingEditor)
+                    .tabItem { Label("首頁", systemImage: "house.fill") }
+                    .tag(Tab.home)
 
-            ExpenseListView()
-                .tabItem { Label("明細", systemImage: "list.bullet.rectangle.portrait.fill") }
-                .tag(Tab.list)
+                ExpenseListView()
+                    .tabItem { Label("明細", systemImage: "list.bullet.rectangle.portrait.fill") }
+                    .tag(Tab.list)
 
-            Color.clear
-                .tabItem { Label("記一筆", systemImage: "plus.circle.fill") }
-                .tag(Tab.add)
+                Color.clear
+                    .tabItem { Label("記一筆", systemImage: "plus.circle.fill") }
+                    .tag(Tab.add)
 
-            StatsView()
-                .tabItem { Label("報表", systemImage: "chart.bar.xaxis") }
-                .tag(Tab.stats)
+                StatsView()
+                    .tabItem { Label("報表", systemImage: "chart.bar.xaxis") }
+                    .tag(Tab.stats)
 
-            MoreView()
-                .tabItem { Label("更多", systemImage: "ellipsis.circle.fill") }
-                .tag(Tab.settings)
+                MoreView()
+                    .tabItem { Label("更多", systemImage: "ellipsis.circle.fill") }
+                    .tag(Tab.settings)
+            }
+            .tint(Theme.accent)
+
+            if appLock.isLocked {
+                lockScreen.transition(.opacity)
+            }
         }
-        .tint(Theme.accent)
+        .animation(.easeInOut(duration: 0.2), value: appLock.isLocked)
         .onAppear {
             DefaultData.seedIfNeeded(context: context)
             BudgetService.refreshWidgetSnapshot(context: context)
+            if let note = AppSettings.legacyMigrationNote {
+                migrationNote = note
+                showingMigrationNote = true
+                AppSettings.legacyMigrationNote = nil
+            }
         }
         .onOpenURL(perform: handle)
         .sheet(isPresented: $showingQuickActions) {
             QuickActionSheet(
                 onManual: { presetCategory = nil; showingEditor = true },
+                onVoice: { showingVoice = true },
                 onScan: { showingReceiptFlow = true }
             )
-            .presentationDetents([.height(430)])
+            .presentationDetents([.height(470)])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingEditor, onDismiss: { presetCategory = nil }) {
             ExpenseEditorView(presetCategory: presetCategory)
         }
-        .sheet(isPresented: $showingReceiptFlow) {
-            ReceiptFlowView()
+        .sheet(isPresented: $showingReceiptFlow) { ReceiptFlowView() }
+        .sheet(isPresented: $showingVoice) { VoiceEntryView() }
+        .alert("資料已搬回本機", isPresented: $showingMigrationNote) {
+            Button("好") {}
+        } message: {
+            Text(migrationNote ?? "")
         }
     }
 
-    /// moneyleft://add 、 moneyleft://scan 、 moneyleft://list
+    // MARK: - 鎖定畫面
+
+    private var lockScreen: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThickMaterial)
+                .ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(Theme.accent)
+                Text("MoneyLeft 已鎖定").font(.headline)
+                if let message = appLock.failureMessage {
+                    Text(message).font(.caption).foregroundStyle(.orange)
+                }
+                Button {
+                    appLock.authenticate()
+                } label: {
+                    Label("解鎖", systemImage: "faceid")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 8)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    /// moneyleft://add 、 //scan 、 //voice 、 //list 、 //stats
     private func handle(_ url: URL) {
         guard url.scheme == AppGroup.urlScheme else { return }
         switch url.host {
@@ -82,6 +128,9 @@ struct RootView: View {
         case "scan":
             selection = .home
             showingReceiptFlow = true
+        case "voice":
+            selection = .home
+            showingVoice = true
         case "list":
             selection = .list
         case "stats":
@@ -99,10 +148,11 @@ struct QuickActionSheet: View {
     @EnvironmentObject private var liveActivity: LiveActivityController
 
     var onManual: () -> Void
+    var onVoice: () -> Void
     var onScan: () -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Capsule()
                 .fill(Color.secondary.opacity(0.3))
                 .frame(width: 40, height: 4)
@@ -112,22 +162,20 @@ struct QuickActionSheet: View {
                 .font(.headline)
                 .padding(.bottom, 2)
 
-            action(
-                title: "手動輸入",
-                subtitle: "金額、分類、情緒標籤",
-                icon: "square.and.pencil",
-                tint: Theme.accent
-            ) {
+            action(title: "語音記帳", subtitle: "講一句話，自動填好等你確認",
+                   icon: "mic.fill", tint: Color(hex: "#FF375F")) {
+                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { onVoice() }
+            }
+
+            action(title: "手動輸入", subtitle: "金額、分類、情緒標籤",
+                   icon: "square.and.pencil", tint: Theme.accent) {
                 dismiss()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { onManual() }
             }
 
-            action(
-                title: "收據辨識",
-                subtitle: "拍照，或從相簿批次匯入",
-                icon: "doc.text.viewfinder",
-                tint: Color(hex: "#34C759")
-            ) {
+            action(title: "收據辨識", subtitle: "拍照或相簿匯入，會先掃電子發票 QR",
+                   icon: "doc.text.viewfinder", tint: Color(hex: "#34C759")) {
                 dismiss()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { onScan() }
             }
@@ -138,11 +186,7 @@ struct QuickActionSheet: View {
                 icon: "capsule.portrait",
                 tint: Color(hex: "#BF5AF2")
             ) {
-                if liveActivity.isActive {
-                    liveActivity.end()
-                } else {
-                    liveActivity.start(context: context)
-                }
+                if liveActivity.isActive { liveActivity.end() } else { liveActivity.start(context: context) }
                 dismiss()
             }
 

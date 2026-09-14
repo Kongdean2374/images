@@ -6,6 +6,7 @@ import Charts
 struct StatsView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Expense.date, order: .reverse) private var allExpenses: [Expense]
+    @Query(sort: \SpendingCategory.sortOrder) private var allCategories: [SpendingCategory]
 
     @State private var period: Period = .month
     @State private var anchor: Date = Date()
@@ -246,6 +247,31 @@ struct StatsView: View {
                 }
                 .chartXAxis(.hidden)
                 .frame(height: CGFloat(categorySlices.count) * 34 + 20)
+
+                Divider().padding(.vertical, 4)
+
+                ForEach(categorySlices) { slice in
+                    if let category = allCategories.first(where: { $0.parent == nil && $0.name == slice.name }) {
+                        NavigationLink {
+                            CategoryDetailView(category: category)
+                        } label: {
+                            HStack(spacing: 10) {
+                                CategoryBadge(iconName: category.iconName, colorHex: category.colorHex, size: 28)
+                                Text(slice.name).font(.subheadline)
+                                Spacer()
+                                Text(Money.string(slice.amount))
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }

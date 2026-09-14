@@ -12,6 +12,9 @@ struct ReceiptScanResult: Identifiable {
     var lines: [String] = []
     var failed: Bool = false
     var sourceType: TransactionSource = .ocrPhotoLibrary
+    /// 電子發票 QR 解出來的號碼（有值代表金額是掃 QR 拿到的，準度很高）
+    var invoiceNumber: String?
+    var isFromInvoiceQR: Bool = false
 }
 
 /// Vision Framework 本地 OCR，完全不連網（計劃書 §2-3）。
@@ -57,6 +60,9 @@ enum ReceiptScanner {
             return ReceiptScanResult(image: image, failed: true)
         }
 
+        // 先試電子發票 QR：有掃到就用它的金額與日期，準度遠高於 OCR 猜「總計」
+        let invoice = InvoiceQRParser.detect(in: cgImage, orientation: orientation)
+
         let observations = request.results ?? []
         // Vision 的座標原點在左下，minY 越大代表越上面。
         let sorted = observations.sorted { $0.boundingBox.minY > $1.boundingBox.minY }
@@ -64,11 +70,13 @@ enum ReceiptScanner {
 
         return ReceiptScanResult(
             image: image,
-            amount: guessAmount(from: lines),
-            date: guessDate(from: lines),
+            amount: invoice?.total ?? guessAmount(from: lines),
+            date: invoice?.date ?? guessDate(from: lines),
             merchant: guessMerchant(from: sorted),
             lines: lines,
-            failed: lines.isEmpty
+            failed: lines.isEmpty && invoice == nil,
+            invoiceNumber: invoice?.invoiceNumber,
+            isFromInvoiceQR: invoice != nil
         )
     }
 

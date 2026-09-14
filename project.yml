@@ -38,7 +38,7 @@ targets:
         INFOPLIST_FILE: MoneyLeft/Info.plist
         CODE_SIGN_ENTITLEMENTS: MoneyLeft/MoneyLeft.entitlements
         GENERATE_INFOPLIST_FILE: "NO"
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "2.0"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -56,7 +56,7 @@ targets:
         INFOPLIST_FILE: MoneyLeftWidget/Info.plist
         CODE_SIGN_ENTITLEMENTS: MoneyLeftWidget/MoneyLeftWidget.entitlements
         GENERATE_INFOPLIST_FILE: "NO"
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "2.0"
         CURRENT_PROJECT_VERSION: "1"
         SKIP_INSTALL: "YES"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

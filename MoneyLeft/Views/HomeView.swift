@@ -130,13 +130,26 @@ struct HomeView: View {
                             .foregroundStyle(.white.opacity(0.9))
                     }
 
-                    Label(summary.burnLevel.label, systemImage: burnIcon)
-                        .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(.white.opacity(0.22)))
-                        .foregroundStyle(.white)
-                        .padding(.top, 2)
+                    HStack(spacing: 6) {
+                        Label(summary.burnLevel.label, systemImage: burnIcon)
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(.white.opacity(0.22)))
+                            .foregroundStyle(.white)
+
+                        if summary.monthlyBudget > 0, abs(summary.carryOver) >= 1 {
+                            Text(summary.carryOver > 0
+                                 ? "比進度省 \(Money.compact(summary.carryOver))"
+                                 : "超前 \(Money.compact(-summary.carryOver))")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(.white.opacity(0.22)))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
 
                 ZStack {

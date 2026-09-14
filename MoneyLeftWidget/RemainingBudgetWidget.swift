@@ -1,5 +1,6 @@
 import WidgetKit
 import SwiftUI
+import AppIntents
 
 struct BudgetEntry: TimelineEntry {
     let date: Date
@@ -65,13 +66,13 @@ struct RemainingBudgetWidgetView: View {
             }
 
         case .systemMedium:
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 mainBlock
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     metric("每日可花", Money.string(summary.dailyAllowance))
-                    metric("已花", Money.string(summary.variableSpent))
                     metric("燒錢速度", String(format: "%.0f%%", summary.burnRatio * 100), tint: summary.burnLevel.color)
+                    quickButtons
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -104,6 +105,28 @@ struct RemainingBudgetWidgetView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 互動式按鈕：不用開 App 就記一筆
+    private var quickButtons: some View {
+        HStack(spacing: 6) {
+            ForEach(AppSettings.quickAmounts.prefix(2), id: \.self) { value in
+                Button(intent: QuickAddExpenseIntent(amount: Double(value))) {
+                    Text("+\(value)")
+                        .font(.caption2.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            Link(destination: URL(string: "\(AppGroup.urlScheme)://voice") ?? URL(string: "https://example.com")!) {
+                Image(systemName: "mic.fill")
+                    .font(.caption2)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+        }
+        .padding(.top, 2)
     }
 
     private func metric(_ title: String, _ value: String, tint: Color = .primary) -> some View {

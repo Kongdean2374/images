@@ -15,10 +15,12 @@ struct MoreView: View {
     @State private var showingExportError = false
     @State private var showingDeleteAll = false
     @State private var showingReceiptFlow = false
-    @State private var cloudEnabled = AppSettings.cloudSyncEnabled
-    @State private var cloudMessage: String?
-    @State private var showingCloudAlert = false
-    @State private var isSwitchingCloud = false
+    @State private var appLockEnabled = AppSettings.appLockEnabled
+    @State private var dailyReminderEnabled = AppSettings.dailyReminderEnabled
+    @State private var overspendAlertEnabled = AppSettings.overspendAlertEnabled
+    @State private var reminderTime = Date()
+    @State private var notificationMessage: String?
+    @State private var showingNotificationAlert = false
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -27,7 +29,8 @@ struct MoreView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     shortcutGrid
-                    cloudCard
+                    notificationCard
+                    securityCard
                     liveActivityCard
                     receiptCard
                     dataCard
@@ -43,10 +46,10 @@ struct MoreView: View {
             .sheet(item: $exportFile) { ActivityView(items: [$0.url]) }
             .sheet(isPresented: $showingReceiptFlow) { ReceiptFlowView() }
             .alert("匯出失敗", isPresented: $showingExportError) { Button("好") {} }
-            .alert("iCloud 同步", isPresented: $showingCloudAlert) {
-                Button("知道了") {}
+            .alert("通知", isPresented: $showingNotificationAlert) {
+                Button("好") {}
             } message: {
-                Text(cloudMessage ?? "")
+                Text(notificationMessage ?? "")
             }
             .alert("確定刪除所有紀錄？", isPresented: $showingDeleteAll) {
                 Button("刪除", role: .destructive) { deleteAll() }
@@ -55,7 +58,13 @@ struct MoreView: View {
                 Text("此動作無法復原，建議先匯出 CSV 備份。")
             }
             .onAppear {
-                cloudEnabled = AppSettings.cloudSyncEnabled
+                appLockEnabled = AppSettings.appLockEnabled
+                dailyReminderEnabled = AppSettings.dailyReminderEnabled
+                overspendAlertEnabled = AppSettings.overspendAlertEnabled
+                var components = DateComponents()
+                components.hour = AppSettings.dailyReminderHour
+                components.minute = AppSettings.dailyReminderMinute
+                reminderTime = DateHelper.calendar.date(from: components) ?? Date()
             }
         }
     }
@@ -79,8 +88,8 @@ struct MoreView: View {
             Button { showingReceiptFlow = true } label: {
                 shortcut("收據辨識", "doc.text.viewfinder", Color(hex: "#BF5AF2"))
             }
-            Button { export() } label: {
-                shortcut("匯出 CSV", "square.and.arrow.up.fill", Color(hex: "#32ADE6"))
+            NavigationLink { BackupView() } label: {
+                shortcut("備份還原", "arrow.up.arrow.down.circle.fill", Color(hex: "#32ADE6"))
             }
         }
         .buttonStyle(.plain)
@@ -104,61 +113,88 @@ struct MoreView: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    // MARK: - iCloud
+    // MARK: - 通知
 
-    private var cloudCard: some View {
+    private var notificationCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CardHeader(title: "iCloud 私人同步", systemImage: "icloud") {
-                statusBadge
+            CardHeader(title: "提醒", systemImage: "bell.badge")
+
+            Toggle(isOn: $dailyReminderEnabled) {
+                Text("每天提醒我記帳").font(.subheadline)
+            }
+            .onChange(of: dailyReminderEnabled) { _, newValue in
+                AppSettings.dailyReminderEnabled = newValue
+                if newValue { askNotificationPermission() } else { NotificationService.syncDailyReminder() }
             }
 
-            Toggle(isOn: Binding(
-                get: { cloudEnabled },
-                set: { switchCloud(to: $0) }
-            )) {
-                Text("開啟同步").font(.subheadline)
-            }
-            .disabled(isSwitchingCloud)
-
-            if let note = AppSettings.cloudFailureNote {
-                Label(note, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+            if dailyReminderEnabled {
+                DatePicker("提醒時間", selection: $reminderTime, displayedComponents: .hourAndMinute)
+                    .font(.subheadline)
+                    .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
+                    .onChange(of: reminderTime) { _, newValue in
+                        let components = DateHelper.calendar.dateComponents([.hour, .minute], from: newValue)
+                        AppSettings.dailyReminderHour = components.hour ?? 21
+                        AppSettings.dailyReminderMinute = components.minute ?? 0
+                        NotificationService.syncDailyReminder()
+                    }
             }
 
-            Text("資料只會流動在你自己的 Apple 帳號裡，不經過任何開發者或第三方伺服器。切換後需完全關閉 App 再重開；若這份簽名沒有 iCloud 權限（免費 Apple ID 自簽就會這樣），App 會自動維持本機模式，**不會**閃退或遺失資料。")
+            Divider()
+
+            Toggle(isOn: $overspendAlertEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("超速消費警告").font(.subheadline)
+                    Text("燒錢速度轉紅燈時提醒一次").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: overspendAlertEnabled) { _, newValue in
+                AppSettings.overspendAlertEnabled = newValue
+                if newValue { askNotificationPermission() }
+            }
+
+            Text("通知全部由這台裝置自己排程，不經過任何伺服器。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .card()
     }
 
-    private var statusBadge: some View {
-        let text: String
-        let color: Color
-        switch Persistence.status {
-        case .cloud: text = "已連上 iCloud"; color = Color(hex: "#34C759")
-        case .local: text = "僅存在本機"; color = .secondary
-        case .cloudUnavailable: text = "iCloud 不可用"; color = .orange
+    private func askNotificationPermission() {
+        Task {
+            let granted = await NotificationService.requestAuthorization()
+            await MainActor.run {
+                if granted {
+                    NotificationService.syncDailyReminder()
+                } else {
+                    notificationMessage = "通知權限沒有開啟，請到 設定 → 通知 → MoneyLeft 開啟。"
+                    showingNotificationAlert = true
+                }
+            }
         }
-        return Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(color.opacity(0.16)))
-            .foregroundStyle(color)
     }
 
-    private func switchCloud(to newValue: Bool) {
-        guard !isSwitchingCloud else { return }
-        isSwitchingCloud = true
-        let result = newValue
-            ? CloudSyncCoordinator.enable(currentContainer: AppContainer.shared)
-            : CloudSyncCoordinator.disable(currentContainer: AppContainer.shared)
-        cloudEnabled = AppSettings.cloudSyncEnabled
-        cloudMessage = result.message
-        showingCloudAlert = true
-        isSwitchingCloud = false
+    // MARK: - 安全
+
+    private var securityCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CardHeader(title: "安全", systemImage: "lock.shield")
+            Toggle(isOn: $appLockEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("開啟 App 需要驗證").font(.subheadline)
+                    Text("Face ID / Touch ID / 裝置密碼").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!AppLockController.biometryAvailable)
+            .onChange(of: appLockEnabled) { _, newValue in
+                AppSettings.appLockEnabled = newValue
+            }
+            if !AppLockController.biometryAvailable {
+                Text("這台裝置沒有設定密碼或生物辨識，無法啟用。")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .card()
     }
 
     // MARK: - 動態島
@@ -216,8 +252,14 @@ struct MoreView: View {
     private var dataCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             CardHeader(title: "資料", systemImage: "externaldrive")
+            NavigationLink { BackupView() } label: {
+                row("備份與還原", "externaldrive")
+            }
             Button { export() } label: {
                 row("匯出 CSV", "square.and.arrow.up")
+            }
+            NavigationLink { PhraseMappingView() } label: {
+                row("語音個人詞庫", "text.book.closed")
             }
             NavigationLink { PrivacyView() } label: {
                 row("隱私說明", "hand.raised.fill")
@@ -225,7 +267,7 @@ struct MoreView: View {
             Button(role: .destructive) { showingDeleteAll = true } label: {
                 row("刪除所有紀錄", "trash", tint: Color(hex: "#FF453A"))
             }
-            Text("共 \(expenses.count) 筆紀錄。")
+            Text("共 \(expenses.count) 筆紀錄，全部只存在這台裝置上。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -247,7 +289,7 @@ struct MoreView: View {
         VStack(spacing: 6) {
             Text("MoneyLeft \(appVersion)")
                 .font(.caption.weight(.semibold))
-            Text("無廣告 · 無訂閱 · 不蒐集任何資料")
+            Text("無廣告 · 無訂閱 · 零連網 · 不蒐集任何資料")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -410,7 +452,7 @@ struct PrivacyView: View {
                 item("資料只存在這台裝置", "所有記帳紀錄、收據照片都寫在 App 自己的資料庫裡，不會上傳到任何伺服器。")
                 item("不需要帳號", "沒有註冊、沒有登入、沒有任何身分識別。")
                 item("收據辨識在本機完成", "使用 Apple 的 Vision 框架做文字辨識，照片不會離開裝置。")
-                item("iCloud 同步是可選的", "開啟後資料會同步到「你自己的」iCloud 私有資料庫，開發者看不到，也沒有任何第三方經手。")
+                item("沒有雲端、沒有同步", "App 不含任何連網能力，資料不會離開這台裝置。換手機請用「備份與還原」。")
                 item("沒有廣告、沒有追蹤", "App 內沒有任何廣告 SDK、分析 SDK 或第三方函式庫。")
                 item("你可以隨時帶走資料", "一鍵匯出 CSV，資料是你的。")
             }
@@ -425,5 +467,59 @@ struct PrivacyView: View {
             Label(title, systemImage: "checkmark.shield.fill").font(.headline)
             Text(body).font(.subheadline).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// 語音記帳學到的個人詞庫
+struct PhraseMappingView: View {
+    @Environment(\.modelContext) private var context
+    @Query(sort: \PhraseMapping.updatedAt, order: .reverse) private var mappings: [PhraseMapping]
+
+    var body: some View {
+        Form {
+            if mappings.isEmpty {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("還沒有學到東西").font(.subheadline)
+                        Text("用語音記帳時，如果 App 猜錯分類、你手動改掉，它就會把「這句話 → 這個分類」記起來，下次直接命中。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            } else {
+                Section {
+                    ForEach(mappings) { mapping in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mapping.phrase).font(.subheadline)
+                                Text("→ \(mapping.categoryName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(mapping.hitCount) 次")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .onDelete(perform: delete)
+                } header: {
+                    Text("已學會 \(mappings.count) 個說法")
+                } footer: {
+                    Text("覺得哪個學錯了就左滑刪掉。")
+                }
+            }
+        }
+        .navigationTitle("語音個人詞庫")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
+    }
+
+    private func delete(at offsets: IndexSet) {
+        for index in offsets where index < mappings.count {
+            context.delete(mappings[index])
+        }
+        try? context.save()
     }
 }

@@ -142,6 +142,15 @@ struct ReceiptFlowView: View {
             .padding(.vertical, 8)
             .background(Color(uiColor: .secondarySystemBackground))
 
+            if result.isFromInvoiceQR {
+                Label("已掃到電子發票 QR，金額與日期直接從發票取得", systemImage: "qrcode.viewfinder")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(hex: "#34C759"))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+            }
+
             if result.failed {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill").font(.title).foregroundStyle(.orange)
@@ -158,7 +167,8 @@ struct ReceiptFlowView: View {
                     merchant: result.merchant,
                     imageData: imageData(for: result),
                     source: result.sourceType,
-                    rawLines: result.lines
+                    rawLines: result.lines,
+                    note: result.invoiceNumber.map { "發票 \($0)" }
                 ),
                 onSaved: {
                     savedCount += 1

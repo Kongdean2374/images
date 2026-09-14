@@ -44,6 +44,9 @@ struct BudgetSummary: Codable, Equatable {
         }
     }
 
+    /// 相對進度省下（正）或超前（負）多少
+    var carryOver: Double { idealSpentToDate - variableSpent }
+
     /// 照目前速度，這個月預計會花掉多少
     var projectedMonthTotal: Double { actualDailyPace * Double(daysInMonth) }
 

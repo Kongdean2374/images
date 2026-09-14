@@ -28,6 +28,16 @@ struct ExpenseEditorView: View {
         var imageData: Data?
         var source: TransactionSource = .manual
         var rawLines: [String] = []
+        /// 語音解析帶進來的建議
+        var categoryName: String?
+        var subCategoryName: String?
+        var emotionName: String?
+        var note: String?
+        var confidence: Double = 1
+        /// 使用者如果改了分類，就用這個片語去學
+        var learningPhrase: String?
+        /// 顯示在最上面的原句
+        var spokenText: String?
     }
 
     @State private var amountText: String = ""
@@ -89,6 +99,21 @@ struct ExpenseEditorView: View {
 
     private var formContent: some View {
         Form {
+                if let spoken = prefill?.spokenText, !spoken.isEmpty {
+                    Section {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("聽到的內容", systemImage: "waveform")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(spoken).font(.subheadline)
+                            if (prefill?.confidence ?? 1) < 0.6 {
+                                Label("有些欄位我不太確定，請確認一下", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
                 amountSection
                 categorySection
                 detailSection
@@ -298,7 +323,20 @@ struct ExpenseEditorView: View {
                 }
                 if let prefillDate = prefill.date { date = prefillDate }
                 if let prefillMerchant = prefill.merchant { merchant = prefillMerchant }
+                if let prefillNote = prefill.note { note = prefillNote }
                 receiptImageData = AppSettings.keepReceiptImage ? prefill.imageData : nil
+
+                if let categoryName = prefill.categoryName,
+                   let matched = allCategories.first(where: { $0.parent == nil && $0.name == categoryName }) {
+                    selectedParent = matched
+                    if let subName = prefill.subCategoryName,
+                       let child = matched.sortedChildren.first(where: { $0.name == subName }) {
+                        selectedChild = child
+                    }
+                }
+                if let emotionName = prefill.emotionName {
+                    selectedTag = tags.first { $0.name == emotionName }
+                }
             }
             if let presetCategory {
                 if let parent = presetCategory.parent {
@@ -349,6 +387,7 @@ struct ExpenseEditorView: View {
             context.insert(new)
         }
 
+        learnIfCorrected(finalCategory: category)
         try? context.save()
         BudgetService.refreshWidgetSnapshot(context: context)
 
@@ -356,6 +395,26 @@ struct ExpenseEditorView: View {
             onSaved()
         } else {
             dismiss()
+        }
+    }
+
+    /// 語音解析猜錯分類、使用者手動改掉時，把「這句話 → 這個分類」記進個人詞庫
+    private func learnIfCorrected(finalCategory: SpendingCategory?) {
+        guard let prefill,
+              let phrase = prefill.learningPhrase,
+              phrase.count >= 2,
+              let finalCategory else { return }
+        let finalName = finalCategory.parent?.name ?? finalCategory.name
+        guard finalName != prefill.categoryName else { return }
+
+        let descriptor = FetchDescriptor<PhraseMapping>()
+        let existing = (try? context.fetch(descriptor)) ?? []
+        if let mapping = existing.first(where: { $0.phrase == phrase }) {
+            mapping.categoryName = finalName
+            mapping.hitCount += 1
+            mapping.updatedAt = Date()
+        } else {
+            context.insert(PhraseMapping(phrase: phrase, categoryName: finalName))
         }
     }
 

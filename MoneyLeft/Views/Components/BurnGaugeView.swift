@@ -58,36 +58,6 @@ struct BurnGaugeView: View {
     }
 }
 
-/// 首頁的小資訊塊
-struct StatTile: View {
-    let title: String
-    let value: String
-    var caption: String?
-    var tint: Color = .primary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.title3, design: .rounded).weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            if let caption {
-                Text(caption)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
 /// 分類小圖示
 struct CategoryBadge: View {
     let iconName: String
