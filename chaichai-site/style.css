@@ -599,39 +599,35 @@ button{font:inherit;color:inherit}
 
 ::selection{background:var(--lamp);color:#2a1704}
 
-/* ══════════ 常駐播放器 ══════════ */
+/* ══════════ 常駐播放器 ══════════
+   iframe 完整鋪滿、不裁切不位移，確保 iOS 觸控座標不會跑掉。 */
 .player{
   position:fixed;z-index:60;left:16px;bottom:16px;
-  width:min(280px,calc(100vw - 20px));
-  background:rgba(16,23,40,.94);
+  width:min(240px,calc(100vw - 20px));
   border:1px solid var(--line);
-  box-shadow:0 24px 64px -26px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.045);
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:0 24px 64px -26px rgba(0,0,0,.95);
 }
-.player::before{
-  content:"";position:absolute;left:0;top:0;width:100%;height:1px;z-index:4;
-  background:linear-gradient(90deg,transparent,var(--lamp),transparent);opacity:.5;
+.player__frame{position:relative;aspect-ratio:16/9;background:#05070d}
+.player__slot,.player__slot iframe{
+  position:absolute;inset:0;width:100%;height:100%;border:0;display:block;
 }
 
-/* 收起來時只露出一條，點擊會穿透到底下的 YouTube 播放鍵 */
-.player__frame{
-  position:relative;height:60px;overflow:hidden;background:#05070d;
-  transition:height .5s cubic-bezier(.2,.7,.3,1);
-}
-.player__slot{position:absolute;left:0;top:50%;transform:translateY(-50%);width:100%}
-.player__slot iframe{display:block;width:100%;border:0}
-
-/* 封面：刻意黑白、看不出是什麼歌；不吃點擊，手指直接落在底下的播放器上 */
+/* 封面：黑白、看不出是什麼歌。不吃點擊，手指直接落在底下的播放鍵上 */
 .player__veil{
   position:absolute;inset:0;z-index:2;pointer-events:none;
-  display:flex;align-items:center;gap:13px;padding:0 16px 0 9px;
-  background:rgba(16,23,40,.985);
-  transition:opacity .45s ease,visibility .45s ease;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
+  padding:12px;text-align:center;
+  background:#101728;
+  transition:opacity .5s ease,visibility .5s ease;
 }
 .player.is-live .player__veil{opacity:0;visibility:hidden}
+.player__veil::before{
+  content:"";position:absolute;left:0;top:0;width:100%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--lamp),transparent);opacity:.55;
+}
 
 .player__art{
-  position:relative;flex:none;width:42px;height:42px;overflow:hidden;
+  position:relative;width:38px;height:38px;overflow:hidden;
   background:#0a0d16;border:1px solid var(--line-soft);
   display:grid;place-items:center;filter:grayscale(1);
 }
@@ -641,44 +637,34 @@ button{font:inherit;color:inherit}
 }
 .player__q{
   position:absolute;inset:0;display:grid;place-items:center;
-  font-family:var(--mono);font-size:15px;color:#3c4763;transition:opacity .3s ease;
+  font-family:var(--mono);font-size:14px;color:#3c4763;
 }
-.player__art .i-play{
-  position:relative;width:14px;height:14px;fill:#e9edf8;
-  opacity:0;transform:scale(.8);transition:opacity .3s ease,transform .3s ease;
-}
-.player__frame:hover .player__art{filter:grayscale(.15);border-color:var(--lamp)}
-.player__frame:hover .player__q{opacity:0}
-.player__frame:hover .player__art .i-play{opacity:1;transform:none}
+.player__art .i-play{position:relative;width:13px;height:13px;fill:#e9edf8;opacity:0}
 
-.player__body{display:flex;flex-direction:column;gap:3px;min-width:0}
 .player__label{
-  font-size:12.5px;line-height:1.35;letter-spacing:.03em;color:var(--tx);white-space:nowrap;
+  font-size:13px;line-height:1.4;letter-spacing:.03em;color:var(--tx);
 }
 .player__hint{
-  font-family:var(--mono);font-size:10px;letter-spacing:.02em;color:var(--tx-3);white-space:nowrap;
+  font-family:var(--mono);font-size:10px;letter-spacing:.02em;color:var(--tx-3);
 }
-.player__frame:hover .player__hint{color:var(--lamp)}
 
-/* 關閉鈕：只有開始播之後才出現，避免擋到封面 */
+/* 關閉鈕：開始播之後才出現 */
 .player__close{
   position:absolute;top:5px;right:5px;z-index:5;
   width:26px;height:26px;display:grid;place-items:center;cursor:pointer;
-  background:rgba(8,12,22,.82);border:1px solid var(--line);color:var(--tx-2);
+  background:rgba(8,12,22,.85);border:1px solid var(--line);color:var(--tx-2);
   opacity:0;visibility:hidden;transition:opacity .3s ease,visibility .3s ease,color .25s;
 }
 .player.is-live .player__close{opacity:1;visibility:visible}
 .player__close:hover{color:var(--lamp);border-color:var(--lamp)}
 .player__close svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
 
-/* 讓頁尾和 toast 不要被壓到 */
-body{padding-bottom:76px}
-.toast{bottom:92px}
+body{padding-bottom:170px}
+.toast{bottom:180px}
 
 @media (max-width:600px){
   .player{left:10px;bottom:10px;margin-bottom:env(safe-area-inset-bottom,0px)}
-  .player__label{font-size:12px}
 }
 @media (prefers-reduced-motion:reduce){
-  .player__frame,.player__veil,.player__close{transition:none}
+  .player__veil,.player__close{transition:none}
 }

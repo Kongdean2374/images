@@ -216,22 +216,12 @@
     var ORIGIN = 'https://www.youtube-nocookie.com';
 
     var box   = $('#player');
-    var frame = $('#pl-frame');
     var slot  = $('#pl-slot');
     var close = $('#pl-close');
     var egg   = $('#btn-egg');
-    if (!box || !frame || !slot) return;
+    if (!box || !slot) return;
 
     var iframe = null, live = false, ping = null;
-
-    function ratioH() { return Math.round(frame.clientWidth * 9 / 16); }
-
-    function sync() {
-      if (!iframe) return;
-      var h = ratioH();
-      iframe.style.height = h + 'px';
-      if (live) frame.style.height = h + 'px';
-    }
 
     function build() {
       iframe = document.createElement('iframe');
@@ -244,7 +234,6 @@
       iframe.setAttribute('allowfullscreen', '');
       iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
       slot.appendChild(iframe);
-      sync();
 
       /* 跟 iframe 要播放狀態，這樣才知道什麼時候把封面收掉 */
       iframe.addEventListener('load', function () {
@@ -265,7 +254,6 @@
       live = true;
       clearInterval(ping);
       box.classList.add('is-live');
-      frame.style.height = ratioH() + 'px';
       if (egg) egg.classList.add('is-on');
     }
 
@@ -273,7 +261,6 @@
       live = false;
       clearInterval(ping);
       box.classList.remove('is-live');
-      frame.style.height = '';
       slot.innerHTML = '';          // 移掉 iframe 才會真的停止播放
       iframe = null;
       if (egg) egg.classList.remove('is-on');
@@ -302,11 +289,6 @@
     if (close) close.addEventListener('click', reset);
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && live && $('#lightbox').hidden) reset();
-    });
-
-    var rt;
-    window.addEventListener('resize', function () {
-      clearTimeout(rt); rt = setTimeout(sync, 160);
     });
 
     /* 語錄區那顆 🐾：捲到播放器並提示 */

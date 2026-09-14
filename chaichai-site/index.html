@@ -379,12 +379,11 @@
 </div>
 
 <!-- ══════════ 常駐播放器 ══════════
-     YouTube 播放器藏在下面，上面那層封面不吃點擊（pointer-events:none），
-     所以使用者的手指其實是直接點在 YouTube 的播放鍵上 —— 只要點一次，
-     iOS 也不會擋。開始播放後封面才淡掉、展開成完整播放器。
-     要換歌：改 script.js 最上面的 YT_ID。 -->
+     YouTube 播放器完整鋪在下面（不裁切、不位移，避免 iOS 觸控座標對不上），
+     上面蓋一層封面，封面設 pointer-events:none 不吃點擊，
+     所以手指是直接點在 YouTube 播放鍵上 —— 只要點一次。
+     開始播放後封面才淡掉。要換歌：改 script.js 最上面的 YT_ID。 -->
 <div class="player" id="player">
-
   <div class="player__frame" id="pl-frame">
     <div class="player__slot" id="pl-slot"></div>
 
@@ -394,10 +393,8 @@
         <svg class="i-play" viewBox="0 0 16 16"><path d="M5 3.2v9.6L13 8z"/></svg>
         <span class="player__q">？</span>
       </span>
-      <span class="player__body">
-        <span class="player__label">配著自介一起食用</span>
-        <span class="player__hint">點這塊任何地方就會開始播</span>
-      </span>
+      <span class="player__label">配著自介一起食用</span>
+      <span class="player__hint">點這裡任何地方，會直接開始播</span>
     </div>
   </div>
 
