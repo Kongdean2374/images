@@ -379,23 +379,23 @@
 </div>
 
 <!-- ══════════ 常駐播放器 ══════════
-     YouTube 播放器完整鋪在下面（不裁切、不位移，避免 iOS 觸控座標對不上），
-     上面蓋一層封面，封面設 pointer-events:none 不吃點擊，
-     所以手指是直接點在 YouTube 播放鍵上 —— 只要點一次。
-     開始播放後封面才淡掉。要換歌：改 script.js 最上面的 YT_ID。 -->
+     iframe 在開頁時就先載好（autoplay=0），點下去時只是把同一個 iframe
+     重新導向到帶 autoplay=1 的網址 —— 對 WebKit 來說這是在使用者手勢
+     之中發生的導向，所以 iPhone 會放行，只要點一次。
+     要換歌：改 script.js 最上面的 YT_ID。 -->
 <div class="player" id="player">
-  <div class="player__frame" id="pl-frame">
+  <div class="player__frame">
     <div class="player__slot" id="pl-slot"></div>
 
-    <div class="player__veil" id="pl-veil" aria-hidden="true">
+    <button type="button" class="player__veil" id="pl-veil"
+            aria-label="播放音樂，點這裡任何地方都可以">
       <span class="player__art">
         <span class="player__hatch"></span>
-        <svg class="i-play" viewBox="0 0 16 16"><path d="M5 3.2v9.6L13 8z"/></svg>
         <span class="player__q">？</span>
       </span>
       <span class="player__label">配著自介一起食用</span>
       <span class="player__hint">點這裡任何地方，會直接開始播</span>
-    </div>
+    </button>
   </div>
 
   <button type="button" class="player__close" id="pl-close" aria-label="關掉播放器">

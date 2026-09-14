@@ -614,10 +614,10 @@ button{font:inherit;color:inherit}
 
 /* 封面：黑白、看不出是什麼歌。不吃點擊，手指直接落在底下的播放鍵上 */
 .player__veil{
-  position:absolute;inset:0;z-index:2;pointer-events:none;
+  position:absolute;inset:0;z-index:2;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
-  padding:12px;text-align:center;
-  background:#101728;
+  padding:12px;text-align:center;cursor:pointer;
+  background:#101728;border:0;font:inherit;color:inherit;
   transition:opacity .5s ease,visibility .5s ease;
 }
 .player.is-live .player__veil{opacity:0;visibility:hidden}
@@ -637,9 +637,12 @@ button{font:inherit;color:inherit}
 }
 .player__q{
   position:absolute;inset:0;display:grid;place-items:center;
-  font-family:var(--mono);font-size:14px;color:#3c4763;
+  font-family:var(--mono);font-size:14px;color:#3c4763;transition:color .3s ease;
 }
-.player__art .i-play{position:relative;width:13px;height:13px;fill:#e9edf8;opacity:0}
+.player__veil:hover .player__art{filter:grayscale(.2);border-color:var(--lamp)}
+.player__veil:hover .player__q{color:var(--lamp)}
+.player__veil:hover .player__hint{color:var(--lamp)}
+.player__veil:active{transform:scale(.985)}
 
 .player__label{
   font-size:13px;line-height:1.4;letter-spacing:.03em;color:var(--tx);

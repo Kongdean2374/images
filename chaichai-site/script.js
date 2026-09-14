@@ -207,99 +207,75 @@
   })();
 
   /* ── 常駐播放器 ─────────────────────────────────────
-     YouTube 播放器藏在封面底下。封面設 pointer-events:none，
-     所以點擊會直接落在 iframe 裡的播放鍵上 —— 對瀏覽器來說是
-     「iframe 內的真實使用者操作」，iOS 才不會擋掉播放。
+     重點：iframe 在開頁時就先建好並載入（autoplay=0）。
+     使用者點下去時，只是把「同一個既有 iframe」重新導向到帶 autoplay=1
+     的網址。對 WebKit 來說這是發生在使用者手勢之中的導向，iPhone 會放行，
+     所以只要點一次。若在點擊當下才新建 iframe，iOS 會擋，需要點兩次。
      要換歌就改 YT_ID（YouTube 網址 watch?v= 後面那串）。 */
   (function () {
     var YT_ID  = 'dQw4w9WgXcQ';
     var ORIGIN = 'https://www.youtube-nocookie.com';
 
-    var box   = $('#player');
-    var slot  = $('#pl-slot');
-    var close = $('#pl-close');
-    var egg   = $('#btn-egg');
-    if (!box || !slot) return;
+    var box  = $('#player');
+    var slot = $('#pl-slot');
+    var veil = $('#pl-veil');
+    var shut = $('#pl-close');
+    var egg  = $('#btn-egg');
+    if (!box || !slot || !veil) return;
 
-    var iframe = null, live = false, ping = null;
+    var iframe = null, live = false;
 
+    function url(autoplay) {
+      return ORIGIN + '/embed/' + YT_ID +
+             '?playsinline=1&rel=0&modestbranding=1&enablejsapi=1' +
+             '&mute=0&autoplay=' + (autoplay ? '1' : '0') +
+             '&origin=' + encodeURIComponent(location.origin);
+    }
+
+    /* 開頁就先把 iframe 準備好，這樣點下去才有既有的 iframe 可以重新導向 */
     function build() {
       iframe = document.createElement('iframe');
       iframe.id = 'pl-yt';
       iframe.title = '配著自介一起食用';
-      iframe.src = ORIGIN + '/embed/' + YT_ID +
-                   '?playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=' +
-                   encodeURIComponent(location.origin);
       iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
       iframe.setAttribute('allowfullscreen', '');
       iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      iframe.src = url(false);
       slot.appendChild(iframe);
-
-      /* 跟 iframe 要播放狀態，這樣才知道什麼時候把封面收掉 */
-      iframe.addEventListener('load', function () {
-        var n = 0;
-        clearInterval(ping);
-        ping = setInterval(function () {
-          if (!iframe || ++n > 12) { clearInterval(ping); return; }
-          try {
-            iframe.contentWindow.postMessage(
-              '{"event":"listening","id":"chai","channel":"widget"}', ORIGIN);
-          } catch (e) {}
-        }, 500);
-      });
     }
 
-    function reveal() {
-      if (live) return;
+    function start() {
+      if (live || !iframe) return;
       live = true;
-      clearInterval(ping);
+      iframe.src = url(true);      // ← 在使用者手勢之中重新導向，iOS 才會放行
       box.classList.add('is-live');
       if (egg) egg.classList.add('is-on');
+      if (shut) shut.focus();
     }
 
     function reset() {
       live = false;
-      clearInterval(ping);
       box.classList.remove('is-live');
-      slot.innerHTML = '';          // 移掉 iframe 才會真的停止播放
+      slot.innerHTML = '';         // 移掉 iframe 才會真的停止播放
       iframe = null;
       if (egg) egg.classList.remove('is-on');
-      build();                       // 重新備好，下次還是一點就播
+      build();                     // 重新備好，下次一樣一點就播
+      veil.focus();
     }
 
-    /* YouTube 回報的播放狀態：1 = 播放中 */
-    window.addEventListener('message', function (e) {
-      if (e.origin !== ORIGIN) return;
-      var d;
-      try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
-      if (!d) return;
-      var st = (d.event === 'onStateChange') ? d.info
-             : (d.info && typeof d.info.playerState === 'number') ? d.info.playerState
-             : null;
-      if (st === 1) reveal();
-    });
+    veil.addEventListener('click', start);
+    if (shut) shut.addEventListener('click', reset);
 
-    /* 後備：使用者把焦點點進 iframe 時也視為開始播 */
-    window.addEventListener('blur', function () {
-      setTimeout(function () {
-        if (iframe && document.activeElement === iframe) reveal();
-      }, 0);
-    });
-
-    if (close) close.addEventListener('click', reset);
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && live && $('#lightbox').hidden) reset();
     });
 
-    /* 語錄區那顆 🐾：捲到播放器並提示 */
+    /* 語錄區那顆 🐾 也接到同一個播放器 */
     if (egg) {
       egg.addEventListener('click', function () {
         if (live) { reset(); return; }
-        box.animate
-          ? box.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-6px)' },
-                         { transform: 'translateY(0)' }], { duration: 420, iterations: 2 })
-          : null;
-        toast('左下角那塊，點一下就會播。');
+        start();
+        toast('汪。');
       });
     }
 
