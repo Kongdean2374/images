@@ -285,6 +285,14 @@
     window.addEventListener('load', check);
   })();
 
+  /* ── 最後更新日期：只需改 HTML 裡 datetime 那一處 ───── */
+  (function () {
+    var el = $('#updated');
+    if (!el) return;
+    var d = (el.getAttribute('datetime') || '').split('-');
+    if (d.length === 3) el.textContent = d[0] + ' / ' + d[1] + ' / ' + d[2];
+  })();
+
   /* ── 回到頂端 ───────────────────────────────────────── */
   (function () {
     var btn = $('#btn-top');
