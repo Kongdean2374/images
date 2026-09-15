@@ -9,6 +9,8 @@ final class LocationManager: NSObject, ObservableObject {
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
     @Published private(set) var latestLocation: CLLocation?
     @Published private(set) var horizontalAccuracy: Double = -1
+    /// 裝置指向的方位（度，0 = 正北）
+    @Published private(set) var deviceHeading: Double = 0
     @Published private(set) var isUpdating = false
 
     private let manager = CLLocationManager()
@@ -79,6 +81,14 @@ extension LocationManager: CLLocationManagerDelegate {
                 self.horizontalAccuracy = location.horizontalAccuracy
                 self.locationSubject.send(location)
             }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        guard newHeading.headingAccuracy >= 0 else { return }
+        let value = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        DispatchQueue.main.async {
+            self.deviceHeading = value
         }
     }
 

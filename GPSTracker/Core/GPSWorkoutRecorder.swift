@@ -39,6 +39,11 @@ final class GPSWorkoutRecorder: ObservableObject {
     @Published private(set) var isAutoPaused = false
     @Published var workoutType: WorkoutType = .gpsRun
     @Published var routeKey: String = ""
+    /// 虛擬配速員的目標配速（秒/公里），nil 表示不啟用
+    @Published var targetPace: Double?
+    /// 自動分圈距離（公尺），0 表示關閉
+    @Published var autoLapDistance: Double = 1000
+    @Published private(set) var laps: [LapDraft] = []
 
     var startDate: Date = Date()
 
@@ -56,6 +61,8 @@ final class GPSWorkoutRecorder: ObservableObject {
     private var lastAltitude: Double?
     private var announcedKM = 0
     private var lowSpeedSince: Date?
+    private var lastLapDistance: Double = 0
+    private var lastLapElapsed: TimeInterval = 0
 
     /// 最近 25 秒的滑動窗口，用於即時配速
     private let paceWindow: TimeInterval = 25
@@ -147,6 +154,9 @@ final class GPSWorkoutRecorder: ObservableObject {
         announcedKM = 0
         lowSpeedSince = nil
         isAutoPaused = false
+        laps = []
+        lastLapDistance = 0
+        lastLapElapsed = 0
         state = .idle
     }
 
@@ -265,12 +275,32 @@ final class GPSWorkoutRecorder: ObservableObject {
         return max(0, dd / dt)
     }
 
+    private func recordAutoLapIfNeeded() {
+        guard autoLapDistance > 0 else { return }
+        while distance - lastLapDistance >= autoLapDistance {
+            let lapDuration = elapsed - lastLapElapsed
+            lastLapDistance += autoLapDistance
+            lastLapElapsed = elapsed
+            laps.append(LapDraft(number: laps.count + 1,
+                                 duration: lapDuration,
+                                 distance: autoLapDistance,
+                                 timestamp: Date()))
+        }
+    }
+
     private func announceKMIfNeeded() {
+        recordAutoLapIfNeeded()
         let km = Int(distance / 1000)
         guard km > announcedKM else { return }
         announcedKM = km
         let paceText = Fmt.pace(averagePace)
-        CueService.shared.speak("已完成 \(km) 公里，平均配速 \(paceText.replacingOccurrences(of: "'", with: "分").replacingOccurrences(of: "\"", with: "秒"))")
+        var announcement = "已完成 \(km) 公里，平均配速 \(paceText.replacingOccurrences(of: "'", with: "分").replacingOccurrences(of: "\"", with: "秒"))"
+        if let seconds = timeLead {
+            announcement += seconds >= 0
+                ? "，領先目標 \(Int(abs(seconds))) 秒"
+                : "，落後目標 \(Int(abs(seconds))) 秒"
+        }
+        CueService.shared.speak(announcement)
         CueService.shared.impact(.medium)
     }
 
@@ -278,6 +308,44 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     var coordinates: [CLLocationCoordinate2D] {
         samples.map { $0.coordinate }
+    }
+
+    // MARK: 虛擬配速員
+
+    /// 依目標配速，此刻「應該」已跑的距離（公尺）
+    var targetDistance: Double? {
+        guard let targetPace, targetPace > 0, elapsed > 0 else { return nil }
+        return elapsed / targetPace * 1000
+    }
+
+    /// 正值代表領先目標的公尺數，負值代表落後
+    var paceLead: Double? {
+        guard let targetDistance else { return nil }
+        return distance - targetDistance
+    }
+
+    /// 正值代表領先的秒數，負值代表落後
+    var timeLead: Double? {
+        guard let targetPace, targetPace > 0, let lead = paceLead else { return nil }
+        return lead / 1000 * targetPace
+    }
+
+    // MARK: 返回起點
+
+    var startCoordinate: CLLocationCoordinate2D? {
+        samples.first?.coordinate
+    }
+
+    /// 目前位置到起點的直線距離（公尺）
+    var distanceToStart: Double? {
+        guard let start = startCoordinate, let current = samples.last?.coordinate else { return nil }
+        return GeoMath.haversine(current, start)
+    }
+
+    /// 回起點的方位角（度）
+    var bearingToStart: Double? {
+        guard let start = startCoordinate, let current = samples.last?.coordinate else { return nil }
+        return GeoMath.bearing(from: current, to: start)
     }
 
     /// 存進 SwiftData 的完整場次
@@ -310,6 +378,12 @@ final class GPSWorkoutRecorder: ObservableObject {
                                                            elevationGain: elevationGain)
         session.weatherNote = weatherNote
         session.temperature = temperature
+        session.laps = laps.map {
+            LapRecord(lapNumber: $0.number,
+                      lapDuration: $0.duration,
+                      distanceOverride: $0.distance,
+                      timestamp: $0.timestamp)
+        }
         session.routePoints = samples.map {
             RoutePoint(latitude: $0.latitude,
                        longitude: $0.longitude,

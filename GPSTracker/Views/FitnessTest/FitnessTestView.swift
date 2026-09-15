@@ -21,9 +21,22 @@ struct FitnessTestView: View {
 
     private var personalBest: Double? {
         let values: [Double] = history.compactMap { session in
-            selected.higherIsBetter ? session.repCount.map(Double.init) : (session.duration > 0 ? session.duration : nil)
+            switch selected {
+            case .cooper12: return session.totalDistance
+            case .run3000: return session.duration > 0 ? session.duration : nil
+            default: return session.repCount.map(Double.init)
+            }
         }
         return selected.higherIsBetter ? values.max() : values.min()
+    }
+
+    /// 依項目格式化成績
+    private func formatValue(_ value: Double) -> String {
+        switch selected {
+        case .cooper12: return "\(Int(value)) 公尺"
+        case .run3000: return Fmt.duration(value)
+        default: return "\(Int(value)) 下"
+        }
     }
 
     var body: some View {
@@ -191,7 +204,7 @@ struct FitnessTestView: View {
 
     private func thresholdPill(_ title: String, _ value: Double) -> some View {
         VStack(spacing: 3) {
-            Text(selected.higherIsBetter ? "\(Int(value))" : Fmt.duration(value))
+            Text(formatValue(value))
                 .font(.subheadline.weight(.bold).monospacedDigit())
                 .foregroundStyle(Theme.textPrimary)
             Text(title)
@@ -212,7 +225,7 @@ struct FitnessTestView: View {
                     Text("個人最佳")
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
-                    Text(selected.higherIsBetter ? "\(Int(best)) 下" : Fmt.duration(best))
+                    Text(formatValue(best))
                         .font(.headline.monospacedDigit())
                         .foregroundStyle(Theme.textPrimary)
                 }
@@ -236,7 +249,9 @@ struct FitnessTestView: View {
                 Label("測驗方式", systemImage: "info.circle")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
-                if selected == .run3000 {
+                if selected == .cooper12 {
+                    Text("12 分鐘內盡可能跑遠。跑道每圈按一下「計圈」最準，沒有計圈時用你的個人步幅換算。結束後會依距離推估最大攝氧量。")
+                } else if selected == .run3000 {
                     Text("把手機帶在身上，跑道每圈按一下「計圈」最準；沒有計圈時會用你的個人步幅換算距離。到 3000 公尺自動結束，每 500 公尺語音報時。")
                 } else {
                     Text("手機放在身上（仰臥起坐建議放胸口口袋或手持，伏地挺身可放口袋），感測器自動計次；偵測不到的次數可以手動補。剩 1 分鐘、30 秒、10 秒會語音提醒，時間到自動結束。")
@@ -293,7 +308,9 @@ struct FitnessTestView: View {
             .padding(.horizontal, 18)
             .padding(.top, 6)
 
-            if engine.isTimed {
+            if selected == .cooper12 {
+                cooperRunning
+            } else if engine.isTimed {
                 timedRunning
             } else {
                 runRunning
@@ -365,6 +382,61 @@ struct FitnessTestView: View {
         }
     }
 
+    private var cooperRunning: some View {
+        VStack(spacing: 20) {
+            ZStack {
+                RingProgress(progress: 1 - (engine.remaining / 720),
+                             lineWidth: 18,
+                             gradient: AngularGradient(colors: [Theme.accent.opacity(0.5), Theme.accent],
+                                                       center: .center))
+                VStack(spacing: 4) {
+                    Text("\(Int(engine.estimatedDistance))")
+                        .font(.system(size: 46, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("公尺")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("剩 \(Fmt.duration(engine.remaining))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Theme.amber)
+                }
+            }
+            .frame(width: 250, height: 250)
+
+            HStack {
+                StatPill(title: "圈數", value: "\(engine.laps)", tint: Theme.amber)
+                StatPill(title: "步數", value: "\(engine.pedometer.steps)", tint: Theme.mint)
+                StatPill(title: "推估 VO₂max",
+                         value: engine.vo2max.map { String(format: "%.1f", $0) } ?? "--",
+                         tint: Theme.violet)
+            }
+            .padding(.horizontal, 18)
+
+            HStack(spacing: 12) {
+                Button {
+                    engine.addLap()
+                } label: {
+                    Label("計圈（\(Int(engine.lapDistance))m）", systemImage: "flag.checkered")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                Button {
+                    engine.removeLap()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .frame(width: 80)
+            }
+            .padding(.horizontal, 18)
+
+            Text(gradePreview)
+                .font(.caption)
+                .foregroundStyle(Theme.mint)
+        }
+    }
+
     private var runRunning: some View {
         VStack(spacing: 20) {
             ZStack {
@@ -422,9 +494,12 @@ struct FitnessTestView: View {
     private var gradePreview: String {
         let grade = standards.grade(for: selected, value: engine.resultValue)
         if let next = standards.gapToNext(for: selected, value: engine.resultValue) {
-            let gapText = selected.higherIsBetter
-                ? "再 \(Int(ceil(next.gap))) 下"
-                : "快 \(Fmt.duration(next.gap))"
+            let gapText: String
+            switch selected {
+            case .cooper12: gapText = "再 \(Int(ceil(next.gap))) 公尺"
+            case .run3000: gapText = "快 \(Fmt.duration(next.gap))"
+            default: gapText = "再 \(Int(ceil(next.gap))) 下"
+            }
             return "目前 \(grade.displayName)　距離「\(next.grade.displayName)」\(gapText)"
         }
         return "目前 \(grade.displayName)　已達最高等級"
@@ -457,21 +532,30 @@ struct FitnessTestView: View {
                             RingProgress(progress: standards.progress(for: selected, value: value),
                                          lineWidth: 14)
                             VStack(spacing: 2) {
-                                Text(selected.higherIsBetter ? "\(Int(value))" : Fmt.duration(value))
+                                Text(selected == .run3000 ? Fmt.duration(value) : "\(Int(value))")
                                     .font(.system(size: 30, weight: .bold, design: .rounded))
                                     .monospacedDigit()
                                     .foregroundStyle(Theme.textPrimary)
-                                Text(selected.higherIsBetter ? "下" : "完成時間")
+                                Text(selected.unit)
                                     .font(.caption2)
                                     .foregroundStyle(Theme.textSecondary)
                             }
                         }
                         .frame(width: 150, height: 150)
 
+                        if let vo2 = engine.vo2max {
+                            HStack(spacing: 6) {
+                                Image(systemName: "lungs.fill")
+                                    .foregroundStyle(Theme.violet)
+                                Text(String(format: "推估最大攝氧量 %.1f ml/kg/min・%@",
+                                            vo2, FitnessTestItem.vo2maxLabel(vo2)))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.violet)
+                            }
+                        }
+
                         if let next = standards.gapToNext(for: selected, value: value) {
-                            Text(selected.higherIsBetter
-                                 ? "距離「\(next.grade.displayName)」還差 \(Int(ceil(next.gap))) 下"
-                                 : "距離「\(next.grade.displayName)」還要快 \(Fmt.duration(next.gap))")
+                            Text("距離「\(next.grade.displayName)」還差 \(selected == .run3000 ? Fmt.duration(next.gap) : formatValue(next.gap))")
                                 .font(.subheadline)
                                 .foregroundStyle(Theme.mint)
                         } else {
@@ -482,14 +566,14 @@ struct FitnessTestView: View {
 
                         if let best = personalBest {
                             let improved = selected.higherIsBetter ? value > best : value < best
-                            Text(improved ? "刷新個人最佳！" : "個人最佳：\(selected.higherIsBetter ? "\(Int(best)) 下" : Fmt.duration(best))")
+                            Text(improved ? "刷新個人最佳！" : "個人最佳：\(formatValue(best))")
                                 .font(.caption)
                                 .foregroundStyle(improved ? Theme.amber : Theme.textSecondary)
                         }
                     }
                 }
 
-                if selected == .run3000 {
+                if selected.tracksDistance {
                     GlassCard {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("距離資料")
@@ -589,6 +673,14 @@ struct FitnessStandardsEditor: View {
         }
     }
 
+    private func stepSize(_ item: FitnessTestItem) -> Double {
+        switch item {
+        case .cooper12: return 50
+        case .run3000: return 5
+        default: return 1
+        }
+    }
+
     private func row(_ item: FitnessTestItem, _ title: String, _ value: Double, update: @escaping (Double) -> Void) -> some View {
         HStack {
             Text(title)
@@ -597,17 +689,18 @@ struct FitnessStandardsEditor: View {
                 .frame(width: 44, alignment: .leading)
             Spacer()
             Button {
-                update(max(0, value - (item.higherIsBetter ? 1 : 5)))
+                update(max(0, value - stepSize(item)))
             } label: {
                 Image(systemName: "minus.circle.fill").foregroundStyle(Theme.accent.opacity(0.8))
             }
             .buttonStyle(.plain)
-            Text(item.higherIsBetter ? "\(Int(value)) 下" : Fmt.duration(value))
+            Text(item == .run3000 ? Fmt.duration(value)
+                 : (item == .cooper12 ? "\(Int(value)) m" : "\(Int(value)) 下"))
                 .font(.subheadline.monospacedDigit())
                 .frame(width: 92)
                 .foregroundStyle(Theme.textPrimary)
             Button {
-                update(value + (item.higherIsBetter ? 1 : 5))
+                update(value + stepSize(item))
             } label: {
                 Image(systemName: "plus.circle.fill").foregroundStyle(Theme.accent.opacity(0.8))
             }

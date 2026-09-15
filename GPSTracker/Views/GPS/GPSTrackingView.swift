@@ -18,6 +18,16 @@ struct GPSTrackingView: View {
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
     @State private var expandedMetrics = true
+    @State private var mapStyleIndex = 0
+    @State private var targetPaceIndex = 0
+    @State private var autoLapIndex = 1
+    @State private var showBackToStart = false
+
+    private let paceOptions: [(String, Double?)] = [
+        ("關閉", nil), ("7'00\"", 420), ("6'30\"", 390), ("6'00\"", 360),
+        ("5'30\"", 330), ("5'00\"", 300), ("4'30\"", 270)
+    ]
+    private let lapOptions: [(String, Double)] = [("關閉", 0), ("1 km", 1000), ("500 m", 500), ("1 mi", 1609.344)]
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -86,10 +96,18 @@ struct GPSTrackingView: View {
                 }
             }
         }
-        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
+        .mapStyle(currentMapStyle)
         .mapControls {
             MapCompass()
             MapScaleView()
+        }
+    }
+
+    private var currentMapStyle: MapStyle {
+        switch mapStyleIndex {
+        case 1: return .hybrid(elevation: .realistic, pointsOfInterest: .excludingAll)
+        case 2: return .imagery(elevation: .realistic)
+        default: return .standard(elevation: .realistic, pointsOfInterest: .excludingAll)
         }
     }
 
@@ -135,16 +153,28 @@ struct GPSTrackingView: View {
 
             Spacer()
 
-            Button {
-                followCamera.toggle()
-                if followCamera { updateCamera() }
-                CueService.shared.impact(.soft)
-            } label: {
-                Image(systemName: followCamera ? "location.fill" : "location")
-                    .font(.headline)
-                    .foregroundStyle(followCamera ? Theme.accent : .white)
-                    .padding(11)
-                    .background(Circle().fill(.ultraThinMaterial))
+            HStack(spacing: 10) {
+                Button {
+                    mapStyleIndex = (mapStyleIndex + 1) % 3
+                    CueService.shared.impact(.soft)
+                } label: {
+                    Image(systemName: mapStyleIndex == 0 ? "map" : (mapStyleIndex == 1 ? "globe.americas" : "photo"))
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
+                Button {
+                    followCamera.toggle()
+                    if followCamera { updateCamera() }
+                    CueService.shared.impact(.soft)
+                } label: {
+                    Image(systemName: followCamera ? "location.fill" : "location")
+                        .font(.headline)
+                        .foregroundStyle(followCamera ? Theme.accent : .white)
+                        .padding(11)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -188,7 +218,19 @@ struct GPSTrackingView: View {
                            size: 40)
             }
 
-            if expandedMetrics {
+            if recorder.state == .idle {
+                setupPanel
+            }
+
+            if recorder.state != .idle, recorder.targetPace != nil {
+                pacerBar
+            }
+
+            if recorder.state != .idle, let toStart = recorder.distanceToStart, toStart > 30 {
+                backToStartRow(distance: toStart)
+            }
+
+            if expandedMetrics, recorder.state != .idle {
                 HStack {
                     MetricTile(title: "即時配速",
                                value: Fmt.pace(recorder.currentPace, unit: settings.unit),
@@ -229,6 +271,124 @@ struct GPSTrackingView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
         .animation(.easeInOut(duration: 0.25), value: expandedMetrics)
+    }
+
+    // MARK: 開始前設定
+
+    private var setupPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            chipRow(title: "虛擬配速員", options: paceOptions.map { $0.0 }, selected: targetPaceIndex) { index in
+                targetPaceIndex = index
+                recorder.targetPace = paceOptions[index].1
+            }
+            chipRow(title: "自動分圈", options: lapOptions.map { $0.0 }, selected: autoLapIndex) { index in
+                autoLapIndex = index
+                recorder.autoLapDistance = lapOptions[index].1
+            }
+        }
+    }
+
+    private func chipRow(title: String,
+                         options: [String],
+                         selected: Int,
+                         action: @escaping (Int) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { index, label in
+                        Button {
+                            action(index)
+                            CueService.shared.impact(.soft)
+                        } label: {
+                            Text(label)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(selected == index
+                                                           ? Theme.accent.opacity(0.3)
+                                                           : Color.white.opacity(0.08)))
+                                .foregroundStyle(selected == index ? Theme.accent : Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: 虛擬配速員
+
+    private var pacerBar: some View {
+        let lead = recorder.timeLead ?? 0
+        let ahead = lead >= 0
+        let magnitude = min(1, abs(lead) / 60)
+        return VStack(spacing: 6) {
+            HStack {
+                Label(ahead ? "領先目標" : "落後目標",
+                      systemImage: ahead ? "hare.fill" : "tortoise.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ahead ? Theme.mint : Theme.amber)
+                Spacer()
+                Text(String(format: "%@%d 秒・%@%.0f m",
+                            ahead ? "+" : "-", Int(abs(lead)),
+                            ahead ? "+" : "-", abs(recorder.paceLead ?? 0)))
+                    .font(.caption.monospacedDigit())
+                    .contentTransition(.numericText())
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .center) {
+                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule()
+                        .fill(ahead ? Theme.mint : Theme.amber)
+                        .frame(width: max(4, geo.size.width / 2 * magnitude))
+                        .offset(x: ahead ? geo.size.width / 4 * magnitude : -geo.size.width / 4 * magnitude)
+                        .animation(.easeOut(duration: 0.4), value: magnitude)
+                    Rectangle()
+                        .fill(Color.white.opacity(0.4))
+                        .frame(width: 2, height: 12)
+                }
+            }
+            .frame(height: 12)
+        }
+    }
+
+    // MARK: 返回起點
+
+    private func backToStartRow(distance: Double) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "location.north.fill")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(Theme.accent)
+                .rotationEffect(.degrees((recorder.bearingToStart ?? 0) - location.deviceHeading))
+                .animation(.easeOut(duration: 0.3), value: location.deviceHeading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("回到起點")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                Text(Fmt.distance(distance, unit: settings.unit))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .contentTransition(.numericText())
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            Spacer(minLength: 0)
+            if !recorder.laps.isEmpty {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("已分圈")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("\(recorder.laps.count)　\(Fmt.pace(recorder.laps.last?.pace, unit: settings.unit))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Theme.mint)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.06)))
     }
 
     private var controls: some View {

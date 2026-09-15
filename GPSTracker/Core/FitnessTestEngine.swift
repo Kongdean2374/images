@@ -35,9 +35,19 @@ final class FitnessTestEngine: ObservableObject {
 
     var isTimed: Bool { item.timeLimit != nil }
 
-    /// 成績：計次項目為次數，跑步為秒數
+    /// 成績：計次項目為次數，3000 公尺為秒數，Cooper 為距離
     var resultValue: Double {
-        isTimed ? Double(totalReps) : elapsed
+        switch item {
+        case .run3000: return elapsed
+        case .cooper12: return estimatedDistance
+        default: return Double(totalReps)
+        }
+    }
+
+    /// Cooper 推估的最大攝氧量
+    var vo2max: Double? {
+        guard item == .cooper12 else { return nil }
+        return FitnessTestItem.vo2max(fromCooperDistance: estimatedDistance)
     }
 
     // MARK: 控制
@@ -72,15 +82,11 @@ final class FitnessTestEngine: ObservableObject {
         phase = .running
         detector.reset()
 
-        switch item {
-        case .sitUps:
-            detector.sensitivity = 1.05
-            detector.start()
-        case .pushUps:
-            detector.sensitivity = 0.95
-            detector.start()
-        case .run3000:
+        if item.tracksDistance {
             pedometer.start(from: Date())
+        } else {
+            detector.sensitivity = item == .sitUps ? 1.05 : 0.95
+            detector.start()
         }
 
         CueService.shared.impact(.heavy)
@@ -89,7 +95,7 @@ final class FitnessTestEngine: ObservableObject {
     }
 
     func addLap() {
-        guard phase == .running, item == .run3000 else { return }
+        guard phase == .running, item.tracksDistance else { return }
         laps += 1
         CueService.shared.notify(.success)
         CueService.shared.speak("第 \(laps) 圈")
@@ -143,12 +149,14 @@ final class FitnessTestEngine: ObservableObject {
         elapsed = Date().timeIntervalSince(startTime)
         detectedReps = detector.repCount
 
+        if item.tracksDistance {
+            recalcDistance()
+        }
         if let limit = item.timeLimit {
             remaining = max(0, limit - elapsed)
             announceTimeMilestones()
             if remaining <= 0 { finish() }
         } else {
-            recalcDistance()
             announceDistanceMilestones()
             if estimatedDistance >= 3000 { finish() }
         }
@@ -201,12 +209,12 @@ final class FitnessTestEngine: ObservableObject {
                                      startDate: startTime,
                                      endDate: Date(),
                                      duration: duration,
-                                     totalDistance: item == .run3000 ? estimatedDistance : nil,
-                                     averagePace: item == .run3000 && estimatedDistance > 100
+                                     totalDistance: item.tracksDistance ? estimatedDistance : nil,
+                                     averagePace: item.tracksDistance && estimatedDistance > 100
                                         ? duration / (estimatedDistance / 1000) : nil,
-                                     stepCount: item == .run3000 && pedometer.steps > 0 ? pedometer.steps : nil,
-                                     repCount: isTimed ? totalReps : nil,
-                                     distanceSource: item == .run3000
+                                     stepCount: item.tracksDistance && pedometer.steps > 0 ? pedometer.steps : nil,
+                                     repCount: item.tracksDistance ? nil : totalReps,
+                                     distanceSource: item.tracksDistance
                                         ? (laps > 0 ? .lap : .stride) : nil,
                                      routeKey: item.displayName,
                                      title: "\(item.displayName)　\(grade.displayName)")
@@ -216,9 +224,18 @@ final class FitnessTestEngine: ObservableObject {
                                                            distance: session.totalDistance,
                                                            averagePace: session.averagePace,
                                                            elevationGain: nil)
-        session.notes = isTimed
-            ? "\(item.displayName)：\(totalReps) 下（\(grade.displayName)）"
-            : "\(item.displayName)：\(Fmt.duration(duration))（\(grade.displayName)）"
+        switch item {
+        case .cooper12:
+            var note = "\(item.displayName)：\(Int(estimatedDistance)) 公尺（\(grade.displayName)）"
+            if let vo2 = vo2max {
+                note += "　推估 VO₂max \(String(format: "%.1f", vo2))"
+            }
+            session.notes = note
+        case .run3000:
+            session.notes = "\(item.displayName)：\(Fmt.duration(duration))（\(grade.displayName)）"
+        default:
+            session.notes = "\(item.displayName)：\(totalReps) 下（\(grade.displayName)）"
+        }
         return session
     }
 }

@@ -5,6 +5,7 @@ enum FitnessTestItem: String, Codable, CaseIterable, Identifiable {
     case sitUps
     case pushUps
     case run3000
+    case cooper12
 
     var id: String { rawValue }
 
@@ -13,6 +14,7 @@ enum FitnessTestItem: String, Codable, CaseIterable, Identifiable {
         case .sitUps: return "2 分鐘仰臥起坐"
         case .pushUps: return "2 分鐘伏地挺身"
         case .run3000: return "3000 公尺跑走"
+        case .cooper12: return "12 分鐘 Cooper 測驗"
         }
     }
 
@@ -21,6 +23,7 @@ enum FitnessTestItem: String, Codable, CaseIterable, Identifiable {
         case .sitUps: return "仰臥起坐"
         case .pushUps: return "伏地挺身"
         case .run3000: return "3000 公尺"
+        case .cooper12: return "Cooper"
         }
     }
 
@@ -29,21 +32,35 @@ enum FitnessTestItem: String, Codable, CaseIterable, Identifiable {
         case .sitUps: return "figure.core.training"
         case .pushUps: return "figure.wrestling"
         case .run3000: return "figure.run"
+        case .cooper12: return "stopwatch.fill"
         }
     }
 
-    /// 計次項目的時限（秒）
+    /// 項目時限（秒）。3000 公尺是跑到距離為止，沒有時限。
     var timeLimit: TimeInterval? {
-        self == .run3000 ? nil : 120
+        switch self {
+        case .run3000: return nil
+        case .cooper12: return 720
+        default: return 120
+        }
     }
 
-    /// 成績越大越好（次數）還是越小越好（秒數）
+    /// 需要距離追蹤（計步或計圈）
+    var tracksDistance: Bool {
+        self == .run3000 || self == .cooper12
+    }
+
+    /// 成績越大越好（次數、距離）還是越小越好（秒數）
     var higherIsBetter: Bool {
         self != .run3000
     }
 
     var unit: String {
-        self == .run3000 ? "時間" : "次"
+        switch self {
+        case .run3000: return "時間"
+        case .cooper12: return "公尺"
+        default: return "次"
+        }
     }
 
     var met: Double {
@@ -51,6 +68,7 @@ enum FitnessTestItem: String, Codable, CaseIterable, Identifiable {
         case .sitUps: return 6.0
         case .pushUps: return 7.0
         case .run3000: return 9.5
+        case .cooper12: return 9.8
         }
     }
 }
@@ -96,12 +114,15 @@ struct FitnessStandards: Codable, Equatable {
     var pushUps = FitnessThresholds(pass: 42, good: 52, excellent: 62, elite: 72)
     /// 秒數，越小越好
     var run3000 = FitnessThresholds(pass: 930, good: 870, excellent: 810, elite: 750)
+    /// 12 分鐘跑的距離（公尺），越大越好
+    var cooper12 = FitnessThresholds(pass: 2000, good: 2400, excellent: 2800, elite: 3200)
 
     func thresholds(for item: FitnessTestItem) -> FitnessThresholds {
         switch item {
         case .sitUps: return sitUps
         case .pushUps: return pushUps
         case .run3000: return run3000
+        case .cooper12: return cooper12
         }
     }
 
@@ -110,6 +131,7 @@ struct FitnessStandards: Codable, Equatable {
         case .sitUps: sitUps = thresholds
         case .pushUps: pushUps = thresholds
         case .run3000: run3000 = thresholds
+        case .cooper12: cooper12 = thresholds
         }
     }
 
@@ -158,6 +180,24 @@ struct FitnessStandards: Codable, Equatable {
             }
         }
         return nil
+    }
+}
+
+extension FitnessTestItem {
+    /// Cooper 測驗換算最大攝氧量（Cooper 原始公式）
+    static func vo2max(fromCooperDistance meters: Double) -> Double? {
+        guard meters > 600 else { return nil }
+        return (meters - 504.9) / 44.73
+    }
+
+    static func vo2maxLabel(_ value: Double) -> String {
+        switch value {
+        case ..<30: return "偏低"
+        case ..<38: return "一般"
+        case ..<46: return "良好"
+        case ..<54: return "優秀"
+        default: return "卓越"
+        }
     }
 }
 
