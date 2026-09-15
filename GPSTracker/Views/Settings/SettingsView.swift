@@ -506,6 +506,19 @@ struct SettingsView: View {
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(Theme.textPrimary)
                 }
+                NavigationLink {
+                    BackupView()
+                } label: {
+                    Label("備份與還原", systemImage: "externaldrive.badge.timemachine")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Theme.accentGradient))
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     exportURL = DataExporter.csv(sessions: sessions)
                     showExport = exportURL != nil

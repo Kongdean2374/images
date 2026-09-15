@@ -63,6 +63,18 @@ final class HealthKitImporter: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var statusText = ""
     @Published private(set) var lastResult: ImportResult?
+    @Published private(set) var isCancelled = false
+
+    /// 每寫入這麼多筆就存檔一次，避免一次性佔用太多記憶體
+    private let batchSize = 25
+
+    /// 中斷匯入。已經寫入的會保留，下次匯入會自動從沒處理到的繼續。
+    @MainActor
+    func cancel() {
+        guard isImporting else { return }
+        isCancelled = true
+        statusText = "正在安全中斷…"
+    }
 
     private let health = HealthKitManager.shared
     private var container: ModelContainer?
@@ -98,10 +110,12 @@ final class HealthKitImporter: ObservableObject {
         }
 
         isImporting = true
+        isCancelled = false
         progress = 0
         statusText = "讀取健康 App 的訓練紀錄…"
         defer {
             isImporting = false
+            isCancelled = false
             statusText = ""
         }
 
@@ -118,6 +132,13 @@ final class HealthKitImporter: ObservableObject {
         let fingerprints = Set(existing.map { fingerprint(type: $0.type, start: $0.startDate) })
 
         for (index, workout) in workouts.enumerated() {
+            if isCancelled {
+                try? context.save()
+                result.finishedAt = Date()
+                lastResult = result
+                statusText = ""
+                return result
+            }
             progress = Double(index) / Double(workouts.count)
             statusText = "處理第 \(index + 1) / \(workouts.count) 筆…"
 
@@ -157,8 +178,8 @@ final class HealthKitImporter: ObservableObject {
             if result.oldest == nil || workout.startDate < result.oldest! { result.oldest = workout.startDate }
             if result.newest == nil || workout.startDate > result.newest! { result.newest = workout.startDate }
 
-            // 每 20 筆存一次，避免一次性佔用太多記憶體
-            if result.imported % 20 == 0 {
+            // 分批寫入：中途被中斷或 App 被系統收回時，已處理的部分不會流失
+            if result.imported % batchSize == 0 {
                 try? context.save()
             }
         }

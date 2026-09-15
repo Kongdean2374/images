@@ -138,8 +138,17 @@ struct HealthImportView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ProgressView(value: importer.progress)
                             .tint(Theme.accent)
-                        Text(importer.statusText)
-                            .font(.caption)
+                        HStack {
+                            Text(importer.statusText)
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer()
+                            Button("中斷") { importer.cancel() }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.accentWarm)
+                        }
+                        Text("每 25 筆就會存檔一次，中斷後已匯入的都會保留，再按一次匯入就會從沒處理到的繼續。")
+                            .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }

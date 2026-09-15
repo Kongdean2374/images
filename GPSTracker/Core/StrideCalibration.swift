@@ -238,6 +238,11 @@ enum StrideCalibration {
              profile: profile)
     }
 
+    /// 從備份還原校正狀態
+    static func restore(_ state: StrideState, profile: StrideProfile) {
+        save(state, profile: profile)
+    }
+
     static func reset(_ profile: StrideProfile) {
         defaults.removeObject(forKey: stateKey(profile))
     }

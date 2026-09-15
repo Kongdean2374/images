@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var selection = 0
     @State private var didAutoImport = false
     @State private var showOnboarding = false
+    @State private var showDatabaseNotice = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -34,6 +35,10 @@ struct RootView: View {
         .tint(Theme.accent)
         .onAppear {
             if !settings.hasSeenOnboarding { showOnboarding = true }
+            if DatabaseHealth.needsAttention { showDatabaseNotice = true }
+        }
+        .sheet(isPresented: $showDatabaseNotice) {
+            DatabaseNoticeView()
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             NavigationStack {

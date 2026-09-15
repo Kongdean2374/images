@@ -7,111 +7,114 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA0000000000000000000075 /* GPSTrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* GPSTrackerApp.swift */; };
-		AA0000000000000000000076 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* RootView.swift */; };
-		AA0000000000000000000077 /* CelebrationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* CelebrationOverlay.swift */; };
-		AA0000000000000000000078 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* EmptyStateView.swift */; };
-		AA0000000000000000000079 /* MetricViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* MetricViews.swift */; };
-		AA000000000000000000007A /* RouteRendering.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* RouteRendering.swift */; };
-		AA000000000000000000007B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000A /* Theme.swift */; };
-		AA000000000000000000007C /* Achievements.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000C /* Achievements.swift */; };
-		AA000000000000000000007D /* ActivityTypeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* ActivityTypeDetector.swift */; };
-		AA000000000000000000007E /* AltimeterManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000E /* AltimeterManager.swift */; };
-		AA000000000000000000007F /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000F /* AppSettings.swift */; };
-		AA0000000000000000000080 /* BestEfforts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000010 /* BestEfforts.swift */; };
-		AA0000000000000000000081 /* CadenceMetronome.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* CadenceMetronome.swift */; };
-		AA0000000000000000000082 /* CueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* CueService.swift */; };
-		AA0000000000000000000083 /* DailyActivityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000013 /* DailyActivityProvider.swift */; };
-		AA0000000000000000000084 /* DataExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000014 /* DataExporter.swift */; };
-		AA0000000000000000000085 /* DataIntegrity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000015 /* DataIntegrity.swift */; };
-		AA0000000000000000000086 /* ExerciseLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000016 /* ExerciseLibrary.swift */; };
-		AA0000000000000000000087 /* FitnessTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000017 /* FitnessTest.swift */; };
-		AA0000000000000000000088 /* FitnessTestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000018 /* FitnessTestEngine.swift */; };
-		AA0000000000000000000089 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000019 /* Formatters.swift */; };
-		AA000000000000000000008A /* GPSWorkoutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* GPSWorkoutRecorder.swift */; };
-		AA000000000000000000008B /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001B /* GeoMath.swift */; };
-		AA000000000000000000008C /* HealthBackgroundMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* HealthBackgroundMonitor.swift */; };
-		AA000000000000000000008D /* HealthKitImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001D /* HealthKitImporter.swift */; };
-		AA000000000000000000008E /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001E /* HealthKitManager.swift */; };
-		AA000000000000000000008F /* HealthKitSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001F /* HealthKitSync.swift */; };
-		AA0000000000000000000090 /* HistoryInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000020 /* HistoryInsights.swift */; };
-		AA0000000000000000000091 /* IntensityCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000021 /* IntensityCalculator.swift */; };
-		AA0000000000000000000092 /* IntervalPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* IntervalPlan.swift */; };
-		AA0000000000000000000093 /* IntervalTimerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000023 /* IntervalTimerEngine.swift */; };
-		AA0000000000000000000094 /* LapWorkoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000024 /* LapWorkoutEngine.swift */; };
-		AA0000000000000000000095 /* LegalContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000025 /* LegalContent.swift */; };
-		AA0000000000000000000096 /* LiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000026 /* LiveActivityController.swift */; };
-		AA0000000000000000000097 /* LocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000027 /* LocationManager.swift */; };
-		AA0000000000000000000098 /* MapSnapshotter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000028 /* MapSnapshotter.swift */; };
-		AA0000000000000000000099 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000029 /* NotificationManager.swift */; };
-		AA000000000000000000009A /* PedometerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002A /* PedometerManager.swift */; };
-		AA000000000000000000009B /* PlankEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002B /* PlankEngine.swift */; };
-		AA000000000000000000009C /* RepDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002C /* RepDetector.swift */; };
-		AA000000000000000000009D /* RouteFileExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002D /* RouteFileExporter.swift */; };
-		AA000000000000000000009E /* StatsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002E /* StatsEngine.swift */; };
-		AA000000000000000000009F /* StepWorkoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002F /* StepWorkoutEngine.swift */; };
-		AA00000000000000000000A0 /* StrideAutoCalibrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* StrideAutoCalibrator.swift */; };
-		AA00000000000000000000A1 /* StrideCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000031 /* StrideCalibration.swift */; };
-		AA00000000000000000000A2 /* TrainingLoadEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000032 /* TrainingLoadEngine.swift */; };
-		AA00000000000000000000A3 /* WorkoutActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000033 /* WorkoutActivityAttributes.swift */; };
-		AA00000000000000000000A4 /* WorkoutTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000034 /* WorkoutTarget.swift */; };
-		AA00000000000000000000A5 /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000036 /* WorkoutModels.swift */; };
-		AA00000000000000000000A6 /* AchievementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003D /* AchievementsView.swift */; };
-		AA00000000000000000000A7 /* DailyActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003F /* DailyActivityView.swift */; };
-		AA00000000000000000000A8 /* AnalyticsCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000041 /* AnalyticsCharts.swift */; };
-		AA00000000000000000000A9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000042 /* AnalyticsView.swift */; };
-		AA00000000000000000000AA /* BestEffortViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000043 /* BestEffortViews.swift */; };
-		AA00000000000000000000AB /* SplitCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000044 /* SplitCharts.swift */; };
-		AA00000000000000000000AC /* StrideCalibrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000046 /* StrideCalibrationView.swift */; };
-		AA00000000000000000000AD /* FitnessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000048 /* FitnessTestView.swift */; };
-		AA00000000000000000000AE /* GPSTrackingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004A /* GPSTrackingView.swift */; };
-		AA00000000000000000000AF /* RoutePlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004B /* RoutePlaybackView.swift */; };
-		AA00000000000000000000B0 /* GoalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004D /* GoalSettingsView.swift */; };
-		AA00000000000000000000B1 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004F /* HistoryListView.swift */; };
-		AA00000000000000000000B2 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000051 /* HomeView.swift */; };
-		AA00000000000000000000B3 /* HealthImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000053 /* HealthImportView.swift */; };
-		AA00000000000000000000B4 /* IndoorRepsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* IndoorRepsView.swift */; };
-		AA00000000000000000000B5 /* PlankTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000056 /* PlankTimerView.swift */; };
-		AA00000000000000000000B6 /* HistoryInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000058 /* HistoryInsightsView.swift */; };
-		AA00000000000000000000B7 /* IntervalTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005A /* IntervalTimerView.swift */; };
-		AA00000000000000000000B8 /* LapCounterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005C /* LapCounterView.swift */; };
-		AA00000000000000000000B9 /* LegalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005E /* LegalView.swift */; };
-		AA00000000000000000000BA /* UserGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005F /* UserGuideView.swift */; };
-		AA00000000000000000000BB /* ManualEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000061 /* ManualEntryView.swift */; };
-		AA00000000000000000000BC /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000063 /* OnboardingView.swift */; };
-		AA00000000000000000000BD /* PBDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000065 /* PBDashboardView.swift */; };
-		AA00000000000000000000BE /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000067 /* SettingsView.swift */; };
-		AA00000000000000000000BF /* StepWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000069 /* StepWorkoutView.swift */; };
-		AA00000000000000000000C0 /* ShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000006B /* ShareCardView.swift */; };
-		AA00000000000000000000C1 /* WorkoutSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000006C /* WorkoutSummaryView.swift */; };
-		AA00000000000000000000C2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000038 /* Assets.xcassets */; };
-		AA00000000000000000000C3 /* GPSTrackerWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000006F /* GPSTrackerWidgetsBundle.swift */; };
-		AA00000000000000000000C4 /* StepsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000071 /* StepsWidget.swift */; };
-		AA00000000000000000000C5 /* WeekStepsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000072 /* WeekStepsWidget.swift */; };
-		AA00000000000000000000C6 /* WidgetSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000073 /* WidgetSupport.swift */; };
-		AA00000000000000000000C7 /* WorkoutLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000074 /* WorkoutLiveActivity.swift */; };
-		AA00000000000000000000C8 /* WorkoutActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000033 /* WorkoutActivityAttributes.swift */; };
-		AA00000000000000000000D7 /* GPSTrackerWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000CA /* GPSTrackerWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AA0000000000000000000079 /* GPSTrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* GPSTrackerApp.swift */; };
+		AA000000000000000000007A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* RootView.swift */; };
+		AA000000000000000000007B /* CelebrationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* CelebrationOverlay.swift */; };
+		AA000000000000000000007C /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* EmptyStateView.swift */; };
+		AA000000000000000000007D /* MetricViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* MetricViews.swift */; };
+		AA000000000000000000007E /* RouteRendering.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* RouteRendering.swift */; };
+		AA000000000000000000007F /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000A /* Theme.swift */; };
+		AA0000000000000000000080 /* Achievements.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000C /* Achievements.swift */; };
+		AA0000000000000000000081 /* ActivityTypeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* ActivityTypeDetector.swift */; };
+		AA0000000000000000000082 /* AltimeterManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000E /* AltimeterManager.swift */; };
+		AA0000000000000000000083 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000F /* AppSettings.swift */; };
+		AA0000000000000000000084 /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000010 /* BackupManager.swift */; };
+		AA0000000000000000000085 /* BestEfforts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* BestEfforts.swift */; };
+		AA0000000000000000000086 /* CadenceMetronome.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* CadenceMetronome.swift */; };
+		AA0000000000000000000087 /* CueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000013 /* CueService.swift */; };
+		AA0000000000000000000088 /* DailyActivityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000014 /* DailyActivityProvider.swift */; };
+		AA0000000000000000000089 /* DataExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000015 /* DataExporter.swift */; };
+		AA000000000000000000008A /* DataIntegrity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000016 /* DataIntegrity.swift */; };
+		AA000000000000000000008B /* DatabaseHealth.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000017 /* DatabaseHealth.swift */; };
+		AA000000000000000000008C /* ExerciseLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000018 /* ExerciseLibrary.swift */; };
+		AA000000000000000000008D /* FitnessTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000019 /* FitnessTest.swift */; };
+		AA000000000000000000008E /* FitnessTestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* FitnessTestEngine.swift */; };
+		AA000000000000000000008F /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001B /* Formatters.swift */; };
+		AA0000000000000000000090 /* GPSWorkoutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* GPSWorkoutRecorder.swift */; };
+		AA0000000000000000000091 /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001D /* GeoMath.swift */; };
+		AA0000000000000000000092 /* HealthBackgroundMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001E /* HealthBackgroundMonitor.swift */; };
+		AA0000000000000000000093 /* HealthKitImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001F /* HealthKitImporter.swift */; };
+		AA0000000000000000000094 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000020 /* HealthKitManager.swift */; };
+		AA0000000000000000000095 /* HealthKitSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000021 /* HealthKitSync.swift */; };
+		AA0000000000000000000096 /* HistoryInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* HistoryInsights.swift */; };
+		AA0000000000000000000097 /* IntensityCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000023 /* IntensityCalculator.swift */; };
+		AA0000000000000000000098 /* IntervalPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000024 /* IntervalPlan.swift */; };
+		AA0000000000000000000099 /* IntervalTimerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000025 /* IntervalTimerEngine.swift */; };
+		AA000000000000000000009A /* LapWorkoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000026 /* LapWorkoutEngine.swift */; };
+		AA000000000000000000009B /* LegalContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000027 /* LegalContent.swift */; };
+		AA000000000000000000009C /* LiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000028 /* LiveActivityController.swift */; };
+		AA000000000000000000009D /* LocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000029 /* LocationManager.swift */; };
+		AA000000000000000000009E /* MapSnapshotter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002A /* MapSnapshotter.swift */; };
+		AA000000000000000000009F /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002B /* NotificationManager.swift */; };
+		AA00000000000000000000A0 /* PedometerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002C /* PedometerManager.swift */; };
+		AA00000000000000000000A1 /* PlankEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002D /* PlankEngine.swift */; };
+		AA00000000000000000000A2 /* RepDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002E /* RepDetector.swift */; };
+		AA00000000000000000000A3 /* RouteFileExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002F /* RouteFileExporter.swift */; };
+		AA00000000000000000000A4 /* StatsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* StatsEngine.swift */; };
+		AA00000000000000000000A5 /* StepWorkoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000031 /* StepWorkoutEngine.swift */; };
+		AA00000000000000000000A6 /* StrideAutoCalibrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000032 /* StrideAutoCalibrator.swift */; };
+		AA00000000000000000000A7 /* StrideCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000033 /* StrideCalibration.swift */; };
+		AA00000000000000000000A8 /* TrainingLoadEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000034 /* TrainingLoadEngine.swift */; };
+		AA00000000000000000000A9 /* WorkoutActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000035 /* WorkoutActivityAttributes.swift */; };
+		AA00000000000000000000AA /* WorkoutTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000036 /* WorkoutTarget.swift */; };
+		AA00000000000000000000AB /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000038 /* WorkoutModels.swift */; };
+		AA00000000000000000000AC /* AchievementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003F /* AchievementsView.swift */; };
+		AA00000000000000000000AD /* DailyActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000041 /* DailyActivityView.swift */; };
+		AA00000000000000000000AE /* AnalyticsCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000043 /* AnalyticsCharts.swift */; };
+		AA00000000000000000000AF /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000044 /* AnalyticsView.swift */; };
+		AA00000000000000000000B0 /* BestEffortViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000045 /* BestEffortViews.swift */; };
+		AA00000000000000000000B1 /* SplitCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000046 /* SplitCharts.swift */; };
+		AA00000000000000000000B2 /* BackupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000048 /* BackupView.swift */; };
+		AA00000000000000000000B3 /* StrideCalibrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004A /* StrideCalibrationView.swift */; };
+		AA00000000000000000000B4 /* FitnessTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004C /* FitnessTestView.swift */; };
+		AA00000000000000000000B5 /* GPSTrackingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004E /* GPSTrackingView.swift */; };
+		AA00000000000000000000B6 /* RoutePlaybackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000004F /* RoutePlaybackView.swift */; };
+		AA00000000000000000000B7 /* GoalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000051 /* GoalSettingsView.swift */; };
+		AA00000000000000000000B8 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000053 /* HistoryListView.swift */; };
+		AA00000000000000000000B9 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000055 /* HomeView.swift */; };
+		AA00000000000000000000BA /* HealthImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000057 /* HealthImportView.swift */; };
+		AA00000000000000000000BB /* IndoorRepsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000059 /* IndoorRepsView.swift */; };
+		AA00000000000000000000BC /* PlankTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005A /* PlankTimerView.swift */; };
+		AA00000000000000000000BD /* HistoryInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005C /* HistoryInsightsView.swift */; };
+		AA00000000000000000000BE /* IntervalTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000005E /* IntervalTimerView.swift */; };
+		AA00000000000000000000BF /* LapCounterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000060 /* LapCounterView.swift */; };
+		AA00000000000000000000C0 /* LegalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000062 /* LegalView.swift */; };
+		AA00000000000000000000C1 /* UserGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000063 /* UserGuideView.swift */; };
+		AA00000000000000000000C2 /* ManualEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000065 /* ManualEntryView.swift */; };
+		AA00000000000000000000C3 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000067 /* OnboardingView.swift */; };
+		AA00000000000000000000C4 /* PBDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000069 /* PBDashboardView.swift */; };
+		AA00000000000000000000C5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000006B /* SettingsView.swift */; };
+		AA00000000000000000000C6 /* StepWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000006D /* StepWorkoutView.swift */; };
+		AA00000000000000000000C7 /* ShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000006F /* ShareCardView.swift */; };
+		AA00000000000000000000C8 /* WorkoutSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000070 /* WorkoutSummaryView.swift */; };
+		AA00000000000000000000C9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003A /* Assets.xcassets */; };
+		AA00000000000000000000CA /* GPSTrackerWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000073 /* GPSTrackerWidgetsBundle.swift */; };
+		AA00000000000000000000CB /* StepsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000075 /* StepsWidget.swift */; };
+		AA00000000000000000000CC /* WeekStepsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000076 /* WeekStepsWidget.swift */; };
+		AA00000000000000000000CD /* WidgetSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000077 /* WidgetSupport.swift */; };
+		AA00000000000000000000CE /* WorkoutLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000078 /* WorkoutLiveActivity.swift */; };
+		AA00000000000000000000CF /* WorkoutActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000035 /* WorkoutActivityAttributes.swift */; };
+		AA00000000000000000000DE /* GPSTrackerWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA00000000000000000000D1 /* GPSTrackerWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		AA00000000000000000000D9 /* PBXContainerItemProxy */ = {
+		AA00000000000000000000E0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = AA00000000000000000000CF /* Project object */;
+			containerPortal = AA00000000000000000000D6 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = AA00000000000000000000CE;
+			remoteGlobalIDString = AA00000000000000000000D5;
 			remoteInfo = GPSTrackerWidgets;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		AA00000000000000000000D3 /* Embed Foundation Extensions */ = {
+		AA00000000000000000000DA /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				AA00000000000000000000D7 /* GPSTrackerWidgets.appex in Embed Foundation Extensions */,
+				AA00000000000000000000DE /* GPSTrackerWidgets.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -119,8 +122,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		AA00000000000000000000C9 /* GPSTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GPSTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA00000000000000000000CA /* GPSTrackerWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GPSTrackerWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA00000000000000000000D0 /* GPSTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GPSTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA00000000000000000000D1 /* GPSTrackerWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GPSTrackerWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000003 /* GPSTrackerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSTrackerApp.swift; sourceTree = "<group>"; };
 		AA0000000000000000000004 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000006 /* CelebrationOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CelebrationOverlay.swift; sourceTree = "<group>"; };
@@ -132,93 +135,96 @@
 		AA000000000000000000000D /* ActivityTypeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityTypeDetector.swift; sourceTree = "<group>"; };
 		AA000000000000000000000E /* AltimeterManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AltimeterManager.swift; sourceTree = "<group>"; };
 		AA000000000000000000000F /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
-		AA0000000000000000000010 /* BestEfforts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BestEfforts.swift; sourceTree = "<group>"; };
-		AA0000000000000000000011 /* CadenceMetronome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenceMetronome.swift; sourceTree = "<group>"; };
-		AA0000000000000000000012 /* CueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueService.swift; sourceTree = "<group>"; };
-		AA0000000000000000000013 /* DailyActivityProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyActivityProvider.swift; sourceTree = "<group>"; };
-		AA0000000000000000000014 /* DataExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExporter.swift; sourceTree = "<group>"; };
-		AA0000000000000000000015 /* DataIntegrity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataIntegrity.swift; sourceTree = "<group>"; };
-		AA0000000000000000000016 /* ExerciseLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseLibrary.swift; sourceTree = "<group>"; };
-		AA0000000000000000000017 /* FitnessTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessTest.swift; sourceTree = "<group>"; };
-		AA0000000000000000000018 /* FitnessTestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessTestEngine.swift; sourceTree = "<group>"; };
-		AA0000000000000000000019 /* Formatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatters.swift; sourceTree = "<group>"; };
-		AA000000000000000000001A /* GPSWorkoutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSWorkoutRecorder.swift; sourceTree = "<group>"; };
-		AA000000000000000000001B /* GeoMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoMath.swift; sourceTree = "<group>"; };
-		AA000000000000000000001C /* HealthBackgroundMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBackgroundMonitor.swift; sourceTree = "<group>"; };
-		AA000000000000000000001D /* HealthKitImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitImporter.swift; sourceTree = "<group>"; };
-		AA000000000000000000001E /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
-		AA000000000000000000001F /* HealthKitSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSync.swift; sourceTree = "<group>"; };
-		AA0000000000000000000020 /* HistoryInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryInsights.swift; sourceTree = "<group>"; };
-		AA0000000000000000000021 /* IntensityCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntensityCalculator.swift; sourceTree = "<group>"; };
-		AA0000000000000000000022 /* IntervalPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntervalPlan.swift; sourceTree = "<group>"; };
-		AA0000000000000000000023 /* IntervalTimerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntervalTimerEngine.swift; sourceTree = "<group>"; };
-		AA0000000000000000000024 /* LapWorkoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LapWorkoutEngine.swift; sourceTree = "<group>"; };
-		AA0000000000000000000025 /* LegalContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalContent.swift; sourceTree = "<group>"; };
-		AA0000000000000000000026 /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
-		AA0000000000000000000027 /* LocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManager.swift; sourceTree = "<group>"; };
-		AA0000000000000000000028 /* MapSnapshotter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapSnapshotter.swift; sourceTree = "<group>"; };
-		AA0000000000000000000029 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
-		AA000000000000000000002A /* PedometerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PedometerManager.swift; sourceTree = "<group>"; };
-		AA000000000000000000002B /* PlankEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlankEngine.swift; sourceTree = "<group>"; };
-		AA000000000000000000002C /* RepDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepDetector.swift; sourceTree = "<group>"; };
-		AA000000000000000000002D /* RouteFileExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileExporter.swift; sourceTree = "<group>"; };
-		AA000000000000000000002E /* StatsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsEngine.swift; sourceTree = "<group>"; };
-		AA000000000000000000002F /* StepWorkoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepWorkoutEngine.swift; sourceTree = "<group>"; };
-		AA0000000000000000000030 /* StrideAutoCalibrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrideAutoCalibrator.swift; sourceTree = "<group>"; };
-		AA0000000000000000000031 /* StrideCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrideCalibration.swift; sourceTree = "<group>"; };
-		AA0000000000000000000032 /* TrainingLoadEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingLoadEngine.swift; sourceTree = "<group>"; };
-		AA0000000000000000000033 /* WorkoutActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutActivityAttributes.swift; sourceTree = "<group>"; };
-		AA0000000000000000000034 /* WorkoutTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutTarget.swift; sourceTree = "<group>"; };
-		AA0000000000000000000036 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
-		AA0000000000000000000038 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		AA0000000000000000000039 /* GPSTracker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GPSTracker.entitlements; sourceTree = "<group>"; };
-		AA000000000000000000003A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		AA000000000000000000003D /* AchievementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementsView.swift; sourceTree = "<group>"; };
-		AA000000000000000000003F /* DailyActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyActivityView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000041 /* AnalyticsCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsCharts.swift; sourceTree = "<group>"; };
-		AA0000000000000000000042 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000043 /* BestEffortViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BestEffortViews.swift; sourceTree = "<group>"; };
-		AA0000000000000000000044 /* SplitCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitCharts.swift; sourceTree = "<group>"; };
-		AA0000000000000000000046 /* StrideCalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrideCalibrationView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000048 /* FitnessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessTestView.swift; sourceTree = "<group>"; };
-		AA000000000000000000004A /* GPSTrackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSTrackingView.swift; sourceTree = "<group>"; };
-		AA000000000000000000004B /* RoutePlaybackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePlaybackView.swift; sourceTree = "<group>"; };
-		AA000000000000000000004D /* GoalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalSettingsView.swift; sourceTree = "<group>"; };
-		AA000000000000000000004F /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000051 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000053 /* HealthImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000055 /* IndoorRepsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndoorRepsView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000056 /* PlankTimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlankTimerView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000058 /* HistoryInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryInsightsView.swift; sourceTree = "<group>"; };
-		AA000000000000000000005A /* IntervalTimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntervalTimerView.swift; sourceTree = "<group>"; };
-		AA000000000000000000005C /* LapCounterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LapCounterView.swift; sourceTree = "<group>"; };
-		AA000000000000000000005E /* LegalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalView.swift; sourceTree = "<group>"; };
-		AA000000000000000000005F /* UserGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserGuideView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000061 /* ManualEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEntryView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000063 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000065 /* PBDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PBDashboardView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000067 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		AA0000000000000000000069 /* StepWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepWorkoutView.swift; sourceTree = "<group>"; };
-		AA000000000000000000006B /* ShareCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCardView.swift; sourceTree = "<group>"; };
-		AA000000000000000000006C /* WorkoutSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSummaryView.swift; sourceTree = "<group>"; };
-		AA000000000000000000006E /* GPSTrackerWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GPSTrackerWidgets.entitlements; sourceTree = "<group>"; };
-		AA000000000000000000006F /* GPSTrackerWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSTrackerWidgetsBundle.swift; sourceTree = "<group>"; };
-		AA0000000000000000000070 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		AA0000000000000000000071 /* StepsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepsWidget.swift; sourceTree = "<group>"; };
-		AA0000000000000000000072 /* WeekStepsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekStepsWidget.swift; sourceTree = "<group>"; };
-		AA0000000000000000000073 /* WidgetSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSupport.swift; sourceTree = "<group>"; };
-		AA0000000000000000000074 /* WorkoutLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLiveActivity.swift; sourceTree = "<group>"; };
+		AA0000000000000000000010 /* BackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupManager.swift; sourceTree = "<group>"; };
+		AA0000000000000000000011 /* BestEfforts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BestEfforts.swift; sourceTree = "<group>"; };
+		AA0000000000000000000012 /* CadenceMetronome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenceMetronome.swift; sourceTree = "<group>"; };
+		AA0000000000000000000013 /* CueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueService.swift; sourceTree = "<group>"; };
+		AA0000000000000000000014 /* DailyActivityProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyActivityProvider.swift; sourceTree = "<group>"; };
+		AA0000000000000000000015 /* DataExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExporter.swift; sourceTree = "<group>"; };
+		AA0000000000000000000016 /* DataIntegrity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataIntegrity.swift; sourceTree = "<group>"; };
+		AA0000000000000000000017 /* DatabaseHealth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseHealth.swift; sourceTree = "<group>"; };
+		AA0000000000000000000018 /* ExerciseLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseLibrary.swift; sourceTree = "<group>"; };
+		AA0000000000000000000019 /* FitnessTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessTest.swift; sourceTree = "<group>"; };
+		AA000000000000000000001A /* FitnessTestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessTestEngine.swift; sourceTree = "<group>"; };
+		AA000000000000000000001B /* Formatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatters.swift; sourceTree = "<group>"; };
+		AA000000000000000000001C /* GPSWorkoutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSWorkoutRecorder.swift; sourceTree = "<group>"; };
+		AA000000000000000000001D /* GeoMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoMath.swift; sourceTree = "<group>"; };
+		AA000000000000000000001E /* HealthBackgroundMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBackgroundMonitor.swift; sourceTree = "<group>"; };
+		AA000000000000000000001F /* HealthKitImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitImporter.swift; sourceTree = "<group>"; };
+		AA0000000000000000000020 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
+		AA0000000000000000000021 /* HealthKitSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSync.swift; sourceTree = "<group>"; };
+		AA0000000000000000000022 /* HistoryInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryInsights.swift; sourceTree = "<group>"; };
+		AA0000000000000000000023 /* IntensityCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntensityCalculator.swift; sourceTree = "<group>"; };
+		AA0000000000000000000024 /* IntervalPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntervalPlan.swift; sourceTree = "<group>"; };
+		AA0000000000000000000025 /* IntervalTimerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntervalTimerEngine.swift; sourceTree = "<group>"; };
+		AA0000000000000000000026 /* LapWorkoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LapWorkoutEngine.swift; sourceTree = "<group>"; };
+		AA0000000000000000000027 /* LegalContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalContent.swift; sourceTree = "<group>"; };
+		AA0000000000000000000028 /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
+		AA0000000000000000000029 /* LocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManager.swift; sourceTree = "<group>"; };
+		AA000000000000000000002A /* MapSnapshotter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapSnapshotter.swift; sourceTree = "<group>"; };
+		AA000000000000000000002B /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		AA000000000000000000002C /* PedometerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PedometerManager.swift; sourceTree = "<group>"; };
+		AA000000000000000000002D /* PlankEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlankEngine.swift; sourceTree = "<group>"; };
+		AA000000000000000000002E /* RepDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepDetector.swift; sourceTree = "<group>"; };
+		AA000000000000000000002F /* RouteFileExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFileExporter.swift; sourceTree = "<group>"; };
+		AA0000000000000000000030 /* StatsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsEngine.swift; sourceTree = "<group>"; };
+		AA0000000000000000000031 /* StepWorkoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepWorkoutEngine.swift; sourceTree = "<group>"; };
+		AA0000000000000000000032 /* StrideAutoCalibrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrideAutoCalibrator.swift; sourceTree = "<group>"; };
+		AA0000000000000000000033 /* StrideCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrideCalibration.swift; sourceTree = "<group>"; };
+		AA0000000000000000000034 /* TrainingLoadEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingLoadEngine.swift; sourceTree = "<group>"; };
+		AA0000000000000000000035 /* WorkoutActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutActivityAttributes.swift; sourceTree = "<group>"; };
+		AA0000000000000000000036 /* WorkoutTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutTarget.swift; sourceTree = "<group>"; };
+		AA0000000000000000000038 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
+		AA000000000000000000003A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AA000000000000000000003B /* GPSTracker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GPSTracker.entitlements; sourceTree = "<group>"; };
+		AA000000000000000000003C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA000000000000000000003F /* AchievementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000041 /* DailyActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyActivityView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000043 /* AnalyticsCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsCharts.swift; sourceTree = "<group>"; };
+		AA0000000000000000000044 /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000045 /* BestEffortViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BestEffortViews.swift; sourceTree = "<group>"; };
+		AA0000000000000000000046 /* SplitCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitCharts.swift; sourceTree = "<group>"; };
+		AA0000000000000000000048 /* BackupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupView.swift; sourceTree = "<group>"; };
+		AA000000000000000000004A /* StrideCalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrideCalibrationView.swift; sourceTree = "<group>"; };
+		AA000000000000000000004C /* FitnessTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessTestView.swift; sourceTree = "<group>"; };
+		AA000000000000000000004E /* GPSTrackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSTrackingView.swift; sourceTree = "<group>"; };
+		AA000000000000000000004F /* RoutePlaybackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePlaybackView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000051 /* GoalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalSettingsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000053 /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000055 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000057 /* HealthImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000059 /* IndoorRepsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndoorRepsView.swift; sourceTree = "<group>"; };
+		AA000000000000000000005A /* PlankTimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlankTimerView.swift; sourceTree = "<group>"; };
+		AA000000000000000000005C /* HistoryInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryInsightsView.swift; sourceTree = "<group>"; };
+		AA000000000000000000005E /* IntervalTimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntervalTimerView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000060 /* LapCounterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LapCounterView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000062 /* LegalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000063 /* UserGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserGuideView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000065 /* ManualEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEntryView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000067 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000069 /* PBDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PBDashboardView.swift; sourceTree = "<group>"; };
+		AA000000000000000000006B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA000000000000000000006D /* StepWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepWorkoutView.swift; sourceTree = "<group>"; };
+		AA000000000000000000006F /* ShareCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCardView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000070 /* WorkoutSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSummaryView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000072 /* GPSTrackerWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GPSTrackerWidgets.entitlements; sourceTree = "<group>"; };
+		AA0000000000000000000073 /* GPSTrackerWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSTrackerWidgetsBundle.swift; sourceTree = "<group>"; };
+		AA0000000000000000000074 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0000000000000000000075 /* StepsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepsWidget.swift; sourceTree = "<group>"; };
+		AA0000000000000000000076 /* WeekStepsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekStepsWidget.swift; sourceTree = "<group>"; };
+		AA0000000000000000000077 /* WidgetSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSupport.swift; sourceTree = "<group>"; };
+		AA0000000000000000000078 /* WorkoutLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLiveActivity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		AA00000000000000000000D1 /* Frameworks */ = {
+		AA00000000000000000000D8 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AA00000000000000000000D5 /* Frameworks */ = {
+		AA00000000000000000000DC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -228,20 +234,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		AA00000000000000000000CC = {
+		AA00000000000000000000D3 = {
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000001 /* GPSTracker */,
-				AA000000000000000000006D /* GPSTrackerWidgets */,
-				AA00000000000000000000CB /* Products */,
+				AA0000000000000000000071 /* GPSTrackerWidgets */,
+				AA00000000000000000000D2 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		AA00000000000000000000CB /* Products */ = {
+		AA00000000000000000000D2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AA00000000000000000000C9 /* GPSTracker.app */,
-				AA00000000000000000000CA /* GPSTrackerWidgets.appex */,
+				AA00000000000000000000D0 /* GPSTracker.app */,
+				AA00000000000000000000D1 /* GPSTrackerWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -252,9 +258,9 @@
 				AA0000000000000000000002 /* App */,
 				AA0000000000000000000005 /* Components */,
 				AA000000000000000000000B /* Core */,
-				AA0000000000000000000035 /* Models */,
-				AA0000000000000000000037 /* Resources */,
-				AA000000000000000000003B /* Views */,
+				AA0000000000000000000037 /* Models */,
+				AA0000000000000000000039 /* Resources */,
+				AA000000000000000000003D /* Views */,
 			);
 			path = GPSTracker;
 			sourceTree = "<group>";
@@ -287,278 +293,289 @@
 				AA000000000000000000000D /* ActivityTypeDetector.swift */,
 				AA000000000000000000000E /* AltimeterManager.swift */,
 				AA000000000000000000000F /* AppSettings.swift */,
-				AA0000000000000000000010 /* BestEfforts.swift */,
-				AA0000000000000000000011 /* CadenceMetronome.swift */,
-				AA0000000000000000000012 /* CueService.swift */,
-				AA0000000000000000000013 /* DailyActivityProvider.swift */,
-				AA0000000000000000000014 /* DataExporter.swift */,
-				AA0000000000000000000015 /* DataIntegrity.swift */,
-				AA0000000000000000000016 /* ExerciseLibrary.swift */,
-				AA0000000000000000000017 /* FitnessTest.swift */,
-				AA0000000000000000000018 /* FitnessTestEngine.swift */,
-				AA0000000000000000000019 /* Formatters.swift */,
-				AA000000000000000000001A /* GPSWorkoutRecorder.swift */,
-				AA000000000000000000001B /* GeoMath.swift */,
-				AA000000000000000000001C /* HealthBackgroundMonitor.swift */,
-				AA000000000000000000001D /* HealthKitImporter.swift */,
-				AA000000000000000000001E /* HealthKitManager.swift */,
-				AA000000000000000000001F /* HealthKitSync.swift */,
-				AA0000000000000000000020 /* HistoryInsights.swift */,
-				AA0000000000000000000021 /* IntensityCalculator.swift */,
-				AA0000000000000000000022 /* IntervalPlan.swift */,
-				AA0000000000000000000023 /* IntervalTimerEngine.swift */,
-				AA0000000000000000000024 /* LapWorkoutEngine.swift */,
-				AA0000000000000000000025 /* LegalContent.swift */,
-				AA0000000000000000000026 /* LiveActivityController.swift */,
-				AA0000000000000000000027 /* LocationManager.swift */,
-				AA0000000000000000000028 /* MapSnapshotter.swift */,
-				AA0000000000000000000029 /* NotificationManager.swift */,
-				AA000000000000000000002A /* PedometerManager.swift */,
-				AA000000000000000000002B /* PlankEngine.swift */,
-				AA000000000000000000002C /* RepDetector.swift */,
-				AA000000000000000000002D /* RouteFileExporter.swift */,
-				AA000000000000000000002E /* StatsEngine.swift */,
-				AA000000000000000000002F /* StepWorkoutEngine.swift */,
-				AA0000000000000000000030 /* StrideAutoCalibrator.swift */,
-				AA0000000000000000000031 /* StrideCalibration.swift */,
-				AA0000000000000000000032 /* TrainingLoadEngine.swift */,
-				AA0000000000000000000033 /* WorkoutActivityAttributes.swift */,
-				AA0000000000000000000034 /* WorkoutTarget.swift */,
+				AA0000000000000000000010 /* BackupManager.swift */,
+				AA0000000000000000000011 /* BestEfforts.swift */,
+				AA0000000000000000000012 /* CadenceMetronome.swift */,
+				AA0000000000000000000013 /* CueService.swift */,
+				AA0000000000000000000014 /* DailyActivityProvider.swift */,
+				AA0000000000000000000015 /* DataExporter.swift */,
+				AA0000000000000000000016 /* DataIntegrity.swift */,
+				AA0000000000000000000017 /* DatabaseHealth.swift */,
+				AA0000000000000000000018 /* ExerciseLibrary.swift */,
+				AA0000000000000000000019 /* FitnessTest.swift */,
+				AA000000000000000000001A /* FitnessTestEngine.swift */,
+				AA000000000000000000001B /* Formatters.swift */,
+				AA000000000000000000001C /* GPSWorkoutRecorder.swift */,
+				AA000000000000000000001D /* GeoMath.swift */,
+				AA000000000000000000001E /* HealthBackgroundMonitor.swift */,
+				AA000000000000000000001F /* HealthKitImporter.swift */,
+				AA0000000000000000000020 /* HealthKitManager.swift */,
+				AA0000000000000000000021 /* HealthKitSync.swift */,
+				AA0000000000000000000022 /* HistoryInsights.swift */,
+				AA0000000000000000000023 /* IntensityCalculator.swift */,
+				AA0000000000000000000024 /* IntervalPlan.swift */,
+				AA0000000000000000000025 /* IntervalTimerEngine.swift */,
+				AA0000000000000000000026 /* LapWorkoutEngine.swift */,
+				AA0000000000000000000027 /* LegalContent.swift */,
+				AA0000000000000000000028 /* LiveActivityController.swift */,
+				AA0000000000000000000029 /* LocationManager.swift */,
+				AA000000000000000000002A /* MapSnapshotter.swift */,
+				AA000000000000000000002B /* NotificationManager.swift */,
+				AA000000000000000000002C /* PedometerManager.swift */,
+				AA000000000000000000002D /* PlankEngine.swift */,
+				AA000000000000000000002E /* RepDetector.swift */,
+				AA000000000000000000002F /* RouteFileExporter.swift */,
+				AA0000000000000000000030 /* StatsEngine.swift */,
+				AA0000000000000000000031 /* StepWorkoutEngine.swift */,
+				AA0000000000000000000032 /* StrideAutoCalibrator.swift */,
+				AA0000000000000000000033 /* StrideCalibration.swift */,
+				AA0000000000000000000034 /* TrainingLoadEngine.swift */,
+				AA0000000000000000000035 /* WorkoutActivityAttributes.swift */,
+				AA0000000000000000000036 /* WorkoutTarget.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000035 /* Models */ = {
+		AA0000000000000000000037 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000036 /* WorkoutModels.swift */,
+				AA0000000000000000000038 /* WorkoutModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000037 /* Resources */ = {
+		AA0000000000000000000039 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000038 /* Assets.xcassets */,
-				AA0000000000000000000039 /* GPSTracker.entitlements */,
-				AA000000000000000000003A /* Info.plist */,
+				AA000000000000000000003A /* Assets.xcassets */,
+				AA000000000000000000003B /* GPSTracker.entitlements */,
+				AA000000000000000000003C /* Info.plist */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000003B /* Views */ = {
+		AA000000000000000000003D /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000003C /* Achievements */,
-				AA000000000000000000003E /* Activity */,
-				AA0000000000000000000040 /* Analytics */,
-				AA0000000000000000000045 /* Calibration */,
-				AA0000000000000000000047 /* FitnessTest */,
-				AA0000000000000000000049 /* GPS */,
-				AA000000000000000000004C /* Goals */,
-				AA000000000000000000004E /* History */,
-				AA0000000000000000000050 /* Home */,
-				AA0000000000000000000052 /* Import */,
-				AA0000000000000000000054 /* Indoor */,
-				AA0000000000000000000057 /* Insights */,
-				AA0000000000000000000059 /* Interval */,
-				AA000000000000000000005B /* Lap */,
-				AA000000000000000000005D /* Legal */,
-				AA0000000000000000000060 /* Manual */,
-				AA0000000000000000000062 /* Onboarding */,
-				AA0000000000000000000064 /* Records */,
-				AA0000000000000000000066 /* Settings */,
-				AA0000000000000000000068 /* Step */,
-				AA000000000000000000006A /* Summary */,
+				AA000000000000000000003E /* Achievements */,
+				AA0000000000000000000040 /* Activity */,
+				AA0000000000000000000042 /* Analytics */,
+				AA0000000000000000000047 /* Backup */,
+				AA0000000000000000000049 /* Calibration */,
+				AA000000000000000000004B /* FitnessTest */,
+				AA000000000000000000004D /* GPS */,
+				AA0000000000000000000050 /* Goals */,
+				AA0000000000000000000052 /* History */,
+				AA0000000000000000000054 /* Home */,
+				AA0000000000000000000056 /* Import */,
+				AA0000000000000000000058 /* Indoor */,
+				AA000000000000000000005B /* Insights */,
+				AA000000000000000000005D /* Interval */,
+				AA000000000000000000005F /* Lap */,
+				AA0000000000000000000061 /* Legal */,
+				AA0000000000000000000064 /* Manual */,
+				AA0000000000000000000066 /* Onboarding */,
+				AA0000000000000000000068 /* Records */,
+				AA000000000000000000006A /* Settings */,
+				AA000000000000000000006C /* Step */,
+				AA000000000000000000006E /* Summary */,
 			);
 			path = Views;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000003C /* Achievements */ = {
+		AA000000000000000000003E /* Achievements */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000003D /* AchievementsView.swift */,
+				AA000000000000000000003F /* AchievementsView.swift */,
 			);
 			path = Achievements;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000003E /* Activity */ = {
+		AA0000000000000000000040 /* Activity */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000003F /* DailyActivityView.swift */,
+				AA0000000000000000000041 /* DailyActivityView.swift */,
 			);
 			path = Activity;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000040 /* Analytics */ = {
+		AA0000000000000000000042 /* Analytics */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000041 /* AnalyticsCharts.swift */,
-				AA0000000000000000000042 /* AnalyticsView.swift */,
-				AA0000000000000000000043 /* BestEffortViews.swift */,
-				AA0000000000000000000044 /* SplitCharts.swift */,
+				AA0000000000000000000043 /* AnalyticsCharts.swift */,
+				AA0000000000000000000044 /* AnalyticsView.swift */,
+				AA0000000000000000000045 /* BestEffortViews.swift */,
+				AA0000000000000000000046 /* SplitCharts.swift */,
 			);
 			path = Analytics;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000045 /* Calibration */ = {
+		AA0000000000000000000047 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000046 /* StrideCalibrationView.swift */,
+				AA0000000000000000000048 /* BackupView.swift */,
+			);
+			path = Backup;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000049 /* Calibration */ = {
+			isa = PBXGroup;
+			children = (
+				AA000000000000000000004A /* StrideCalibrationView.swift */,
 			);
 			path = Calibration;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000047 /* FitnessTest */ = {
+		AA000000000000000000004B /* FitnessTest */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000048 /* FitnessTestView.swift */,
+				AA000000000000000000004C /* FitnessTestView.swift */,
 			);
 			path = FitnessTest;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000049 /* GPS */ = {
+		AA000000000000000000004D /* GPS */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000004A /* GPSTrackingView.swift */,
-				AA000000000000000000004B /* RoutePlaybackView.swift */,
+				AA000000000000000000004E /* GPSTrackingView.swift */,
+				AA000000000000000000004F /* RoutePlaybackView.swift */,
 			);
 			path = GPS;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000004C /* Goals */ = {
+		AA0000000000000000000050 /* Goals */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000004D /* GoalSettingsView.swift */,
+				AA0000000000000000000051 /* GoalSettingsView.swift */,
 			);
 			path = Goals;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000004E /* History */ = {
+		AA0000000000000000000052 /* History */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000004F /* HistoryListView.swift */,
+				AA0000000000000000000053 /* HistoryListView.swift */,
 			);
 			path = History;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000050 /* Home */ = {
+		AA0000000000000000000054 /* Home */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000051 /* HomeView.swift */,
+				AA0000000000000000000055 /* HomeView.swift */,
 			);
 			path = Home;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000052 /* Import */ = {
+		AA0000000000000000000056 /* Import */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000053 /* HealthImportView.swift */,
+				AA0000000000000000000057 /* HealthImportView.swift */,
 			);
 			path = Import;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000054 /* Indoor */ = {
+		AA0000000000000000000058 /* Indoor */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000055 /* IndoorRepsView.swift */,
-				AA0000000000000000000056 /* PlankTimerView.swift */,
+				AA0000000000000000000059 /* IndoorRepsView.swift */,
+				AA000000000000000000005A /* PlankTimerView.swift */,
 			);
 			path = Indoor;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000057 /* Insights */ = {
+		AA000000000000000000005B /* Insights */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000058 /* HistoryInsightsView.swift */,
+				AA000000000000000000005C /* HistoryInsightsView.swift */,
 			);
 			path = Insights;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000059 /* Interval */ = {
+		AA000000000000000000005D /* Interval */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000005A /* IntervalTimerView.swift */,
+				AA000000000000000000005E /* IntervalTimerView.swift */,
 			);
 			path = Interval;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000005B /* Lap */ = {
+		AA000000000000000000005F /* Lap */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000005C /* LapCounterView.swift */,
+				AA0000000000000000000060 /* LapCounterView.swift */,
 			);
 			path = Lap;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000005D /* Legal */ = {
+		AA0000000000000000000061 /* Legal */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000005E /* LegalView.swift */,
-				AA000000000000000000005F /* UserGuideView.swift */,
+				AA0000000000000000000062 /* LegalView.swift */,
+				AA0000000000000000000063 /* UserGuideView.swift */,
 			);
 			path = Legal;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000060 /* Manual */ = {
+		AA0000000000000000000064 /* Manual */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000061 /* ManualEntryView.swift */,
+				AA0000000000000000000065 /* ManualEntryView.swift */,
 			);
 			path = Manual;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000062 /* Onboarding */ = {
+		AA0000000000000000000066 /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000063 /* OnboardingView.swift */,
+				AA0000000000000000000067 /* OnboardingView.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000064 /* Records */ = {
+		AA0000000000000000000068 /* Records */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000065 /* PBDashboardView.swift */,
+				AA0000000000000000000069 /* PBDashboardView.swift */,
 			);
 			path = Records;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000066 /* Settings */ = {
+		AA000000000000000000006A /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000067 /* SettingsView.swift */,
+				AA000000000000000000006B /* SettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000068 /* Step */ = {
+		AA000000000000000000006C /* Step */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000069 /* StepWorkoutView.swift */,
+				AA000000000000000000006D /* StepWorkoutView.swift */,
 			);
 			path = Step;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000006A /* Summary */ = {
+		AA000000000000000000006E /* Summary */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000006B /* ShareCardView.swift */,
-				AA000000000000000000006C /* WorkoutSummaryView.swift */,
+				AA000000000000000000006F /* ShareCardView.swift */,
+				AA0000000000000000000070 /* WorkoutSummaryView.swift */,
 			);
 			path = Summary;
 			sourceTree = "<group>";
 		};
-		AA000000000000000000006D /* GPSTrackerWidgets */ = {
+		AA0000000000000000000071 /* GPSTrackerWidgets */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000006E /* GPSTrackerWidgets.entitlements */,
-				AA000000000000000000006F /* GPSTrackerWidgetsBundle.swift */,
-				AA0000000000000000000070 /* Info.plist */,
-				AA0000000000000000000071 /* StepsWidget.swift */,
-				AA0000000000000000000072 /* WeekStepsWidget.swift */,
-				AA0000000000000000000073 /* WidgetSupport.swift */,
-				AA0000000000000000000074 /* WorkoutLiveActivity.swift */,
+				AA0000000000000000000072 /* GPSTrackerWidgets.entitlements */,
+				AA0000000000000000000073 /* GPSTrackerWidgetsBundle.swift */,
+				AA0000000000000000000074 /* Info.plist */,
+				AA0000000000000000000075 /* StepsWidget.swift */,
+				AA0000000000000000000076 /* WeekStepsWidget.swift */,
+				AA0000000000000000000077 /* WidgetSupport.swift */,
+				AA0000000000000000000078 /* WorkoutLiveActivity.swift */,
 			);
 			path = GPSTrackerWidgets;
 			sourceTree = "<group>";
@@ -566,32 +583,32 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AA00000000000000000000CD /* GPSTracker */ = {
+		AA00000000000000000000D4 /* GPSTracker */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA00000000000000000000DB /* Build configuration list for PBXNativeTarget "GPSTracker" */;
+			buildConfigurationList = AA00000000000000000000E2 /* Build configuration list for PBXNativeTarget "GPSTracker" */;
 			buildPhases = (
-				AA00000000000000000000D0 /* Sources */,
-				AA00000000000000000000D1 /* Frameworks */,
-				AA00000000000000000000D2 /* Resources */,
-				AA00000000000000000000D3 /* Embed Foundation Extensions */,
+				AA00000000000000000000D7 /* Sources */,
+				AA00000000000000000000D8 /* Frameworks */,
+				AA00000000000000000000D9 /* Resources */,
+				AA00000000000000000000DA /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				AA00000000000000000000D8 /* PBXTargetDependency */,
+				AA00000000000000000000DF /* PBXTargetDependency */,
 			);
 			name = GPSTracker;
 			productName = GPSTracker;
-			productReference = AA00000000000000000000C9 /* GPSTracker.app */;
+			productReference = AA00000000000000000000D0 /* GPSTracker.app */;
 			productType = "com.apple.product-type.application";
 		};
-		AA00000000000000000000CE /* GPSTrackerWidgets */ = {
+		AA00000000000000000000D5 /* GPSTrackerWidgets */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA00000000000000000000DC /* Build configuration list for PBXNativeTarget "GPSTrackerWidgets" */;
+			buildConfigurationList = AA00000000000000000000E3 /* Build configuration list for PBXNativeTarget "GPSTrackerWidgets" */;
 			buildPhases = (
-				AA00000000000000000000D4 /* Sources */,
-				AA00000000000000000000D5 /* Frameworks */,
-				AA00000000000000000000D6 /* Resources */,
+				AA00000000000000000000DB /* Sources */,
+				AA00000000000000000000DC /* Frameworks */,
+				AA00000000000000000000DD /* Resources */,
 			);
 			buildRules = (
 			);
@@ -599,28 +616,28 @@
 			);
 			name = GPSTrackerWidgets;
 			productName = GPSTrackerWidgets;
-			productReference = AA00000000000000000000CA /* GPSTrackerWidgets.appex */;
+			productReference = AA00000000000000000000D1 /* GPSTrackerWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		AA00000000000000000000CF /* Project object */ = {
+		AA00000000000000000000D6 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
-					AA00000000000000000000CD = {
+					AA00000000000000000000D4 = {
 						CreatedOnToolsVersion = 15.0;
 					};
-					AA00000000000000000000CE = {
+					AA00000000000000000000D5 = {
 						CreatedOnToolsVersion = 15.0;
 					};
 				};
 			};
-			buildConfigurationList = AA00000000000000000000DA /* Build configuration list for PBXProject "GPSTracker" */;
+			buildConfigurationList = AA00000000000000000000E1 /* Build configuration list for PBXProject "GPSTracker" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -628,27 +645,27 @@
 				en,
 				Base,
 			);
-			mainGroup = AA00000000000000000000CC;
-			productRefGroup = AA00000000000000000000CB /* Products */;
+			mainGroup = AA00000000000000000000D3;
+			productRefGroup = AA00000000000000000000D2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AA00000000000000000000CD /* GPSTracker */,
-				AA00000000000000000000CE /* GPSTrackerWidgets */,
+				AA00000000000000000000D4 /* GPSTracker */,
+				AA00000000000000000000D5 /* GPSTrackerWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		AA00000000000000000000D2 /* Resources */ = {
+		AA00000000000000000000D9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA00000000000000000000C2 /* Assets.xcassets in Resources */,
+				AA00000000000000000000C9 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AA00000000000000000000D6 /* Resources */ = {
+		AA00000000000000000000DD /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -658,115 +675,118 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		AA00000000000000000000D0 /* Sources */ = {
+		AA00000000000000000000D7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA0000000000000000000075 /* GPSTrackerApp.swift in Sources */,
-				AA0000000000000000000076 /* RootView.swift in Sources */,
-				AA0000000000000000000077 /* CelebrationOverlay.swift in Sources */,
-				AA0000000000000000000078 /* EmptyStateView.swift in Sources */,
-				AA0000000000000000000079 /* MetricViews.swift in Sources */,
-				AA000000000000000000007A /* RouteRendering.swift in Sources */,
-				AA000000000000000000007B /* Theme.swift in Sources */,
-				AA000000000000000000007C /* Achievements.swift in Sources */,
-				AA000000000000000000007D /* ActivityTypeDetector.swift in Sources */,
-				AA000000000000000000007E /* AltimeterManager.swift in Sources */,
-				AA000000000000000000007F /* AppSettings.swift in Sources */,
-				AA0000000000000000000080 /* BestEfforts.swift in Sources */,
-				AA0000000000000000000081 /* CadenceMetronome.swift in Sources */,
-				AA0000000000000000000082 /* CueService.swift in Sources */,
-				AA0000000000000000000083 /* DailyActivityProvider.swift in Sources */,
-				AA0000000000000000000084 /* DataExporter.swift in Sources */,
-				AA0000000000000000000085 /* DataIntegrity.swift in Sources */,
-				AA0000000000000000000086 /* ExerciseLibrary.swift in Sources */,
-				AA0000000000000000000087 /* FitnessTest.swift in Sources */,
-				AA0000000000000000000088 /* FitnessTestEngine.swift in Sources */,
-				AA0000000000000000000089 /* Formatters.swift in Sources */,
-				AA000000000000000000008A /* GPSWorkoutRecorder.swift in Sources */,
-				AA000000000000000000008B /* GeoMath.swift in Sources */,
-				AA000000000000000000008C /* HealthBackgroundMonitor.swift in Sources */,
-				AA000000000000000000008D /* HealthKitImporter.swift in Sources */,
-				AA000000000000000000008E /* HealthKitManager.swift in Sources */,
-				AA000000000000000000008F /* HealthKitSync.swift in Sources */,
-				AA0000000000000000000090 /* HistoryInsights.swift in Sources */,
-				AA0000000000000000000091 /* IntensityCalculator.swift in Sources */,
-				AA0000000000000000000092 /* IntervalPlan.swift in Sources */,
-				AA0000000000000000000093 /* IntervalTimerEngine.swift in Sources */,
-				AA0000000000000000000094 /* LapWorkoutEngine.swift in Sources */,
-				AA0000000000000000000095 /* LegalContent.swift in Sources */,
-				AA0000000000000000000096 /* LiveActivityController.swift in Sources */,
-				AA0000000000000000000097 /* LocationManager.swift in Sources */,
-				AA0000000000000000000098 /* MapSnapshotter.swift in Sources */,
-				AA0000000000000000000099 /* NotificationManager.swift in Sources */,
-				AA000000000000000000009A /* PedometerManager.swift in Sources */,
-				AA000000000000000000009B /* PlankEngine.swift in Sources */,
-				AA000000000000000000009C /* RepDetector.swift in Sources */,
-				AA000000000000000000009D /* RouteFileExporter.swift in Sources */,
-				AA000000000000000000009E /* StatsEngine.swift in Sources */,
-				AA000000000000000000009F /* StepWorkoutEngine.swift in Sources */,
-				AA00000000000000000000A0 /* StrideAutoCalibrator.swift in Sources */,
-				AA00000000000000000000A1 /* StrideCalibration.swift in Sources */,
-				AA00000000000000000000A2 /* TrainingLoadEngine.swift in Sources */,
-				AA00000000000000000000A3 /* WorkoutActivityAttributes.swift in Sources */,
-				AA00000000000000000000A4 /* WorkoutTarget.swift in Sources */,
-				AA00000000000000000000A5 /* WorkoutModels.swift in Sources */,
-				AA00000000000000000000A6 /* AchievementsView.swift in Sources */,
-				AA00000000000000000000A7 /* DailyActivityView.swift in Sources */,
-				AA00000000000000000000A8 /* AnalyticsCharts.swift in Sources */,
-				AA00000000000000000000A9 /* AnalyticsView.swift in Sources */,
-				AA00000000000000000000AA /* BestEffortViews.swift in Sources */,
-				AA00000000000000000000AB /* SplitCharts.swift in Sources */,
-				AA00000000000000000000AC /* StrideCalibrationView.swift in Sources */,
-				AA00000000000000000000AD /* FitnessTestView.swift in Sources */,
-				AA00000000000000000000AE /* GPSTrackingView.swift in Sources */,
-				AA00000000000000000000AF /* RoutePlaybackView.swift in Sources */,
-				AA00000000000000000000B0 /* GoalSettingsView.swift in Sources */,
-				AA00000000000000000000B1 /* HistoryListView.swift in Sources */,
-				AA00000000000000000000B2 /* HomeView.swift in Sources */,
-				AA00000000000000000000B3 /* HealthImportView.swift in Sources */,
-				AA00000000000000000000B4 /* IndoorRepsView.swift in Sources */,
-				AA00000000000000000000B5 /* PlankTimerView.swift in Sources */,
-				AA00000000000000000000B6 /* HistoryInsightsView.swift in Sources */,
-				AA00000000000000000000B7 /* IntervalTimerView.swift in Sources */,
-				AA00000000000000000000B8 /* LapCounterView.swift in Sources */,
-				AA00000000000000000000B9 /* LegalView.swift in Sources */,
-				AA00000000000000000000BA /* UserGuideView.swift in Sources */,
-				AA00000000000000000000BB /* ManualEntryView.swift in Sources */,
-				AA00000000000000000000BC /* OnboardingView.swift in Sources */,
-				AA00000000000000000000BD /* PBDashboardView.swift in Sources */,
-				AA00000000000000000000BE /* SettingsView.swift in Sources */,
-				AA00000000000000000000BF /* StepWorkoutView.swift in Sources */,
-				AA00000000000000000000C0 /* ShareCardView.swift in Sources */,
-				AA00000000000000000000C1 /* WorkoutSummaryView.swift in Sources */,
+				AA0000000000000000000079 /* GPSTrackerApp.swift in Sources */,
+				AA000000000000000000007A /* RootView.swift in Sources */,
+				AA000000000000000000007B /* CelebrationOverlay.swift in Sources */,
+				AA000000000000000000007C /* EmptyStateView.swift in Sources */,
+				AA000000000000000000007D /* MetricViews.swift in Sources */,
+				AA000000000000000000007E /* RouteRendering.swift in Sources */,
+				AA000000000000000000007F /* Theme.swift in Sources */,
+				AA0000000000000000000080 /* Achievements.swift in Sources */,
+				AA0000000000000000000081 /* ActivityTypeDetector.swift in Sources */,
+				AA0000000000000000000082 /* AltimeterManager.swift in Sources */,
+				AA0000000000000000000083 /* AppSettings.swift in Sources */,
+				AA0000000000000000000084 /* BackupManager.swift in Sources */,
+				AA0000000000000000000085 /* BestEfforts.swift in Sources */,
+				AA0000000000000000000086 /* CadenceMetronome.swift in Sources */,
+				AA0000000000000000000087 /* CueService.swift in Sources */,
+				AA0000000000000000000088 /* DailyActivityProvider.swift in Sources */,
+				AA0000000000000000000089 /* DataExporter.swift in Sources */,
+				AA000000000000000000008A /* DataIntegrity.swift in Sources */,
+				AA000000000000000000008B /* DatabaseHealth.swift in Sources */,
+				AA000000000000000000008C /* ExerciseLibrary.swift in Sources */,
+				AA000000000000000000008D /* FitnessTest.swift in Sources */,
+				AA000000000000000000008E /* FitnessTestEngine.swift in Sources */,
+				AA000000000000000000008F /* Formatters.swift in Sources */,
+				AA0000000000000000000090 /* GPSWorkoutRecorder.swift in Sources */,
+				AA0000000000000000000091 /* GeoMath.swift in Sources */,
+				AA0000000000000000000092 /* HealthBackgroundMonitor.swift in Sources */,
+				AA0000000000000000000093 /* HealthKitImporter.swift in Sources */,
+				AA0000000000000000000094 /* HealthKitManager.swift in Sources */,
+				AA0000000000000000000095 /* HealthKitSync.swift in Sources */,
+				AA0000000000000000000096 /* HistoryInsights.swift in Sources */,
+				AA0000000000000000000097 /* IntensityCalculator.swift in Sources */,
+				AA0000000000000000000098 /* IntervalPlan.swift in Sources */,
+				AA0000000000000000000099 /* IntervalTimerEngine.swift in Sources */,
+				AA000000000000000000009A /* LapWorkoutEngine.swift in Sources */,
+				AA000000000000000000009B /* LegalContent.swift in Sources */,
+				AA000000000000000000009C /* LiveActivityController.swift in Sources */,
+				AA000000000000000000009D /* LocationManager.swift in Sources */,
+				AA000000000000000000009E /* MapSnapshotter.swift in Sources */,
+				AA000000000000000000009F /* NotificationManager.swift in Sources */,
+				AA00000000000000000000A0 /* PedometerManager.swift in Sources */,
+				AA00000000000000000000A1 /* PlankEngine.swift in Sources */,
+				AA00000000000000000000A2 /* RepDetector.swift in Sources */,
+				AA00000000000000000000A3 /* RouteFileExporter.swift in Sources */,
+				AA00000000000000000000A4 /* StatsEngine.swift in Sources */,
+				AA00000000000000000000A5 /* StepWorkoutEngine.swift in Sources */,
+				AA00000000000000000000A6 /* StrideAutoCalibrator.swift in Sources */,
+				AA00000000000000000000A7 /* StrideCalibration.swift in Sources */,
+				AA00000000000000000000A8 /* TrainingLoadEngine.swift in Sources */,
+				AA00000000000000000000A9 /* WorkoutActivityAttributes.swift in Sources */,
+				AA00000000000000000000AA /* WorkoutTarget.swift in Sources */,
+				AA00000000000000000000AB /* WorkoutModels.swift in Sources */,
+				AA00000000000000000000AC /* AchievementsView.swift in Sources */,
+				AA00000000000000000000AD /* DailyActivityView.swift in Sources */,
+				AA00000000000000000000AE /* AnalyticsCharts.swift in Sources */,
+				AA00000000000000000000AF /* AnalyticsView.swift in Sources */,
+				AA00000000000000000000B0 /* BestEffortViews.swift in Sources */,
+				AA00000000000000000000B1 /* SplitCharts.swift in Sources */,
+				AA00000000000000000000B2 /* BackupView.swift in Sources */,
+				AA00000000000000000000B3 /* StrideCalibrationView.swift in Sources */,
+				AA00000000000000000000B4 /* FitnessTestView.swift in Sources */,
+				AA00000000000000000000B5 /* GPSTrackingView.swift in Sources */,
+				AA00000000000000000000B6 /* RoutePlaybackView.swift in Sources */,
+				AA00000000000000000000B7 /* GoalSettingsView.swift in Sources */,
+				AA00000000000000000000B8 /* HistoryListView.swift in Sources */,
+				AA00000000000000000000B9 /* HomeView.swift in Sources */,
+				AA00000000000000000000BA /* HealthImportView.swift in Sources */,
+				AA00000000000000000000BB /* IndoorRepsView.swift in Sources */,
+				AA00000000000000000000BC /* PlankTimerView.swift in Sources */,
+				AA00000000000000000000BD /* HistoryInsightsView.swift in Sources */,
+				AA00000000000000000000BE /* IntervalTimerView.swift in Sources */,
+				AA00000000000000000000BF /* LapCounterView.swift in Sources */,
+				AA00000000000000000000C0 /* LegalView.swift in Sources */,
+				AA00000000000000000000C1 /* UserGuideView.swift in Sources */,
+				AA00000000000000000000C2 /* ManualEntryView.swift in Sources */,
+				AA00000000000000000000C3 /* OnboardingView.swift in Sources */,
+				AA00000000000000000000C4 /* PBDashboardView.swift in Sources */,
+				AA00000000000000000000C5 /* SettingsView.swift in Sources */,
+				AA00000000000000000000C6 /* StepWorkoutView.swift in Sources */,
+				AA00000000000000000000C7 /* ShareCardView.swift in Sources */,
+				AA00000000000000000000C8 /* WorkoutSummaryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AA00000000000000000000D4 /* Sources */ = {
+		AA00000000000000000000DB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA00000000000000000000C3 /* GPSTrackerWidgetsBundle.swift in Sources */,
-				AA00000000000000000000C4 /* StepsWidget.swift in Sources */,
-				AA00000000000000000000C5 /* WeekStepsWidget.swift in Sources */,
-				AA00000000000000000000C6 /* WidgetSupport.swift in Sources */,
-				AA00000000000000000000C7 /* WorkoutLiveActivity.swift in Sources */,
-				AA00000000000000000000C8 /* WorkoutActivityAttributes.swift in Sources */,
+				AA00000000000000000000CA /* GPSTrackerWidgetsBundle.swift in Sources */,
+				AA00000000000000000000CB /* StepsWidget.swift in Sources */,
+				AA00000000000000000000CC /* WeekStepsWidget.swift in Sources */,
+				AA00000000000000000000CD /* WidgetSupport.swift in Sources */,
+				AA00000000000000000000CE /* WorkoutLiveActivity.swift in Sources */,
+				AA00000000000000000000CF /* WorkoutActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		AA00000000000000000000D8 /* PBXTargetDependency */ = {
+		AA00000000000000000000DF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = AA00000000000000000000CE /* GPSTrackerWidgets */;
-			targetProxy = AA00000000000000000000D9 /* PBXContainerItemProxy */;
+			target = AA00000000000000000000D5 /* GPSTrackerWidgets */;
+			targetProxy = AA00000000000000000000E0 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		AA00000000000000000000DD /* Debug */ = {
+		AA00000000000000000000E4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -790,7 +810,7 @@
 			};
 			name = Debug;
 		};
-		AA00000000000000000000DE /* Release */ = {
+		AA00000000000000000000E5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -813,7 +833,7 @@
 			};
 			name = Release;
 		};
-		AA00000000000000000000DF /* Debug */ = {
+		AA00000000000000000000E6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "";
@@ -833,7 +853,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gpstracker.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -841,7 +861,7 @@
 			};
 			name = Debug;
 		};
-		AA00000000000000000000E0 /* Release */ = {
+		AA00000000000000000000E7 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "";
@@ -861,7 +881,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gpstracker.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -869,7 +889,7 @@
 			};
 			name = Release;
 		};
-		AA00000000000000000000E1 /* Debug */ = {
+		AA00000000000000000000E8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "";
@@ -888,7 +908,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gpstracker.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -897,7 +917,7 @@
 			};
 			name = Debug;
 		};
-		AA00000000000000000000E2 /* Release */ = {
+		AA00000000000000000000E9 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "";
@@ -916,7 +936,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gpstracker.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -928,34 +948,34 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA00000000000000000000DA /* Build configuration list for PBXProject "GPSTracker" */ = {
+		AA00000000000000000000E1 /* Build configuration list for PBXProject "GPSTracker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA00000000000000000000DD /* Debug */,
-				AA00000000000000000000DE /* Release */,
+				AA00000000000000000000E4 /* Debug */,
+				AA00000000000000000000E5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA00000000000000000000DB /* Build configuration list for PBXNativeTarget "GPSTracker" */ = {
+		AA00000000000000000000E2 /* Build configuration list for PBXNativeTarget "GPSTracker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA00000000000000000000DF /* Debug */,
-				AA00000000000000000000E0 /* Release */,
+				AA00000000000000000000E6 /* Debug */,
+				AA00000000000000000000E7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA00000000000000000000DC /* Build configuration list for PBXNativeTarget "GPSTrackerWidgets" */ = {
+		AA00000000000000000000E3 /* Build configuration list for PBXNativeTarget "GPSTrackerWidgets" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA00000000000000000000E1 /* Debug */,
-				AA00000000000000000000E2 /* Release */,
+				AA00000000000000000000E8 /* Debug */,
+				AA00000000000000000000E9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = AA00000000000000000000CF /* Project object */;
+	rootObject = AA00000000000000000000D6 /* Project object */;
 }
