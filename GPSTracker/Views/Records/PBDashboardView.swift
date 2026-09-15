@@ -46,6 +46,8 @@ struct PBDashboardView: View {
                 } else {
                     totalsCard
                     streakCard
+                    BestEffortsCard(efforts: BestEffortEngine.evaluate(sessions: sessions),
+                                    unit: settings.unit)
                     recordCard(title: "最快平均配速",
                                value: Fmt.pace(records.fastestPace?.value, unit: settings.unit),
                                subtitle: records.fastestPace.map { Fmt.date($0.session.startDate) } ?? "--",

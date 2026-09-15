@@ -25,10 +25,27 @@ struct HomeView: View {
 
     private var hasImported: Bool { sessions.contains { $0.isImported } }
 
+    private var lastWeekSummary: (distance: Double, duration: TimeInterval, count: Int) {
+        let calendar = Calendar.current
+        guard let thisWeekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())),
+              let lastWeekStart = calendar.date(byAdding: .weekOfYear, value: -1, to: thisWeekStart) else {
+            return (0, 0, 0)
+        }
+        let items = sessions.filter { $0.startDate >= lastWeekStart && $0.startDate < thisWeekStart }
+        return (items.reduce(0) { $0 + ($1.totalDistance ?? 0) },
+                items.reduce(0) { $0 + $1.duration },
+                items.count)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 summaryHeader
+                if !sessions.isEmpty {
+                    WeeklyRecapCard(thisWeek: weekSummary,
+                                    lastWeek: lastWeekSummary,
+                                    unit: settings.unit)
+                }
                 if !hasImported { importPrompt }
                 locationBanner
 

@@ -30,6 +30,12 @@ struct WorkoutSummaryView: View {
     @StateObject private var health = HealthKitManager.shared
 
     private var splits: [SplitSegment] { StatsEngine.splits(for: session) }
+    private var paceZones: [PaceZoneSlice] {
+        PaceZoneEngine.distribution(points: points, averagePace: session.averagePace)
+    }
+    private var sessionEfforts: [BestEffort] {
+        session.hasRoute ? BestEffortEngine.evaluate(session: session) : []
+    }
     private var points: [RoutePoint] { session.sortedPoints }
     private var coordinates: [CLLocationCoordinate2D] {
         points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
@@ -49,6 +55,14 @@ struct WorkoutSummaryView: View {
                     }
                     if points.count > 3 {
                         GlassCard { ElevationChartView(points: points) }
+                    }
+                    if !paceZones.isEmpty {
+                        PaceZoneCard(slices: paceZones,
+                                     averagePace: session.averagePace,
+                                     unit: settings.unit)
+                    }
+                    if !sessionEfforts.isEmpty {
+                        BestEffortsCard(efforts: sessionEfforts, unit: settings.unit, showsDate: false)
                     }
                     if !session.laps.isEmpty { lapsCard }
                     rpeCard
