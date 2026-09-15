@@ -337,13 +337,15 @@ final class HealthKitManager: ObservableObject {
             case .walking, .hiking: profile = .walking
             default: continue
             }
-            let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?
+            var distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?
                 .sumQuantity()?.doubleValue(for: .meter())
-                ?? (await sumQuantity(HKQuantityType(.distanceWalkingRunning),
-                                      unit: .meter(),
-                                      from: workout.startDate,
-                                      to: workout.endDate) ?? 0)
-            guard distance > 300 else { continue }
+            if distance == nil {
+                distance = await sumQuantity(HKQuantityType(.distanceWalkingRunning),
+                                             unit: .meter(),
+                                             from: workout.startDate,
+                                             to: workout.endDate)
+            }
+            guard let distance, distance > 300 else { continue }
             guard let steps = await sumQuantity(HKQuantityType(.stepCount),
                                                 unit: .count(),
                                                 from: workout.startDate,
