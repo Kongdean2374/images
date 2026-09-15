@@ -98,16 +98,25 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
+          IPA_PATH: ${{ steps.package.outputs.ipa_path }}
+          RUN_NUMBER: ${{ github.run_number }}
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
         run: |
-          TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" "${{ steps.package.outputs.ipa_path }}" \
-            --target "${{ github.sha }}" \
-            --title "GPS 軌跡記錄器 未簽名 IPA (build ${{ github.run_number }})" \
-            --notes "未簽名 IPA，供側載自簽安裝使用。
-
-- Commit: \`${{ github.sha }}\`
-- 分支: \`${{ github.ref_name }}\`
-- 最低系統需求: iOS 17
-- 安裝方式: 用 Sideloadly / AltStore / TrollStore 等工具自簽安裝
-
-簽名憑證與 provisioning profile 皆未進入 CI 環境。"
+          TAG="build-$RUN_NUMBER"
+          NOTES="$RUNNER_TEMP/notes.md"
+          {
+            echo "未簽名 IPA，供側載自簽安裝使用。"
+            echo ""
+            echo "- Commit: $COMMIT_SHA"
+            echo "- 分支: $BRANCH_NAME"
+            echo "- 最低系統需求: iOS 17"
+            echo "- 安裝方式: 用 Sideloadly / AltStore / TrollStore 等工具自簽安裝"
+            echo ""
+            echo "簽名憑證與 provisioning profile 皆未進入 CI 環境。"
+          } > "$NOTES"
+          gh release create "$TAG" "$IPA_PATH" \
+            --target "$COMMIT_SHA" \
+            --title "GPS 軌跡記錄器 未簽名 IPA (build $RUN_NUMBER)" \
+            --notes-file "$NOTES"
+          gh release view "$TAG" --json url,assets
