@@ -43,6 +43,8 @@ enum Theme {
         case .lapCounter: return amber
         case .indoorInterval: return accentWarm
         case .indoorReps: return violet
+        case .plank: return Color(red: 0.42, green: 0.86, blue: 0.78)
+        case .stairs: return Color(red: 0.98, green: 0.52, blue: 0.62)
         case .fitnessTest: return Color(red: 0.95, green: 0.82, blue: 0.35)
         case .manualEntry: return Color.gray
         }

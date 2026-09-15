@@ -525,6 +525,8 @@ final class HealthKitManager: ObservableObject {
         case .lapCounter: return .running
         case .indoorInterval: return .highIntensityIntervalTraining
         case .indoorReps: return .functionalStrengthTraining
+        case .plank: return .coreTraining
+        case .stairs: return .stairClimbing
         case .fitnessTest: return .functionalStrengthTraining
         case .manualEntry: return .other
         }

@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "AA00000000000000000000BC"
+               BlueprintIdentifier = "AA00000000000000000000C7"
                BuildableName = "GPSTracker.app"
                BlueprintName = "GPSTracker"
                ReferencedContainer = "container:GPSTracker.xcodeproj">
@@ -28,7 +28,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "AA00000000000000000000BD"
+               BlueprintIdentifier = "AA00000000000000000000C8"
                BuildableName = "GPSTrackerWidgets.appex"
                BlueprintName = "GPSTrackerWidgets"
                ReferencedContainer = "container:GPSTracker.xcodeproj">
@@ -58,7 +58,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "AA00000000000000000000BC"
+            BlueprintIdentifier = "AA00000000000000000000C7"
             BuildableName = "GPSTracker.app"
             BlueprintName = "GPSTracker"
             ReferencedContainer = "container:GPSTracker.xcodeproj">
@@ -75,7 +75,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "AA00000000000000000000BC"
+            BlueprintIdentifier = "AA00000000000000000000C7"
             BuildableName = "GPSTracker.app"
             BlueprintName = "GPSTracker"
             ReferencedContainer = "container:GPSTracker.xcodeproj">

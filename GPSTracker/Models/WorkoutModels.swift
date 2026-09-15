@@ -12,6 +12,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
     case lapCounter
     case indoorInterval
     case indoorReps
+    case plank
+    case stairs
     case fitnessTest
     case manualEntry
 
@@ -27,6 +29,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return "營區計圈"
         case .indoorInterval: return "室內間歇"
         case .indoorReps: return "原地運動"
+        case .plank: return "棒式撐體"
+        case .stairs: return "爬樓梯"
         case .fitnessTest: return "體能測驗"
         case .manualEntry: return "手動輸入"
         }
@@ -42,6 +46,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return "計圈"
         case .indoorInterval: return "間歇"
         case .indoorReps: return "原地"
+        case .plank: return "棒式"
+        case .stairs: return "樓梯"
         case .fitnessTest: return "體測"
         case .manualEntry: return "手動"
         }
@@ -57,6 +63,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return "arrow.triangle.capsulepath"
         case .indoorInterval: return "timer"
         case .indoorReps: return "figure.jumprope"
+        case .plank: return "figure.core.training"
+        case .stairs: return "figure.stair.stepper"
         case .fitnessTest: return "medal.fill"
         case .manualEntry: return "square.and.pencil"
         }
@@ -69,7 +77,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
 
     /// 以計步器為主的無定位模式
     var isStepBased: Bool {
-        self == .walk || self == .run || self == .treadmill
+        self == .walk || self == .run || self == .treadmill || self == .stairs
     }
 
     /// 步幅校正時歸類為走路或跑步
@@ -91,6 +99,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return 8.3
         case .indoorInterval: return 8.0
         case .indoorReps: return 7.0
+        case .plank: return 4.0
+        case .stairs: return 8.8
         case .fitnessTest: return 8.5
         case .manualEntry: return 7.0
         }

@@ -6,12 +6,39 @@ struct PBDashboardView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
     @EnvironmentObject private var settings: AppSettings
     @State private var shine = false
+    @State private var showBadges = false
 
     private var records: PersonalRecords {
         StatsEngine.personalRecords(sessions: sessions)
     }
 
     var body: some View {
+        VStack(spacing: 12) {
+            Picker("檢視", selection: $showBadges) {
+                Text("個人紀錄").tag(false)
+                Text("徽章").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+
+            if showBadges {
+                AchievementsView()
+            } else {
+                recordsList
+            }
+        }
+        .screenBackground()
+        .navigationTitle("成就")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: false)) {
+                shine = true
+            }
+        }
+    }
+
+    private var recordsList: some View {
         ScrollView {
             VStack(spacing: 16) {
                 if sessions.isEmpty {
@@ -53,13 +80,6 @@ struct PBDashboardView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 26)
-        }
-        .screenBackground()
-        .navigationTitle("個人紀錄")
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: false)) {
-                shine = true
-            }
         }
     }
 

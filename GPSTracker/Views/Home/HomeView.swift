@@ -47,6 +47,8 @@ struct HomeView: View {
                         modeTile(.lapCounter, subtitle: "固定圈距計圈")
                         modeTile(.indoorInterval, subtitle: "衝刺／休息循環")
                         modeTile(.indoorReps, subtitle: "自動計次・循環組")
+                        modeTile(.plank, subtitle: "撐體計時・穩定度偵測")
+                        modeTile(.stairs, subtitle: "樓層與垂直爬升")
                         modeTile(.fitnessTest, subtitle: "三項體測評等")
                         modeTile(.manualEntry, subtitle: "事後補登")
                     }
@@ -85,6 +87,10 @@ struct HomeView: View {
                 IntervalTimerView()
             case .indoorReps:
                 IndoorRepsView()
+            case .plank:
+                PlankTimerView()
+            case .stairs:
+                StepWorkoutView(initialMode: .stairs)
             case .fitnessTest:
                 FitnessTestView()
             case .manualEntry:

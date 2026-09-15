@@ -9,13 +9,33 @@ struct IntervalConfig: Codable, Equatable {
     var totalSeconds: Int {
         prepareSeconds + rounds * (workSeconds + restSeconds)
     }
+
+    /// 轉成通用課表
+    var plan: IntervalPlan {
+        var segments: [IntervalSegment] = []
+        if prepareSeconds > 0 {
+            segments.append(IntervalSegment(kind: .prepare, seconds: prepareSeconds))
+        }
+        segments.append(IntervalSegment(kind: .work, seconds: workSeconds))
+        if restSeconds > 0 {
+            segments.append(IntervalSegment(kind: .rest, seconds: restSeconds))
+        }
+        // 預備段只做一次，所以拆成兩個課表結構時用 repeatCount 處理主體
+        if prepareSeconds > 0 {
+            let body = Array(segments.dropFirst())
+            var expanded: [IntervalSegment] = [segments[0]]
+            for _ in 0..<max(1, rounds) { expanded.append(contentsOf: body) }
+            return IntervalPlan(name: "快速設定", segments: expanded, repeatCount: 1)
+        }
+        return IntervalPlan(name: "快速設定", segments: segments, repeatCount: max(1, rounds))
+    }
 }
 
-/// 間歇訓練計時器：完全不需定位。
+/// 間歇計時器：支援快速設定與自訂多段課表。
 final class IntervalTimerEngine: ObservableObject {
 
     enum Phase: String {
-        case idle, prepare, work, rest, finished
+        case idle, prepare, work, rest, cooldown, finished
 
         var displayName: String {
             switch self {
@@ -23,31 +43,42 @@ final class IntervalTimerEngine: ObservableObject {
             case .prepare: return "預備"
             case .work: return "衝刺"
             case .rest: return "休息"
+            case .cooldown: return "緩和"
             case .finished: return "完成"
             }
         }
+    }
+
+    private struct Step {
+        let kind: IntervalSegmentKind
+        let name: String
+        let seconds: Int
+        let round: Int
     }
 
     @Published var config = IntervalConfig()
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var remaining: TimeInterval = 0
     @Published private(set) var currentRound = 0
+    @Published private(set) var totalRounds = 0
     @Published private(set) var totalElapsed: TimeInterval = 0
     @Published private(set) var isPaused = false
     @Published private(set) var completedWorkSeconds: TimeInterval = 0
+    @Published private(set) var currentSegmentName = ""
+    @Published private(set) var planName = ""
+    @Published private(set) var stepIndex = 0
+    @Published private(set) var stepCount = 0
 
+    private var steps: [Step] = []
     private var timer: Timer?
     private var phaseEnd: Date?
     private var pausedRemaining: TimeInterval = 0
+    private var lastCountdownSpoken = -1
     private(set) var startDate = Date()
 
     var phaseDuration: TimeInterval {
-        switch phase {
-        case .prepare: return TimeInterval(config.prepareSeconds)
-        case .work: return TimeInterval(config.workSeconds)
-        case .rest: return TimeInterval(config.restSeconds)
-        default: return 1
-        }
+        guard stepIndex < steps.count else { return 1 }
+        return TimeInterval(max(1, steps[stepIndex].seconds))
     }
 
     var phaseProgress: Double {
@@ -59,15 +90,61 @@ final class IntervalTimerEngine: ObservableObject {
         phase != .idle && phase != .finished && !isPaused
     }
 
+    /// 整體進度 0...1
+    var overallProgress: Double {
+        guard stepCount > 0 else { return 0 }
+        return min(1, (Double(stepIndex) + phaseProgress) / Double(stepCount))
+    }
+
+    var totalPlannedSeconds: Int {
+        steps.reduce(0) { $0 + $1.seconds }
+    }
+
     // MARK: 控制
 
     func start() {
+        start(plan: config.plan)
+    }
+
+    func start(plan: IntervalPlan) {
         reset()
+        planName = plan.name
+        steps = expand(plan)
+        stepCount = steps.count
+        totalRounds = max(1, steps.map { $0.round }.max() ?? 1)
+        guard !steps.isEmpty else { return }
         startDate = Date()
-        currentRound = 1
-        enter(config.prepareSeconds > 0 ? .prepare : .work)
+        stepIndex = 0
+        enterCurrentStep()
         startTimer()
         LiveActivityController.shared.start(mode: .indoorInterval, usesDistance: false)
+    }
+
+    private func expand(_ plan: IntervalPlan) -> [Step] {
+        var result: [Step] = []
+        let rounds = max(1, plan.repeatCount)
+        var roundNumber = 0
+        for round in 0..<rounds {
+            roundNumber = round + 1
+            for segment in plan.segments where segment.seconds > 0 {
+                result.append(Step(kind: segment.kind,
+                                   name: segment.name,
+                                   seconds: segment.seconds,
+                                   round: roundNumber))
+            }
+        }
+        // 快速設定會把每一輪展開在同一個 repeat 裡，改用衝刺段計算輪次
+        if rounds == 1 {
+            var workIndex = 0
+            result = result.map { step in
+                if step.kind == .work {
+                    workIndex += 1
+                    return Step(kind: step.kind, name: step.name, seconds: step.seconds, round: workIndex)
+                }
+                return Step(kind: step.kind, name: step.name, seconds: step.seconds, round: max(1, workIndex))
+            }
+        }
+        return result
     }
 
     func pause() {
@@ -86,7 +163,7 @@ final class IntervalTimerEngine: ObservableObject {
     }
 
     func skipPhase() {
-        guard phase == .work || phase == .rest || phase == .prepare else { return }
+        guard phase != .idle, phase != .finished else { return }
         advance()
     }
 
@@ -104,11 +181,20 @@ final class IntervalTimerEngine: ObservableObject {
         phase = .idle
         remaining = 0
         currentRound = 0
+        totalRounds = 0
         totalElapsed = 0
         completedWorkSeconds = 0
         isPaused = false
         phaseEnd = nil
+        steps = []
+        stepIndex = 0
+        stepCount = 0
+        currentSegmentName = ""
+        planName = ""
+        lastCountdownSpoken = -1
     }
+
+    // MARK: 內部
 
     private func startTimer() {
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -118,47 +204,52 @@ final class IntervalTimerEngine: ObservableObject {
         timer = t
     }
 
-    private func enter(_ next: Phase) {
-        phase = next
-        remaining = phaseDuration
+    private func enterCurrentStep() {
+        guard stepIndex < steps.count else {
+            finish()
+            return
+        }
+        let step = steps[stepIndex]
+        phase = phaseFor(step.kind)
+        currentRound = step.round
+        currentSegmentName = step.name
+        remaining = TimeInterval(step.seconds)
         phaseEnd = Date().addingTimeInterval(remaining)
-        switch next {
+        lastCountdownSpoken = -1
+
+        switch step.kind {
         case .prepare:
             CueService.shared.speak("預備")
         case .work:
-            CueService.shared.speak("第 \(currentRound) 組，開始")
+            CueService.shared.speak("\(step.name)，開始")
             CueService.shared.impact(.heavy)
         case .rest:
             CueService.shared.speak("休息")
             CueService.shared.impact(.medium)
-        default:
-            break
+        case .cooldown:
+            CueService.shared.speak("緩和")
+            CueService.shared.impact(.soft)
+        }
+    }
+
+    private func phaseFor(_ kind: IntervalSegmentKind) -> Phase {
+        switch kind {
+        case .prepare: return .prepare
+        case .work: return .work
+        case .rest: return .rest
+        case .cooldown: return .cooldown
         }
     }
 
     private func advance() {
-        switch phase {
-        case .prepare:
-            enter(.work)
-        case .work:
-            completedWorkSeconds += TimeInterval(config.workSeconds)
-            if currentRound >= config.rounds {
-                finish()
-            } else if config.restSeconds > 0 {
-                enter(.rest)
-            } else {
-                currentRound += 1
-                enter(.work)
-            }
-        case .rest:
-            currentRound += 1
-            if currentRound > config.rounds {
-                finish()
-            } else {
-                enter(.work)
-            }
-        default:
-            break
+        if stepIndex < steps.count, steps[stepIndex].kind == .work {
+            completedWorkSeconds += TimeInterval(steps[stepIndex].seconds)
+        }
+        stepIndex += 1
+        if stepIndex >= steps.count {
+            finish()
+        } else {
+            enterCurrentStep()
         }
     }
 
@@ -169,10 +260,8 @@ final class IntervalTimerEngine: ObservableObject {
         timer = nil
         LiveActivityController.shared.end()
         CueService.shared.notify(.success)
-        CueService.shared.speak("訓練完成，共 \(config.rounds) 組")
+        CueService.shared.speak("訓練完成")
     }
-
-    private var lastCountdownSpoken = -1
 
     private func tick() {
         guard let phaseEnd, !isPaused else { return }
@@ -184,11 +273,12 @@ final class IntervalTimerEngine: ObservableObject {
             lastCountdownSpoken = whole
             CueService.shared.impact(.rigid)
         }
+
         LiveActivityController.shared.update(elapsed: totalElapsed,
                                              distance: 0,
                                              steps: 0,
                                              pace: nil,
-                                             statusText: "\(phase.displayName) \(Int(ceil(remaining)))s・第 \(min(currentRound, config.rounds))/\(config.rounds) 組",
+                                             statusText: "\(phase.displayName) \(Int(ceil(remaining)))s・\(stepIndex + 1)/\(stepCount)",
                                              isPaused: isPaused)
         if remaining <= 0 {
             lastCountdownSpoken = -1
@@ -200,13 +290,15 @@ final class IntervalTimerEngine: ObservableObject {
 
     func buildSession() -> WorkoutSession {
         let duration = max(totalElapsed, 1)
+        let label = planName.isEmpty ? "間歇" : planName
         let session = WorkoutSession(type: .indoorInterval,
                                      startDate: startDate,
                                      endDate: Date(),
                                      duration: duration,
                                      totalDistance: nil,
                                      averagePace: nil,
-                                     routeKey: "間歇 \(config.workSeconds)/\(config.restSeconds)×\(config.rounds)")
+                                     routeKey: label,
+                                     title: label)
         session.calories = IntensityCalculator.calories(type: .indoorInterval,
                                                         duration: duration,
                                                         bodyWeight: AppSettings.shared.bodyWeight)
@@ -215,12 +307,14 @@ final class IntervalTimerEngine: ObservableObject {
                                                            distance: nil,
                                                            averagePace: nil,
                                                            elevationGain: nil)
-        session.notes = "完成 \(min(currentRound, config.rounds)) / \(config.rounds) 組"
-        session.laps = (1...max(1, min(currentRound, config.rounds))).map {
-            LapRecord(lapNumber: $0,
-                      lapDuration: TimeInterval(config.workSeconds),
+        let doneSteps = min(stepIndex, stepCount)
+        session.notes = "\(label)：完成 \(doneSteps) / \(stepCount) 段，衝刺累計 \(Fmt.duration(completedWorkSeconds))"
+        let workSteps = steps.enumerated().filter { $0.element.kind == .work && $0.offset < stepIndex }
+        session.laps = workSteps.enumerated().map { index, item in
+            LapRecord(lapNumber: index + 1,
+                      lapDuration: TimeInterval(item.element.seconds),
                       distanceOverride: nil,
-                      timestamp: startDate.addingTimeInterval(Double($0) * Double(config.workSeconds + config.restSeconds)))
+                      timestamp: startDate.addingTimeInterval(Double(index) * Double(item.element.seconds)))
         }
         return session
     }

@@ -18,7 +18,7 @@ struct StepWorkoutView: View {
     @State private var showTreadmillSheet = false
     @State private var actualDistanceText = ""
 
-    private var modes: [WorkoutType] { [.walk, .run, .treadmill] }
+    private var modes: [WorkoutType] { [.walk, .run, .treadmill, .stairs] }
 
     var body: some View {
         ZStack {
@@ -409,7 +409,22 @@ struct StepWorkoutView: View {
                 HStack {
                     StatPill(title: "步頻", value: Fmt.decimal(engine.cadence, digits: 0), tint: Theme.violet)
                     StatPill(title: "熱量", value: Fmt.decimal(engine.calories, digits: 0), tint: Theme.accentWarm)
-                    StatPill(title: "樓層", value: "\(engine.floorsAscended)", tint: Theme.amber)
+                    StatPill(title: engine.mode == .stairs ? "垂直爬升" : "樓層",
+                             value: engine.mode == .stairs
+                                ? String(format: "%.0f m", max(engine.elevationGain, Double(engine.floorsAscended) * 3))
+                                : "\(engine.floorsAscended)",
+                             tint: Theme.amber)
+                }
+                if engine.mode == .stairs {
+                    HStack {
+                        StatPill(title: "爬升層數", value: "\(engine.floorsAscended)", tint: Theme.color(for: .stairs))
+                        StatPill(title: "下降層數", value: "\(engine.floorsDescended)", tint: Theme.textSecondary)
+                        StatPill(title: "每分鐘層數",
+                                 value: engine.elapsed > 30
+                                    ? String(format: "%.1f", Double(engine.floorsAscended) / (engine.elapsed / 60))
+                                    : "--",
+                                 tint: Theme.mint)
+                    }
                 }
             }
         }
