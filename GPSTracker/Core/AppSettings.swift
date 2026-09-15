@@ -34,6 +34,10 @@ final class AppSettings: ObservableObject {
     @Published var announcePacerDelta: Bool { didSet { defaults.set(announcePacerDelta, forKey: Keys.announcePacerDelta) } }
     @Published var keepScreenAwake: Bool { didSet { defaults.set(keepScreenAwake, forKey: Keys.keepScreenAwake) } }
     @Published var batterySaver: Bool { didSet { defaults.set(batterySaver, forKey: Keys.batterySaver) } }
+    /// 被隱藏的模式（raw value 陣列）
+    @Published var hiddenModes: [String] { didSet { defaults.set(hiddenModes, forKey: Keys.hiddenModes) } }
+    /// 釘選在最上面的模式
+    @Published var pinnedModes: [String] { didSet { defaults.set(pinnedModes, forKey: Keys.pinnedModes) } }
     @Published var dailyDistanceGoal: Double { didSet { defaults.set(dailyDistanceGoal, forKey: Keys.dailyDistanceGoal) } }
     @Published var lastHealthImport: Double { didSet { defaults.set(lastHealthImport, forKey: Keys.lastHealthImport) } }
 
@@ -64,6 +68,8 @@ final class AppSettings: ObservableObject {
         static let announcePacerDelta = "announcePacerDelta"
         static let keepScreenAwake = "keepScreenAwake"
         static let batterySaver = "batterySaver"
+        static let hiddenModes = "hiddenModes"
+        static let pinnedModes = "pinnedModes"
         static let dailyDistanceGoal = "dailyDistanceGoal"
         static let lastHealthImport = "lastHealthImport"
     }
@@ -126,8 +132,36 @@ final class AppSettings: ObservableObject {
         announcePacerDelta = defaults.bool(forKey: Keys.announcePacerDelta)
         keepScreenAwake = defaults.bool(forKey: Keys.keepScreenAwake)
         batterySaver = defaults.bool(forKey: Keys.batterySaver)
+        hiddenModes = defaults.stringArray(forKey: Keys.hiddenModes) ?? []
+        pinnedModes = defaults.stringArray(forKey: Keys.pinnedModes) ?? []
         dailyDistanceGoal = defaults.double(forKey: Keys.dailyDistanceGoal)
         lastHealthImport = defaults.double(forKey: Keys.lastHealthImport)
+    }
+
+    func isHidden(_ type: WorkoutType) -> Bool {
+        hiddenModes.contains(type.rawValue)
+    }
+
+    func isPinned(_ type: WorkoutType) -> Bool {
+        pinnedModes.contains(type.rawValue)
+    }
+
+    func toggleHidden(_ type: WorkoutType) {
+        if let index = hiddenModes.firstIndex(of: type.rawValue) {
+            hiddenModes.remove(at: index)
+        } else {
+            hiddenModes.append(type.rawValue)
+            pinnedModes.removeAll { $0 == type.rawValue }
+        }
+    }
+
+    func togglePinned(_ type: WorkoutType) {
+        if let index = pinnedModes.firstIndex(of: type.rawValue) {
+            pinnedModes.remove(at: index)
+        } else {
+            pinnedModes.append(type.rawValue)
+            hiddenModes.removeAll { $0 == type.rawValue }
+        }
     }
 
     /// 播報間隔的顯示文字

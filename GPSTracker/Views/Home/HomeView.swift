@@ -11,6 +11,39 @@ struct HomeView: View {
 
     @State private var activeMode: WorkoutType?
     @State private var showImport = false
+    @StateObject private var intentRouter = PendingIntentRouter.shared
+
+    private let gpsModes: [WorkoutType] = [.gpsRun, .gpsHike]
+    private let noGPSModes: [WorkoutType] = [.walk, .run, .treadmill, .stairs, .ruck,
+                                             .lapCounter, .shuttleRun, .indoorInterval,
+                                             .indoorReps, .plank, .fitnessTest, .manualEntry]
+
+    private var pinned: [WorkoutType] {
+        (gpsModes + noGPSModes).filter { settings.isPinned($0) }
+    }
+
+    private func visible(_ modes: [WorkoutType]) -> [WorkoutType] {
+        modes.filter { !settings.isHidden($0) && !settings.isPinned($0) }
+    }
+
+    private func subtitle(for type: WorkoutType) -> String {
+        switch type {
+        case .gpsRun: return "即時軌跡・3D 鏡頭"
+        case .gpsHike: return "海拔與爬升"
+        case .walk: return "計步・步頻・樓層"
+        case .run: return "步幅換算距離"
+        case .treadmill: return "可用實際距離校正"
+        case .stairs: return "樓層與垂直爬升"
+        case .ruck: return "負重計入熱量估算"
+        case .lapCounter: return "固定圈距計圈"
+        case .shuttleRun: return "碰線計趟・短距衝刺"
+        case .indoorInterval: return "自訂課表・語音提示"
+        case .indoorReps: return "自動計次・循環組"
+        case .plank: return "撐體計時・穩定度偵測"
+        case .fitnessTest: return "四項測驗自動評等"
+        case .manualEntry: return "事後補登"
+        }
+    }
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -49,27 +82,33 @@ struct HomeView: View {
                 if !hasImported { importPrompt }
                 locationBanner
 
-                section("需要定位", subtitle: "戶外路跑與健行") {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        modeTile(.gpsRun, subtitle: "即時軌跡・3D 鏡頭")
-                        modeTile(.gpsHike, subtitle: "海拔與爬升")
+                if !pinned.isEmpty {
+                    section("釘選", subtitle: "長按任一模式可釘選或隱藏") {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(pinned, id: \.self) { mode in
+                                modeTile(mode, subtitle: subtitle(for: mode))
+                            }
+                        }
                     }
                 }
 
-                section("無定位模式", subtitle: "營區、室內、地下室都能用") {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        modeTile(.walk, subtitle: "計步・步頻・樓層")
-                        modeTile(.run, subtitle: "步幅換算距離")
-                        modeTile(.treadmill, subtitle: "可用實際距離校正")
-                        modeTile(.lapCounter, subtitle: "固定圈距計圈")
-                        modeTile(.shuttleRun, subtitle: "碰線計趟・短距衝刺")
-                        modeTile(.ruck, subtitle: "負重計入熱量估算")
-                        modeTile(.indoorInterval, subtitle: "衝刺／休息循環")
-                        modeTile(.indoorReps, subtitle: "自動計次・循環組")
-                        modeTile(.plank, subtitle: "撐體計時・穩定度偵測")
-                        modeTile(.stairs, subtitle: "樓層與垂直爬升")
-                        modeTile(.fitnessTest, subtitle: "三項體測評等")
-                        modeTile(.manualEntry, subtitle: "事後補登")
+                if !visible(gpsModes).isEmpty {
+                    section("需要定位", subtitle: "戶外路跑與健行") {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(visible(gpsModes), id: \.self) { mode in
+                                modeTile(mode, subtitle: subtitle(for: mode))
+                            }
+                        }
+                    }
+                }
+
+                if !visible(noGPSModes).isEmpty {
+                    section("無定位模式", subtitle: "營區、室內、地下室都能用") {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(visible(noGPSModes), id: \.self) { mode in
+                                modeTile(mode, subtitle: subtitle(for: mode))
+                            }
+                        }
                     }
                 }
 
@@ -82,6 +121,11 @@ struct HomeView: View {
         .task {
             await dailyActivity.load(dayCount: 7)
             health.refreshAvailability()
+        }
+        .onChange(of: intentRouter.requestedMode) { _, newValue in
+            guard let newValue else { return }
+            activeMode = newValue
+            intentRouter.requestedMode = nil
         }
         .navigationTitle("開始運動")
         .navigationBarTitleDisplayMode(.inline)
@@ -291,11 +335,28 @@ struct HomeView: View {
                     .fill(Theme.card)
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Theme.cardStroke, lineWidth: 1)
+                            .stroke(settings.isPinned(type) ? Theme.accent.opacity(0.5) : Theme.cardStroke,
+                                    lineWidth: 1)
                     )
             )
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(type.displayName)，\(subtitle)")
+        .accessibilityHint("點兩下開始，長按可釘選或隱藏")
+        .contextMenu {
+            Button {
+                settings.togglePinned(type)
+            } label: {
+                Label(settings.isPinned(type) ? "取消釘選" : "釘選到最上面",
+                      systemImage: settings.isPinned(type) ? "pin.slash" : "pin")
+            }
+            Button(role: .destructive) {
+                settings.toggleHidden(type)
+            } label: {
+                Label("從首頁隱藏", systemImage: "eye.slash")
+            }
+        }
     }
 
     @ViewBuilder

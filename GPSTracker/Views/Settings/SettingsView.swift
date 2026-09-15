@@ -30,6 +30,7 @@ struct SettingsView: View {
                     notificationCard
                 }
                 group("運動偏好") {
+                    homeLayoutCard
                     unitCard
                     bodyCard
                     announcementCard
@@ -403,6 +404,69 @@ struct SettingsView: View {
                                       set: { settings.lapDistance = $0 }),
                        in: 50...2000, step: 50)
                     .tint(Theme.accent)
+            }
+        }
+    }
+
+    private var homeLayoutCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("首頁模式", systemImage: "square.grid.2x2")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("在首頁長按任一模式即可釘選到最上面，或從首頁隱藏。")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+
+                if !settings.pinnedModes.isEmpty {
+                    Text("已釘選")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    modeChips(settings.pinnedModes, tint: Theme.accent) { type in
+                        settings.togglePinned(type)
+                    }
+                }
+
+                if !settings.hiddenModes.isEmpty {
+                    Text("已隱藏（點一下可恢復）")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    modeChips(settings.hiddenModes, tint: Theme.amber) { type in
+                        settings.toggleHidden(type)
+                    }
+                }
+
+                if settings.pinnedModes.isEmpty && settings.hiddenModes.isEmpty {
+                    Text("目前顯示全部模式。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+
+    private func modeChips(_ raws: [String], tint: Color, action: @escaping (WorkoutType) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(raws, id: \.self) { raw in
+                    if let type = WorkoutType(rawValue: raw) {
+                        Button {
+                            action(type)
+                            CueService.shared.impact(.soft)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: type.systemImage)
+                                Text(type.shortName)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(tint.opacity(0.22)))
+                            .foregroundStyle(tint)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }

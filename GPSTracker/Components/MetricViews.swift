@@ -37,6 +37,9 @@ struct MetricTile: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(unit == nil ? value : "\(value) \(unit ?? "")")
     }
 }
 
@@ -62,6 +65,9 @@ struct StatPill: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.06))
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
     }
 }
 
@@ -94,6 +100,7 @@ struct CircleControlButton: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title ?? systemImage)
     }
 }
 
@@ -137,6 +144,7 @@ struct SecondaryButtonStyle: ButtonStyle {
 /// 環形進度
 struct RingProgress: View {
     var progress: Double
+    var accessibilityTitle: String? = nil
     var lineWidth: CGFloat = 14
     var gradient: AngularGradient = AngularGradient(colors: [Theme.accent, Theme.mint, Theme.accent],
                                                     center: .center)
@@ -151,5 +159,8 @@ struct RingProgress: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.8), value: progress)
         }
+        .accessibilityElement()
+        .accessibilityLabel(accessibilityTitle ?? "進度")
+        .accessibilityValue(String(format: "%.0f%%", min(1, max(0, progress)) * 100))
     }
 }
