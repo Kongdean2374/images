@@ -214,7 +214,7 @@ struct AnalyticsView: View {
                             .foregroundStyle(Theme.mint)
                             .symbolSize(20)
                         }
-                        RuleMark(y: .value("建議", 175))
+                        RuleMark(y: .value("建議步頻", 175.0))
                             .foregroundStyle(Theme.amber.opacity(0.7))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     }
