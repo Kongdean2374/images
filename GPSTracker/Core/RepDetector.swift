@@ -2,7 +2,6 @@ import Foundation
 import CoreMotion
 
 /// 原地運動（開合跳、波比跳）次數偵測：加速度計 + 陀螺儀峰值偵測。
-@MainActor
 final class RepDetector: ObservableObject {
     @Published private(set) var repCount = 0
     @Published private(set) var magnitude: Double = 0
@@ -31,7 +30,7 @@ final class RepDetector: ObservableObject {
                 let accMag = sqrt(a.x * a.x + a.y * a.y + a.z * a.z)
                 let rotMag = sqrt(r.x * r.x + r.y * r.y + r.z * r.z) * 0.08
                 let value = accMag + rotMag
-                Task { @MainActor in self?.evaluate(value) }
+                DispatchQueue.main.async { self?.evaluate(value) }
             }
         } else if motion.isAccelerometerAvailable {
             motion.accelerometerUpdateInterval = 1.0 / 50.0
@@ -39,7 +38,7 @@ final class RepDetector: ObservableObject {
                 guard let data else { return }
                 let a = data.acceleration
                 let mag = abs(sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 1.0)
-                Task { @MainActor in self?.evaluate(mag) }
+                DispatchQueue.main.async { self?.evaluate(mag) }
             }
         }
     }

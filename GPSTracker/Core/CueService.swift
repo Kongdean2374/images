@@ -3,7 +3,6 @@ import AVFoundation
 import UIKit
 
 /// 語音與震動提示（間歇訓練、每公里播報）。
-@MainActor
 final class CueService {
     static let shared = CueService()
 

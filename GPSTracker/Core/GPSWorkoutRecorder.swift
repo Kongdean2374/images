@@ -19,7 +19,6 @@ struct TrackSample: Identifiable, Hashable {
 }
 
 /// GPS 追蹤錄製器：距離、配速、海拔、即時軌跡。
-@MainActor
 final class GPSWorkoutRecorder: ObservableObject {
 
     enum RecordingState: String {
@@ -134,7 +133,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     private func startTimer() {
         timer?.invalidate()
         let t = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+            DispatchQueue.main.async { self?.tick() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

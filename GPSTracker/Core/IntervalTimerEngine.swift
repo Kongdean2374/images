@@ -12,7 +12,6 @@ struct IntervalConfig: Codable, Equatable {
 }
 
 /// 間歇訓練計時器：完全不需定位。
-@MainActor
 final class IntervalTimerEngine: ObservableObject {
 
     enum Phase: String {
@@ -111,7 +110,7 @@ final class IntervalTimerEngine: ObservableObject {
 
     private func startTimer() {
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+            DispatchQueue.main.async { self?.tick() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

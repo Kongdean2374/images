@@ -2,7 +2,6 @@ import Foundation
 import CoreMotion
 
 /// Core Motion 計步（不需要定位權限，營區、室內皆可用）。
-@MainActor
 final class PedometerManager: ObservableObject {
     @Published private(set) var steps: Int = 0
     @Published private(set) var cadence: Double = 0        // 步/分鐘
@@ -27,7 +26,7 @@ final class PedometerManager: ObservableObject {
             let steps = data.numberOfSteps.intValue
             let cadence = (data.currentCadence?.doubleValue ?? 0) * 60
             let distance = data.distance?.doubleValue
-            Task { @MainActor in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 self.steps = steps
                 self.cadence = cadence

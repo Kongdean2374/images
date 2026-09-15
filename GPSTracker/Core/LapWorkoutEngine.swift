@@ -13,7 +13,6 @@ struct LapDraft: Identifiable, Hashable {
 }
 
 /// 營區計圈：完全不需定位，純計時 + 計數。
-@MainActor
 final class LapWorkoutEngine: ObservableObject {
 
     enum State: String { case idle, running, paused, finished }
@@ -125,7 +124,7 @@ final class LapWorkoutEngine: ObservableObject {
 
     private func startTimer() {
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+            DispatchQueue.main.async { self?.tick() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

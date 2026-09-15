@@ -3,7 +3,6 @@ import CoreLocation
 import Combine
 
 /// 定位權限與座標來源。定位被拒不會影響模組 B 的任何功能。
-@MainActor
 final class LocationManager: NSObject, ObservableObject {
     static let shared = LocationManager()
 
@@ -71,9 +70,9 @@ final class LocationManager: NSObject, ObservableObject {
 }
 
 extension LocationManager: CLLocationManagerDelegate {
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         let received = locations
-        Task { @MainActor in
+        DispatchQueue.main.async {
             for location in received {
                 guard location.horizontalAccuracy > 0 else { continue }
                 self.latestLocation = location
@@ -83,14 +82,14 @@ extension LocationManager: CLLocationManagerDelegate {
         }
     }
 
-    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
-        Task { @MainActor in
+        DispatchQueue.main.async {
             self.authorizationStatus = status
         }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // 定位失敗不中斷 App，其他模組照常運作。
     }
 }
