@@ -37,6 +37,9 @@ enum Theme {
         switch type {
         case .gpsRun: return accent
         case .gpsHike: return mint
+        case .walk: return Color(red: 0.36, green: 0.78, blue: 0.98)
+        case .run: return accent
+        case .treadmill: return Color(red: 0.98, green: 0.6, blue: 0.35)
         case .lapCounter: return amber
         case .indoorInterval: return accentWarm
         case .indoorReps: return violet

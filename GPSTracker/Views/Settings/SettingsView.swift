@@ -10,6 +10,10 @@ struct SettingsView: View {
     @StateObject private var location = LocationManager.shared
 
     @State private var showDeleteAll = false
+    @StateObject private var health = HealthKitManager.shared
+    @State private var healthMessage: String?
+    @State private var isSyncingAll = false
+    @State private var notificationsAuthorized = false
     @State private var exportURL: URL?
     @State private var showExport = false
     @State private var weightText = ""
@@ -18,6 +22,9 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 16) {
                 unitCard
+                healthCard
+                notificationCard
+                strideCard
                 bodyCard
                 cueCard
                 mapCard
@@ -30,7 +37,13 @@ struct SettingsView: View {
         }
         .screenBackground()
         .navigationTitle("設定")
-        .onAppear { weightText = String(format: "%.0f", settings.bodyWeight) }
+        .onAppear {
+            weightText = String(format: "%.0f", settings.bodyWeight)
+            health.refreshAvailability()
+        }
+        .task {
+            notificationsAuthorized = await NotificationManager.authorizationStatus() == .authorized
+        }
         .alert("刪除所有資料？", isPresented: $showDeleteAll) {
             Button("取消", role: .cancel) {}
             Button("全部刪除", role: .destructive) { deleteAll() }
@@ -50,6 +63,240 @@ struct SettingsView: View {
                 }
                 .padding()
                 .presentationDetents([.height(200)])
+            }
+        }
+    }
+
+
+    // MARK: 健康 App
+
+    private var healthCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("健康 App", systemImage: "heart.fill")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(health.availability.displayName)
+                        .font(.caption)
+                        .foregroundStyle(health.isReady ? Theme.mint : Theme.amber)
+                }
+
+                Toggle("運動結束自動寫入健康 App", isOn: Binding(
+                    get: { settings.healthKitEnabled },
+                    set: { newValue in
+                        settings.healthKitEnabled = newValue
+                        if newValue {
+                            Task {
+                                let ok = await health.requestAuthorization()
+                                if !ok {
+                                    await MainActor.run {
+                                        settings.healthKitEnabled = false
+                                        healthMessage = health.availability == .notEntitled
+                                            ? "此安裝版本沒有健康權限。免費 Apple ID 自簽無法啟用 HealthKit，可改用 GPX／TCX 匯出。"
+                                            : "尚未取得健康 App 權限。"
+                                    }
+                                }
+                            }
+                        }
+                    }))
+                .tint(Theme.accent)
+                .foregroundStyle(Theme.textPrimary)
+
+                Toggle("讀取已有的心率資料（選配）", isOn: Binding(
+                    get: { settings.readHeartRate },
+                    set: { settings.readHeartRate = $0 }))
+                .tint(Theme.accent)
+                .foregroundStyle(Theme.textPrimary)
+                .disabled(!health.isReady)
+
+                Text("只寫入體能訓練、距離、熱量與 GPS 路線，不寫入步數（避免與 iPhone 自動計步重複累加）。心率僅被動讀取其他來源已存在的資料，不連接任何裝置。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+
+                if let healthMessage {
+                    Text(healthMessage)
+                        .font(.caption)
+                        .foregroundStyle(Theme.amber)
+                }
+
+                Button {
+                    Task { await syncAll() }
+                } label: {
+                    if isSyncingAll {
+                        ProgressView()
+                    } else {
+                        Label("補傳未同步的紀錄", systemImage: "arrow.up.heart")
+                    }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(!health.isReady || isSyncingAll)
+
+                Button {
+                    Task {
+                        if let mass = await health.latestBodyMass() {
+                            await MainActor.run {
+                                settings.bodyWeight = mass
+                                weightText = String(format: "%.0f", mass)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("從健康 App 讀取體重", systemImage: "scalemass")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(!health.isReady)
+            }
+        }
+    }
+
+    @MainActor
+    private func syncAll() async {
+        isSyncingAll = true
+        defer { isSyncingAll = false }
+        let count = await HealthKitSync.syncPending(sessions)
+        try? context.save()
+        healthMessage = count > 0 ? "已補傳 \(count) 筆紀錄" : "沒有需要補傳的紀錄"
+    }
+
+    // MARK: 通知
+
+    private var notificationCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("提醒", systemImage: "bell.badge")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(notificationsAuthorized ? "已允許" : "未允許")
+                        .font(.caption)
+                        .foregroundStyle(notificationsAuthorized ? Theme.mint : Theme.amber)
+                }
+
+                Toggle("每日步數提醒", isOn: Binding(
+                    get: { settings.stepReminderEnabled },
+                    set: { newValue in
+                        settings.stepReminderEnabled = newValue
+                        Task { await applyNotificationSettings(request: newValue) }
+                    }))
+                .tint(Theme.accent)
+
+                if settings.stepReminderEnabled {
+                    HStack {
+                        Text("提醒時間")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Picker("", selection: Binding(get: { settings.stepReminderHour },
+                                                      set: { settings.stepReminderHour = $0 })) {
+                            ForEach(6...23, id: \.self) { Text("\($0):00").tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Theme.accent)
+                    }
+                }
+
+                Toggle("連續天數即將中斷提醒", isOn: Binding(
+                    get: { settings.streakReminderEnabled },
+                    set: { newValue in
+                        settings.streakReminderEnabled = newValue
+                        Task { await applyNotificationSettings(request: newValue) }
+                    }))
+                .tint(Theme.accent)
+
+                HStack {
+                    Text("久坐提醒")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Picker("", selection: Binding(get: { settings.sedentaryReminderHours },
+                                                  set: { newValue in
+                                                      settings.sedentaryReminderHours = newValue
+                                                      Task { await applyNotificationSettings(request: newValue > 0) }
+                                                  })) {
+                        Text("關閉").tag(0)
+                        Text("每 1 小時").tag(1)
+                        Text("每 2 小時").tag(2)
+                        Text("每 3 小時").tag(3)
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Theme.accent)
+                }
+
+                Text("全部由裝置本機排程，不需要網路或伺服器。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .foregroundStyle(Theme.textPrimary)
+        }
+    }
+
+    @MainActor
+    private func applyNotificationSettings(request: Bool) async {
+        if request {
+            let granted = await NotificationManager.requestAuthorization()
+            notificationsAuthorized = granted
+            if !granted { return }
+        }
+        if settings.stepReminderEnabled {
+            NotificationManager.scheduleDailyStepReminder(hour: settings.stepReminderHour,
+                                                          goal: settings.dailyStepGoal)
+        } else {
+            NotificationManager.cancel(NotificationManager.Identifier.dailySteps)
+        }
+        if settings.streakReminderEnabled {
+            let records = StatsEngine.personalRecords(sessions: sessions)
+            NotificationManager.scheduleStreakReminder(streak: max(1, records.currentStreak))
+        } else {
+            NotificationManager.cancel(NotificationManager.Identifier.streak)
+        }
+        NotificationManager.scheduleSedentaryReminder(intervalHours: settings.sedentaryReminderHours)
+    }
+
+    // MARK: 步幅
+
+    private var strideCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("個人步幅校正", systemImage: "ruler")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("每次 GPS 運動結束會用「實際距離 ÷ 步數」更新你的步幅，沒有訊號時就用它換算距離。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+
+                strideRow(.walking, title: "走路步幅")
+                strideRow(.running, title: "跑步步幅")
+
+                Button {
+                    StrideCalibration.reset(.walking)
+                    StrideCalibration.reset(.running)
+                    CueService.shared.impact(.rigid)
+                } label: {
+                    Label("重設步幅校正", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+        }
+    }
+
+    private func strideRow(_ profile: StrideProfile, title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(String(format: "%.2f 公尺/步", StrideCalibration.stride(profile)))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Theme.textPrimary)
+                Text(StrideCalibration.isCalibrated(profile)
+                     ? "已校正 \(StrideCalibration.sampleCount(profile)) 次"
+                     : "尚未校正（使用平均值）")
+                    .font(.caption2)
+                    .foregroundStyle(StrideCalibration.isCalibrated(profile) ? Theme.mint : Theme.amber)
             }
         }
     }

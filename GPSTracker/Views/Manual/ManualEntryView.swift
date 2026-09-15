@@ -195,6 +195,7 @@ struct ManualEntryView: View {
         session.temperature = Double(temperature)
         context.insert(session)
         try? context.save()
+        Task { await HealthKitSync.syncIfEnabled(session) }
         CueService.shared.notify(.success)
         finishedSession = session
     }

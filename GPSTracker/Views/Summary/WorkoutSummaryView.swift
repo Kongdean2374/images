@@ -22,6 +22,11 @@ struct WorkoutSummaryView: View {
     @State private var showDeleteConfirm = false
     @State private var weatherNote: String = ""
     @State private var temperatureText: String = ""
+    @State private var exportURL: URL?
+    @State private var showFileShare = false
+    @State private var healthMessage: String?
+    @State private var isSyncing = false
+    @StateObject private var health = HealthKitManager.shared
 
     private var splits: [SplitSegment] { StatsEngine.splits(for: session) }
     private var points: [RoutePoint] { session.sortedPoints }
@@ -68,6 +73,7 @@ struct WorkoutSummaryView: View {
         .task {
             weatherNote = session.weatherNote ?? ""
             if let t = session.temperature { temperatureText = String(format: "%.0f", t) }
+            health.refreshAvailability()
             if session.hasRoute {
                 routeSnapshot = await MapSnapshotter.snapshot(coordinates: coordinates,
                                                              speeds: points.map { $0.speed })
@@ -84,6 +90,21 @@ struct WorkoutSummaryView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             shareSheet
+        }
+        .sheet(isPresented: $showFileShare) {
+            if let exportURL {
+                VStack(spacing: 16) {
+                    Text(exportURL.lastPathComponent)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textPrimary)
+                    ShareLink(item: exportURL) {
+                        Label("分享／儲存檔案", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+                .padding()
+                .presentationDetents([.height(200)])
+            }
         }
         .fullScreenCover(isPresented: $showPlayback) {
             RoutePlaybackView(session: session)
@@ -182,6 +203,34 @@ struct WorkoutSummaryView: View {
                     if !session.laps.isEmpty {
                         StatPill(title: "圈數", value: "\(session.laps.count)", tint: Theme.amber)
                     }
+                    if let floors = session.floorsAscended, floors > 0 {
+                        StatPill(title: "爬樓層", value: "\(floors)", tint: Theme.violet)
+                    }
+                    if let stride = session.strideLength {
+                        StatPill(title: "步幅", value: String(format: "%.2fm", stride), tint: Theme.accent)
+                    }
+                }
+                if let source = session.distanceSource {
+                    HStack {
+                        Text("距離來源")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Text(source.displayName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+                if let walking = session.walkingSeconds, let running = session.runningSeconds {
+                    HStack {
+                        Text("走跑分段")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Text("走路 \(Fmt.duration(walking))　跑步 \(Fmt.duration(running))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(Theme.textPrimary)
+                    }
                 }
                 if let notes = session.notes, !notes.isEmpty {
                     Text(notes)
@@ -266,12 +315,120 @@ struct WorkoutSummaryView: View {
             }
             .buttonStyle(PrimaryButtonStyle())
 
+            healthCard
+            exportCard
+
             Button {
                 showDeleteConfirm = true
             } label: {
                 Label("刪除紀錄", systemImage: "trash")
             }
             .buttonStyle(SecondaryButtonStyle())
+        }
+    }
+
+    private var healthCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("健康 App", systemImage: "heart.fill")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    if session.healthKitSynced {
+                        Label("已同步", systemImage: "checkmark.seal.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.mint)
+                    }
+                }
+                Text(health.isReady
+                     ? "寫入後，健康 App 與其他讀取健康資料的 App 都能看到這次運動（含 GPS 路線）。"
+                     : health.availability.displayName)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                if let healthMessage {
+                    Text(healthMessage)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.amber)
+                }
+                Button {
+                    Task { await syncToHealth() }
+                } label: {
+                    if isSyncing {
+                        ProgressView()
+                    } else {
+                        Label(session.healthKitSynced ? "重新寫入健康 App" : "寫入健康 App",
+                              systemImage: "arrow.up.heart")
+                    }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(isSyncing)
+            }
+        }
+    }
+
+    private var exportCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("匯出到其他 App")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("GPX 與 TCX 是通用格式，可匯入 Strava、Garmin Connect、Komoot 等。")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 10) {
+                    if session.hasRoute {
+                        Button {
+                            exportURL = RouteFileExporter.gpxFile(for: session)
+                            showFileShare = exportURL != nil
+                        } label: {
+                            Label("GPX", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
+                    Button {
+                        exportURL = RouteFileExporter.tcxFile(for: session)
+                        showFileShare = exportURL != nil
+                    } label: {
+                        Label("TCX", systemImage: "doc.text")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    Button {
+                        exportURL = DataExporter.routeCSV(session: session)
+                        showFileShare = exportURL != nil
+                    } label: {
+                        Label("CSV", systemImage: "tablecells")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(!session.hasRoute)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func syncToHealth() async {
+        isSyncing = true
+        defer { isSyncing = false }
+        healthMessage = nil
+        if !health.isReady {
+            let granted = await health.requestAuthorization()
+            if !granted {
+                healthMessage = health.availability == .notEntitled
+                    ? "這個安裝版本沒有健康權限（免費 Apple ID 自簽無法啟用），可改用下方 GPX／TCX 匯出。"
+                    : "尚未取得健康 App 權限。"
+                return
+            }
+            AppSettings.shared.healthKitEnabled = true
+        }
+        let ok = await health.save(WorkoutSnapshot(session: session))
+        if ok {
+            session.healthKitSynced = true
+            try? context.save()
+            healthMessage = nil
+            CueService.shared.notify(.success)
+        } else {
+            healthMessage = health.lastError ?? "寫入失敗"
         }
     }
 

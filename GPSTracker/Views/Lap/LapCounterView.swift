@@ -316,6 +316,7 @@ struct LapCounterView: View {
                                           cadence: pedometer.isAvailable ? pedometer.cadence : nil)
         context.insert(session)
         try? context.save()
+        Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }
 }

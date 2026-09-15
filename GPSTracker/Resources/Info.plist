@@ -26,6 +26,14 @@
 	<string>用於記錄你的路跑與健行軌跡、距離與配速。</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>在螢幕鎖定或 App 進入背景時，仍持續記錄運動軌跡。</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>讀取體重與既有的活動資料，讓熱量與強度估算更準確。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>把你的運動寫入健康 App，讓其他 App 也能看到這次訓練。</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用於將運動戰績卡片儲存到相簿。</string>
 	<key>NSMotionUsageDescription</key>

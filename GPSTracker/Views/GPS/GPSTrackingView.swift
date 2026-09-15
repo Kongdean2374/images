@@ -322,6 +322,7 @@ struct GPSTrackingView: View {
         let session = recorder.buildSession(weatherNote: nil, temperature: nil)
         context.insert(session)
         try? context.save()
+        Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }
 }

@@ -271,6 +271,7 @@ struct IntervalTimerView: View {
         let session = engine.buildSession()
         context.insert(session)
         try? context.save()
+        Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }
 }

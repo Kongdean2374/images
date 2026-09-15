@@ -15,6 +15,14 @@ final class AppSettings: ObservableObject {
     @Published var autoPause: Bool { didSet { defaults.set(autoPause, forKey: Keys.autoPause) } }
     @Published var mapPitch: Double { didSet { defaults.set(mapPitch, forKey: Keys.mapPitch) } }
     @Published var preferDarkMode: Bool { didSet { defaults.set(preferDarkMode, forKey: Keys.preferDarkMode) } }
+    @Published var healthKitEnabled: Bool { didSet { defaults.set(healthKitEnabled, forKey: Keys.healthKitEnabled) } }
+    @Published var readHeartRate: Bool { didSet { defaults.set(readHeartRate, forKey: Keys.readHeartRate) } }
+    @Published var dailyStepGoal: Int { didSet { defaults.set(dailyStepGoal, forKey: Keys.dailyStepGoal) } }
+    @Published var stepReminderEnabled: Bool { didSet { defaults.set(stepReminderEnabled, forKey: Keys.stepReminderEnabled) } }
+    @Published var stepReminderHour: Int { didSet { defaults.set(stepReminderHour, forKey: Keys.stepReminderHour) } }
+    @Published var streakReminderEnabled: Bool { didSet { defaults.set(streakReminderEnabled, forKey: Keys.streakReminderEnabled) } }
+    @Published var sedentaryReminderHours: Int { didSet { defaults.set(sedentaryReminderHours, forKey: Keys.sedentaryReminderHours) } }
+    @Published var liveActivityEnabled: Bool { didSet { defaults.set(liveActivityEnabled, forKey: Keys.liveActivityEnabled) } }
 
     private enum Keys {
         static let unit = "unit"
@@ -25,6 +33,14 @@ final class AppSettings: ObservableObject {
         static let autoPause = "autoPause"
         static let mapPitch = "mapPitch"
         static let preferDarkMode = "preferDarkMode"
+        static let healthKitEnabled = "healthKitEnabled"
+        static let readHeartRate = "readHeartRate"
+        static let dailyStepGoal = "dailyStepGoal"
+        static let stepReminderEnabled = "stepReminderEnabled"
+        static let stepReminderHour = "stepReminderHour"
+        static let streakReminderEnabled = "streakReminderEnabled"
+        static let sedentaryReminderHours = "sedentaryReminderHours"
+        static let liveActivityEnabled = "liveActivityEnabled"
     }
 
     init() {
@@ -37,7 +53,15 @@ final class AppSettings: ObservableObject {
             Keys.hapticCues: true,
             Keys.autoPause: true,
             Keys.mapPitch: 55.0,
-            Keys.preferDarkMode: true
+            Keys.preferDarkMode: true,
+            Keys.healthKitEnabled: false,
+            Keys.readHeartRate: false,
+            Keys.dailyStepGoal: 8000,
+            Keys.stepReminderEnabled: false,
+            Keys.stepReminderHour: 20,
+            Keys.streakReminderEnabled: false,
+            Keys.sedentaryReminderHours: 0,
+            Keys.liveActivityEnabled: true
         ])
         unitRaw = defaults.string(forKey: Keys.unit) ?? DistanceUnit.metric.rawValue
         bodyWeight = defaults.double(forKey: Keys.bodyWeight)
@@ -47,6 +71,14 @@ final class AppSettings: ObservableObject {
         autoPause = defaults.bool(forKey: Keys.autoPause)
         mapPitch = defaults.double(forKey: Keys.mapPitch)
         preferDarkMode = defaults.bool(forKey: Keys.preferDarkMode)
+        healthKitEnabled = defaults.bool(forKey: Keys.healthKitEnabled)
+        readHeartRate = defaults.bool(forKey: Keys.readHeartRate)
+        dailyStepGoal = defaults.integer(forKey: Keys.dailyStepGoal)
+        stepReminderEnabled = defaults.bool(forKey: Keys.stepReminderEnabled)
+        stepReminderHour = defaults.integer(forKey: Keys.stepReminderHour)
+        streakReminderEnabled = defaults.bool(forKey: Keys.streakReminderEnabled)
+        sedentaryReminderHours = defaults.integer(forKey: Keys.sedentaryReminderHours)
+        liveActivityEnabled = defaults.bool(forKey: Keys.liveActivityEnabled)
     }
 
     var unit: DistanceUnit {

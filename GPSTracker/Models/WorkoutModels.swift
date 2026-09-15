@@ -6,6 +6,9 @@ import SwiftData
 enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
     case gpsRun
     case gpsHike
+    case walk
+    case run
+    case treadmill
     case lapCounter
     case indoorInterval
     case indoorReps
@@ -17,6 +20,9 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .gpsRun: return "GPS 路跑"
         case .gpsHike: return "GPS 健行"
+        case .walk: return "走路"
+        case .run: return "跑步"
+        case .treadmill: return "跑步機"
         case .lapCounter: return "營區計圈"
         case .indoorInterval: return "室內間歇"
         case .indoorReps: return "原地運動"
@@ -28,6 +34,9 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .gpsRun: return "路跑"
         case .gpsHike: return "健行"
+        case .walk: return "走路"
+        case .run: return "跑步"
+        case .treadmill: return "跑步機"
         case .lapCounter: return "計圈"
         case .indoorInterval: return "間歇"
         case .indoorReps: return "原地"
@@ -39,6 +48,9 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .gpsRun: return "figure.run"
         case .gpsHike: return "figure.hiking"
+        case .walk: return "figure.walk"
+        case .run: return "figure.run.circle"
+        case .treadmill: return "figure.run.treadmill"
         case .lapCounter: return "arrow.triangle.capsulepath"
         case .indoorInterval: return "timer"
         case .indoorReps: return "figure.jumprope"
@@ -51,15 +63,54 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         self == .gpsRun || self == .gpsHike
     }
 
+    /// 以計步器為主的無定位模式
+    var isStepBased: Bool {
+        self == .walk || self == .run || self == .treadmill
+    }
+
+    /// 步幅校正時歸類為走路或跑步
+    var strideProfile: StrideProfile {
+        switch self {
+        case .walk, .gpsHike: return .walking
+        default: return .running
+        }
+    }
+
     /// MET 值，用於熱量與強度估算。
     var metValue: Double {
         switch self {
         case .gpsRun: return 9.8
         case .gpsHike: return 6.0
+        case .walk: return 3.5
+        case .run: return 9.0
+        case .treadmill: return 8.3
         case .lapCounter: return 8.3
         case .indoorInterval: return 8.0
         case .indoorReps: return 7.0
         case .manualEntry: return 7.0
+        }
+    }
+}
+
+enum StrideProfile: String, Codable {
+    case walking, running
+}
+
+/// 距離是怎麼算出來的，讓使用者知道數字可信度
+enum DistanceSource: String, Codable {
+    case gps
+    case pedometer
+    case stride
+    case lap
+    case manual
+
+    var displayName: String {
+        switch self {
+        case .gps: return "GPS 軌跡"
+        case .pedometer: return "系統計步估算"
+        case .stride: return "個人步幅換算"
+        case .lap: return "圈數換算"
+        case .manual: return "手動輸入"
         }
     }
 }
@@ -86,6 +137,17 @@ final class WorkoutSession {
     var intensityScore: Double?
     var weatherNote: String?
     var temperature: Double?
+    var floorsAscended: Int?
+    var floorsDescended: Int?
+    /// 本次使用的步幅（公尺），供回溯檢視
+    var strideLength: Double?
+    /// 動作辨識分段：走路 / 跑步各佔多少秒
+    var walkingSeconds: Double?
+    var runningSeconds: Double?
+    /// 是否已寫入健康 App
+    var healthKitSynced: Bool = false
+    /// 距離來源：gps / pedometer / stride / manual
+    var distanceSourceRaw: String?
     /// 同路線比較用的識別名稱（GPS 路線名或圈數設定）。
     var routeKey: String?
     var title: String?
@@ -113,6 +175,12 @@ final class WorkoutSession {
          intensityScore: Double? = nil,
          weatherNote: String? = nil,
          temperature: Double? = nil,
+         floorsAscended: Int? = nil,
+         floorsDescended: Int? = nil,
+         strideLength: Double? = nil,
+         walkingSeconds: Double? = nil,
+         runningSeconds: Double? = nil,
+         distanceSource: DistanceSource? = nil,
          routeKey: String? = nil,
          title: String? = nil,
          notes: String? = nil) {
@@ -132,6 +200,13 @@ final class WorkoutSession {
         self.intensityScore = intensityScore
         self.weatherNote = weatherNote
         self.temperature = temperature
+        self.floorsAscended = floorsAscended
+        self.floorsDescended = floorsDescended
+        self.strideLength = strideLength
+        self.walkingSeconds = walkingSeconds
+        self.runningSeconds = runningSeconds
+        self.healthKitSynced = false
+        self.distanceSourceRaw = distanceSource?.rawValue
         self.routeKey = routeKey
         self.title = title
         self.notes = notes
@@ -142,6 +217,11 @@ final class WorkoutSession {
     var type: WorkoutType {
         get { WorkoutType(rawValue: typeRaw) ?? .manualEntry }
         set { typeRaw = newValue.rawValue }
+    }
+
+    var distanceSource: DistanceSource? {
+        get { distanceSourceRaw.flatMap { DistanceSource(rawValue: $0) } }
+        set { distanceSourceRaw = newValue?.rawValue }
     }
 
     var hasRoute: Bool { !routePoints.isEmpty }

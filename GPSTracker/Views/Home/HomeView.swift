@@ -7,7 +7,7 @@ struct HomeView: View {
     @StateObject private var location = LocationManager.shared
 
     @State private var activeMode: WorkoutType?
-    @State private var showManualEntry = false
+    @StateObject private var dailyActivity = DailyActivityProvider()
 
     private var weekSummary: (distance: Double, duration: TimeInterval, count: Int) {
         let calendar = Calendar.current
@@ -22,12 +22,16 @@ struct HomeView: View {
         ScrollView {
             VStack(spacing: 18) {
                 header
+                stepsCard
                 weekCard
                 locationBanner
                 sectionTitle("需要定位", subtitle: "戶外路跑與健行")
                 modeCard(.gpsRun, subtitle: "即時軌跡、配速漸層、3D 鏡頭跟隨")
                 modeCard(.gpsHike, subtitle: "海拔爬升與下降記錄")
                 sectionTitle("無定位模式", subtitle: "營區、室內、地下室都能用")
+                modeCard(.walk, subtitle: "計步器記錄步數、步頻與距離，含爬樓層")
+                modeCard(.run, subtitle: "以個人步幅換算距離，走跑自動分段")
+                modeCard(.treadmill, subtitle: "跑步機專用，可用實際距離反向校正步幅")
                 modeCard(.lapCounter, subtitle: "固定圈距手動計圈，純計時計數")
                 modeCard(.indoorInterval, subtitle: "衝刺／休息循環，語音與震動提示")
                 modeCard(.indoorReps, subtitle: "開合跳、波比跳自動計次")
@@ -38,12 +42,15 @@ struct HomeView: View {
             .padding(.bottom, 28)
         }
         .screenBackground()
+        .task { await dailyActivity.load(dayCount: 7) }
         .navigationTitle("開始運動")
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $activeMode) { mode in
             switch mode {
             case .gpsRun, .gpsHike:
                 GPSTrackingView(type: mode)
+            case .walk, .run, .treadmill:
+                StepWorkoutView(initialMode: mode)
             case .lapCounter:
                 LapCounterView()
             case .indoorInterval:
@@ -76,6 +83,47 @@ struct HomeView: View {
         case 11..<17: return "午安，動一下吧"
         case 17..<22: return "晚安，夜跑時間"
         default: return "深夜訓練"
+        }
+    }
+
+    @ViewBuilder
+    private var stepsCard: some View {
+        if dailyActivity.isAvailable {
+            NavigationLink {
+                DailyActivityView()
+            } label: {
+                GlassCard {
+                    HStack(spacing: 16) {
+                        ZStack {
+                            RingProgress(progress: min(1, Double(dailyActivity.todaySteps) / Double(max(1, settings.dailyStepGoal))),
+                                         lineWidth: 8)
+                            Image(systemName: "shoeprints.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .frame(width: 60, height: 60)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("今日步數")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                            Text("\(dailyActivity.todaySteps)")
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                                .foregroundStyle(Theme.textPrimary)
+                            Text("目標 \(settings.dailyStepGoal) 步・爬 \(dailyActivity.todayFloors) 層")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 

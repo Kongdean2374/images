@@ -44,6 +44,9 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     private let location = LocationManager.shared
     private let settings = AppSettings.shared
+    /// GPS 場次同時計步，用來學習個人步幅（供無定位模式換算距離）
+    let pedometer = PedometerManager()
+    let altimeter = AltimeterManager()
     private let kalman = GPSKalmanFilter()
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer?
@@ -71,6 +74,8 @@ final class GPSWorkoutRecorder: ObservableObject {
             location.requestAlwaysPermission()
         }
         location.startUpdating(background: true)
+        pedometer.start(from: startDate)
+        altimeter.start()
         subscribe()
         startTimer()
         CueService.shared.impact(.heavy)
@@ -99,6 +104,12 @@ final class GPSWorkoutRecorder: ObservableObject {
         timer = nil
         cancellables.removeAll()
         location.stopUpdating()
+        pedometer.stop()
+        altimeter.stop()
+        // 用這次可信的 GPS 距離校正個人步幅，之後沒訊號時就靠它換算
+        StrideCalibration.learn(distance: distance,
+                                steps: pedometer.steps,
+                                profile: workoutType.strideProfile)
         CueService.shared.speak("記錄結束")
     }
 
@@ -264,6 +275,13 @@ final class GPSWorkoutRecorder: ObservableObject {
                                      averagePace: distance > 50 ? elapsed / (distance / 1000) : nil,
                                      elevationGain: elevationGain,
                                      elevationLoss: elevationLoss,
+                                     stepCount: pedometer.steps > 0 ? pedometer.steps : nil,
+                                     cadence: pedometer.cadence > 0 ? pedometer.cadence : nil,
+                                     floorsAscended: pedometer.floorsAscended,
+                                     floorsDescended: pedometer.floorsDescended,
+                                     strideLength: pedometer.steps > 400 && distance > 300
+                                        ? distance / Double(pedometer.steps) : nil,
+                                     distanceSource: .gps,
                                      routeKey: routeKey.isEmpty ? nil : routeKey,
                                      notes: nil)
         session.calories = IntensityCalculator.calories(type: workoutType,
