@@ -19,6 +19,8 @@ final class StepWorkoutEngine: ObservableObject {
     @Published private(set) var elevationLoss: Double = 0
     @Published private(set) var currentMotion: MotionKind = .unknown
     @Published var mode: WorkoutType = .walk
+    @Published var target: WorkoutTarget = .none
+    @Published private(set) var targetReached = false
 
     let pedometer = PedometerManager()
     let altimeter = AltimeterManager()
@@ -52,11 +54,32 @@ final class StepWorkoutEngine: ObservableObject {
 
     var isCalibrated: Bool { StrideCalibration.isCalibrated(strideProfile) }
 
+    var targetProgress: Double {
+        target.progress(distance: distance, steps: steps, duration: elapsed, calories: calories)
+    }
+
+    var targetRemainingText: String {
+        target.remainingText(distance: distance,
+                             steps: steps,
+                             duration: elapsed,
+                             calories: calories,
+                             unit: AppSettings.shared.unit)
+    }
+
+    private func checkTarget() {
+        guard target.isActive, !targetReached, targetProgress >= 1 else { return }
+        targetReached = true
+        CueService.shared.notify(.success)
+        CueService.shared.speak("目標達成")
+    }
+
     // MARK: 控制
 
-    func start(mode: WorkoutType) {
+    func start(mode: WorkoutType, target: WorkoutTarget = .none) {
+        let requested = target
         self.mode = mode
         reset()
+        self.target = requested
         startDate = Date()
         segmentStart = Date()
         state = .running
@@ -118,6 +141,7 @@ final class StepWorkoutEngine: ObservableObject {
         accumulated = 0
         announcedKM = 0
         segmentStart = nil
+        targetReached = false
         altimeter.reset()
         state = .idle
     }
@@ -176,6 +200,7 @@ final class StepWorkoutEngine: ObservableObject {
             distanceSource = .stride
         }
         announceKMIfNeeded()
+        checkTarget()
     }
 
     private func announceKMIfNeeded() {
@@ -197,6 +222,7 @@ final class StepWorkoutEngine: ObservableObject {
     private func tick() {
         guard state == .running, let segmentStart else { return }
         elapsed = accumulated + Date().timeIntervalSince(segmentStart)
+        checkTarget()
         LiveActivityController.shared.update(elapsed: elapsed,
                                              distance: distance,
                                              steps: steps,

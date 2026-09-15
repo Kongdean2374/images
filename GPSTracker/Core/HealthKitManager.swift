@@ -271,6 +271,121 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
+
+    // MARK: 歷史資料（步幅自動校正用）
+
+    /// 每日彙總的步數與步行跑步距離，一次可回溯數年。
+    /// 用兩個 statistics collection query 取得，不會逐筆掃描，速度快。
+    func dailyStrideSamples(days: Int = 1095) async -> [StrideSample] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
+        let calendar = Calendar.current
+        let end = Date()
+        guard let start = calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: end)) else { return [] }
+
+        async let stepsByDay = dailySums(HKQuantityType(.stepCount), unit: .count(), from: start, to: end)
+        async let distanceByDay = dailySums(HKQuantityType(.distanceWalkingRunning), unit: .meter(), from: start, to: end)
+        let (steps, distance) = await (stepsByDay, distanceByDay)
+
+        var samples: [StrideSample] = []
+        for (day, stepCount) in steps {
+            guard let meters = distance[day], stepCount > 300, meters > 300 else { continue }
+            let stride = meters / stepCount
+            samples.append(StrideSample(stride: stride,
+                                        distance: meters,
+                                        steps: Int(stepCount),
+                                        date: day,
+                                        source: .health,
+                                        profile: .walking))
+        }
+        return samples
+    }
+
+    private func dailySums(_ type: HKQuantityType, unit: HKUnit, from start: Date, to end: Date) async -> [Date: Double] {
+        await withCheckedContinuation { continuation in
+            let calendar = Calendar.current
+            let anchor = calendar.startOfDay(for: start)
+            let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+            let query = HKStatisticsCollectionQuery(quantityType: type,
+                                                    quantitySamplePredicate: predicate,
+                                                    options: .cumulativeSum,
+                                                    anchorDate: anchor,
+                                                    intervalComponents: DateComponents(day: 1))
+            query.initialResultsHandler = { _, collection, _ in
+                var result: [Date: Double] = [:]
+                collection?.enumerateStatistics(from: start, to: end) { statistics, _ in
+                    if let sum = statistics.sumQuantity()?.doubleValue(for: unit), sum > 0 {
+                        result[calendar.startOfDay(for: statistics.startDate)] = sum
+                    }
+                }
+                continuation.resume(returning: result)
+            }
+            store.execute(query)
+        }
+    }
+
+    /// 歷史體能訓練（走路／跑步／健行），逐筆取距離與期間步數。
+    func workoutStrideSamples(limit: Int = 80, years: Int = 5) async -> [StrideSample] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
+        let start = Calendar.current.date(byAdding: .year, value: -years, to: Date()) ?? Date()
+        let workouts = await fetchWorkouts(from: start, limit: limit)
+
+        var samples: [StrideSample] = []
+        for workout in workouts {
+            let profile: StrideProfile
+            switch workout.workoutActivityType {
+            case .running: profile = .running
+            case .walking, .hiking: profile = .walking
+            default: continue
+            }
+            let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?
+                .sumQuantity()?.doubleValue(for: .meter())
+                ?? (await sumQuantity(HKQuantityType(.distanceWalkingRunning),
+                                      unit: .meter(),
+                                      from: workout.startDate,
+                                      to: workout.endDate) ?? 0)
+            guard distance > 300 else { continue }
+            guard let steps = await sumQuantity(HKQuantityType(.stepCount),
+                                                unit: .count(),
+                                                from: workout.startDate,
+                                                to: workout.endDate), steps > 300 else { continue }
+            samples.append(StrideSample(stride: distance / steps,
+                                        distance: distance,
+                                        steps: Int(steps),
+                                        date: workout.startDate,
+                                        source: .healthWorkout,
+                                        profile: profile))
+        }
+        return samples
+    }
+
+    private func fetchWorkouts(from start: Date, limit: Int) async -> [HKWorkout] {
+        await withCheckedContinuation { continuation in
+            let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
+                                      predicate: predicate,
+                                      limit: limit,
+                                      sortDescriptors: [sort]) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKWorkout]) ?? [])
+            }
+            store.execute(query)
+        }
+    }
+
+    /// 匯入健康 App 的歷史運動，做為統計與資料完整性的補充來源
+    func recentWorkoutSummaries(limit: Int = 200, years: Int = 3) async -> [(type: HKWorkoutActivityType, start: Date, end: Date, distance: Double?, energy: Double?)] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
+        let start = Calendar.current.date(byAdding: .year, value: -years, to: Date()) ?? Date()
+        let workouts = await fetchWorkouts(from: start, limit: limit)
+        return workouts.map { workout in
+            (workout.workoutActivityType,
+             workout.startDate,
+             workout.endDate,
+             workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meter()),
+             workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie()))
+        }
+    }
+
     // MARK: 工具
 
     private func update(_ block: @escaping () -> Void) {
@@ -290,6 +405,7 @@ final class HealthKitManager: ObservableObject {
         case .lapCounter: return .running
         case .indoorInterval: return .highIntensityIntervalTraining
         case .indoorReps: return .functionalStrengthTraining
+        case .fitnessTest: return .functionalStrengthTraining
         case .manualEntry: return .other
         }
     }

@@ -22,6 +22,7 @@ struct WorkoutSummaryView: View {
     @State private var showDeleteConfirm = false
     @State private var weatherNote: String = ""
     @State private var temperatureText: String = ""
+    @State private var rpe: Int = 0
     @State private var exportURL: URL?
     @State private var showFileShare = false
     @State private var healthMessage: String?
@@ -50,6 +51,7 @@ struct WorkoutSummaryView: View {
                         GlassCard { ElevationChartView(points: points) }
                     }
                     if !session.laps.isEmpty { lapsCard }
+                    rpeCard
                     weatherCard
                     actionsCard
                 }
@@ -73,6 +75,7 @@ struct WorkoutSummaryView: View {
         .task {
             weatherNote = session.weatherNote ?? ""
             if let t = session.temperature { temperatureText = String(format: "%.0f", t) }
+            rpe = session.rpe ?? 0
             health.refreshAvailability()
             if session.hasRoute {
                 routeSnapshot = await MapSnapshotter.snapshot(coordinates: coordinates,
@@ -271,6 +274,58 @@ struct WorkoutSummaryView: View {
                     Divider().overlay(Color.white.opacity(0.06))
                 }
             }
+        }
+    }
+
+    private var rpeCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("自覺強度 RPE")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    if rpe > 0 {
+                        Text("\(rpe) / 10　\(rpeLabel)")
+                            .font(.subheadline.weight(.semibold))
+                            .contentTransition(.numericText())
+                            .foregroundStyle(Theme.violet)
+                    }
+                }
+                Text("運動後自己評 1～10 分，越主觀越準。會納入訓練負荷統計。")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 5) {
+                    ForEach(1...10, id: \.self) { value in
+                        Button {
+                            rpe = value
+                            session.rpe = value
+                            try? context.save()
+                            CueService.shared.impact(.soft)
+                        } label: {
+                            Text("\(value)")
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 10)
+                                    .fill(rpe == value ? Theme.violet.opacity(0.45) : Color.white.opacity(0.07)))
+                                .foregroundStyle(rpe == value ? .white : Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var rpeLabel: String {
+        switch rpe {
+        case 1...2: return "非常輕鬆"
+        case 3...4: return "輕鬆"
+        case 5...6: return "中等"
+        case 7...8: return "吃力"
+        case 9...10: return "極限"
+        default: return ""
         }
     }
 

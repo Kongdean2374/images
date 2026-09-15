@@ -2,6 +2,12 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+struct CadencePoint: Identifiable, Hashable {
+    let id = UUID()
+    let date: Date
+    let cadence: Double
+}
+
 struct AnalyticsView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
     @Query private var goals: [WorkoutGoal]
@@ -33,11 +39,14 @@ struct AnalyticsView: View {
                     emptyState
                 } else {
                     trendCard
+                    trainingLoadCard
                     goalCard
                     if !comparableGroups.isEmpty { comparisonCard }
                     intensityCard
                     distributionCard
                     if weatherPoints.count >= 2 { weatherCard }
+                    cadenceCard
+                    integrityCard
                     exportCard
                 }
             }
@@ -67,6 +76,276 @@ struct AnalyticsView: View {
     }
 
     // MARK: 區塊
+
+
+    // MARK: 訓練負荷
+
+    private var loadReport: TrainingLoadReport {
+        TrainingLoadEngine.report(sessions: sessions)
+    }
+
+    private var trainingLoadCard: some View {
+        let report = loadReport
+        return GlassCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("訓練負荷")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(report.zone.displayName)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(zoneColor(report.zone).opacity(0.22)))
+                        .foregroundStyle(zoneColor(report.zone))
+                }
+
+                Text("以 sRPE 法計算：自覺強度 × 分鐘數。沒有評 RPE 的紀錄會用強度分數換算。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+
+                Chart {
+                    ForEach(report.daily.suffix(42)) { day in
+                        BarMark(x: .value("日期", day.date, unit: .day),
+                                y: .value("負荷", day.load))
+                        .foregroundStyle(day.load > 0 ? Theme.accent.opacity(0.75) : Color.clear)
+                        .cornerRadius(3)
+                    }
+                    RuleMark(y: .value("平均", report.chronic / 7))
+                        .foregroundStyle(Theme.amber.opacity(0.8))
+                        .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                        .annotation(position: .top, alignment: .leading) {
+                            Text("四週日均")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.amber)
+                        }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text("\(Int(v))")
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                        AxisValueLabel {
+                            if let date = value.as(Date.self) {
+                                Text(Fmt.shortDayFormatter.string(from: date))
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 150)
+
+                HStack {
+                    StatPill(title: "7 天負荷", value: String(format: "%.0f", report.acute), tint: Theme.accent)
+                    StatPill(title: "28 天週均", value: String(format: "%.0f", report.chronic), tint: Theme.mint)
+                    StatPill(title: "急慢性比",
+                             value: report.hasEnoughData ? String(format: "%.2f", report.ratio) : "--",
+                             tint: zoneColor(report.zone))
+                }
+                HStack {
+                    StatPill(title: "體能 CTL", value: String(format: "%.0f", report.ctl), tint: Theme.accent)
+                    StatPill(title: "疲勞 ATL", value: String(format: "%.0f", report.atl), tint: Theme.accentWarm)
+                    StatPill(title: "狀態 \(report.formText)",
+                             value: String(format: "%+.0f", report.tsb),
+                             tint: report.tsb >= 0 ? Theme.mint : Theme.amber)
+                }
+
+                if report.hasEnoughData {
+                    HStack(spacing: 6) {
+                        Image(systemName: report.weeklyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                        Text(String(format: "本週較上週 %+.0f%%，近 7 天休息 %d 天",
+                                    report.weeklyChange * 100, report.restDays7))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                }
+
+                Text(report.advice)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+
+    private func zoneColor(_ zone: TrainingLoadReport.Zone) -> Color {
+        switch zone {
+        case .insufficient: return Theme.textSecondary
+        case .detraining: return Theme.accent
+        case .optimal: return Theme.mint
+        case .caution: return Theme.amber
+        case .risk: return Theme.accentWarm
+        }
+    }
+
+    // MARK: 步頻
+
+    @ViewBuilder
+    private var cadenceCard: some View {
+        if let stats = DataIntegrity.cadenceStats(sessions: sessions) {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("步頻分析")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    HStack {
+                        StatPill(title: "平均步頻", value: String(format: "%.0f", stats.average), tint: Theme.accent)
+                        StatPill(title: "最高步頻", value: String(format: "%.0f", stats.best), tint: Theme.mint)
+                        StatPill(title: "樣本", value: "\(stats.samples)", tint: Theme.amber)
+                    }
+                    Chart {
+                        ForEach(cadenceSeries) { item in
+                            LineMark(x: .value("日期", item.date),
+                                     y: .value("步頻", item.cadence))
+                            .foregroundStyle(Theme.mint)
+                            .interpolationMethod(.catmullRom)
+                            PointMark(x: .value("日期", item.date),
+                                      y: .value("步頻", item.cadence))
+                            .foregroundStyle(Theme.mint)
+                            .symbolSize(20)
+                        }
+                        RuleMark(y: .value("建議", 175))
+                            .foregroundStyle(Theme.amber.opacity(0.7))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    }
+                    .chartYScale(domain: .automatic(includesZero: false))
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { value in
+                            AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
+                            AxisValueLabel {
+                                if let v = value.as(Double.self) {
+                                    Text("\(Int(v))")
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks { value in
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    Text(Fmt.shortDayFormatter.string(from: date))
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 150)
+                    Text("步頻偏低（低於 160）通常代表步幅過大、觸地時間長；用步頻節拍器練習可以逐步改善。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var cadenceSeries: [CadencePoint] {
+        let points = sessions.compactMap { session -> CadencePoint? in
+            guard let cadence = session.cadence, cadence > 40, cadence < 250 else { return nil }
+            return CadencePoint(date: session.startDate, cadence: cadence)
+        }
+        .sorted { $0.date < $1.date }
+        return Array(points.suffix(40))
+    }
+
+    // MARK: 資料完整性
+
+    private var integrityCard: some View {
+        let report = DataIntegrity.report(sessions: sessions)
+        return GlassCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("資料完整性")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(report.grade)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.mint)
+                }
+
+                HStack(spacing: 18) {
+                    ZStack {
+                        RingProgress(progress: report.completeness, lineWidth: 11)
+                        Text("\(report.completenessPercent)%")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                    .frame(width: 88, height: 88)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(report.total) 筆紀錄")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        if let first = report.firstDate, let last = report.lastDate {
+                            Text("\(Fmt.date(first)) ～ \(Fmt.date(last))")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        Text("涵蓋 \(report.coverageDays) 天・可校正樣本 \(report.calibrationSamples) 筆")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                ForEach(report.issues) { issue in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: severityIcon(issue.severity))
+                            .font(.caption)
+                            .foregroundStyle(severityColor(issue.severity))
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(issue.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                            Text(issue.detail)
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                }
+
+                NavigationLink {
+                    StrideCalibrationView()
+                } label: {
+                    Label("前往步幅校正中心", systemImage: "wand.and.stars")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        }
+    }
+
+    private func severityIcon(_ severity: IntegrityIssue.Severity) -> String {
+        switch severity {
+        case .info: return "info.circle"
+        case .warning: return "exclamationmark.triangle"
+        case .problem: return "xmark.octagon"
+        }
+    }
+
+    private func severityColor(_ severity: IntegrityIssue.Severity) -> Color {
+        switch severity {
+        case .info: return Theme.textSecondary
+        case .warning: return Theme.amber
+        case .problem: return Theme.accentWarm
+        }
+    }
 
     private var trendCard: some View {
         GlassCard {

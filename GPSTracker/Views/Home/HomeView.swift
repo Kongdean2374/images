@@ -34,7 +34,8 @@ struct HomeView: View {
                 modeCard(.treadmill, subtitle: "跑步機專用，可用實際距離反向校正步幅")
                 modeCard(.lapCounter, subtitle: "固定圈距手動計圈，純計時計數")
                 modeCard(.indoorInterval, subtitle: "衝刺／休息循環，語音與震動提示")
-                modeCard(.indoorReps, subtitle: "開合跳、波比跳自動計次")
+                modeCard(.indoorReps, subtitle: "開合跳、波比跳自動計次，可設循環組數")
+                modeCard(.fitnessTest, subtitle: "仰臥起坐／伏地挺身／3000 公尺，自動評等")
                 modeCard(.manualEntry, subtitle: "事後補登里程與時間")
                 recentSection
             }
@@ -57,6 +58,8 @@ struct HomeView: View {
                 IntervalTimerView()
             case .indoorReps:
                 IndoorRepsView()
+            case .fitnessTest:
+                FitnessTestView()
             case .manualEntry:
                 ManualEntryView()
             }

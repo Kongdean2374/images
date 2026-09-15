@@ -270,14 +270,18 @@ struct SettingsView: View {
                 strideRow(.walking, title: "走路步幅")
                 strideRow(.running, title: "跑步步幅")
 
-                Button {
-                    StrideCalibration.reset(.walking)
-                    StrideCalibration.reset(.running)
-                    CueService.shared.impact(.rigid)
+                NavigationLink {
+                    StrideCalibrationView()
                 } label: {
-                    Label("重設步幅校正", systemImage: "arrow.counterclockwise")
+                    Label("開啟校正中心（自動計算精準度）", systemImage: "wand.and.stars")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Theme.accentGradient))
                 }
-                .buttonStyle(SecondaryButtonStyle())
+                .buttonStyle(.plain)
             }
         }
     }
@@ -293,7 +297,9 @@ struct SettingsView: View {
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
                 Text(StrideCalibration.isCalibrated(profile)
-                     ? "已校正 \(StrideCalibration.sampleCount(profile)) 次"
+                     ? String(format: "精準度 %.0f%%・樣本 %d",
+                              StrideCalibration.confidence(profile) * 100,
+                              StrideCalibration.sampleCount(profile))
                      : "尚未校正（使用平均值）")
                     .font(.caption2)
                     .foregroundStyle(StrideCalibration.isCalibrated(profile) ? Theme.mint : Theme.amber)

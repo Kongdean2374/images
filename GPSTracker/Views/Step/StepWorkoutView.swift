@@ -10,6 +10,9 @@ struct StepWorkoutView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @StateObject private var engine = StepWorkoutEngine()
+    @StateObject private var metronome = CadenceMetronome()
+    @State private var targetKind = 0
+    @State private var targetValue = ""
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
     @State private var showTreadmillSheet = false
@@ -30,11 +33,15 @@ struct StepWorkoutView: View {
                     topBar
                     if engine.state == .idle {
                         modePicker
+                        targetCard
+                        metronomeCard
                         infoCard
                         calibrationCard
                     } else {
+                        if engine.target.isActive { targetProgressCard }
                         metricsCard
                         motionCard
+                        metronomeCard
                         detailCard
                     }
                 }
@@ -58,6 +65,7 @@ struct StepWorkoutView: View {
         .onAppear { engine.mode = initialMode }
         .onDisappear {
             if engine.state == .running || engine.state == .paused { engine.stop() }
+            metronome.stop()
         }
         .fullScreenCover(item: $finishedSession) { session in
             NavigationStack {
@@ -128,6 +136,202 @@ struct StepWorkoutView: View {
                     .foregroundStyle(engine.mode == mode ? Theme.color(for: mode) : Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+            }
+        }
+    }
+
+
+    // MARK: 目標與節拍器
+
+    private var selectedTarget: WorkoutTarget {
+        guard let value = Double(targetValue), value > 0 else { return .none }
+        switch targetKind {
+        case 1: return .distance(settings.unit == .metric ? value * 1000 : value * 1609.344)
+        case 2: return .steps(Int(value))
+        case 3: return .duration(value * 60)
+        case 4: return .calories(value)
+        default: return .none
+        }
+    }
+
+    private var targetCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("訓練目標")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Picker("目標類型", selection: $targetKind) {
+                    Text("自由").tag(0)
+                    Text("距離").tag(1)
+                    Text("步數").tag(2)
+                    Text("時間").tag(3)
+                    Text("熱量").tag(4)
+                }
+                .pickerStyle(.segmented)
+
+                if targetKind != 0 {
+                    HStack {
+                        TextField(placeholderForTarget, text: $targetValue)
+                            .keyboardType(.decimalPad)
+                            .textFieldStyle(.plain)
+                            .padding(11)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.07)))
+                        Text(targetUnitLabel)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    HStack(spacing: 8) {
+                        ForEach(quickTargets, id: \.self) { value in
+                            Button {
+                                targetValue = value
+                                CueService.shared.impact(.soft)
+                            } label: {
+                                Text(value)
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 9)
+                                    .background(Capsule().fill(targetValue == value
+                                                               ? Theme.accent.opacity(0.3)
+                                                               : Color.white.opacity(0.07)))
+                                    .foregroundStyle(targetValue == value ? Theme.accent : Theme.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Text("達成時會語音與震動提醒，進行中也會顯示環形進度。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var placeholderForTarget: String {
+        switch targetKind {
+        case 1: return settings.unit == .metric ? "5" : "3"
+        case 2: return "6000"
+        case 3: return "40"
+        case 4: return "300"
+        default: return ""
+        }
+    }
+
+    private var targetUnitLabel: String {
+        switch targetKind {
+        case 1: return Fmt.distanceUnitLabel(settings.unit)
+        case 2: return "步"
+        case 3: return "分鐘"
+        case 4: return "大卡"
+        default: return ""
+        }
+    }
+
+    private var quickTargets: [String] {
+        switch targetKind {
+        case 1: return ["3", "5", "10", "21"]
+        case 2: return ["3000", "6000", "10000", "15000"]
+        case 3: return ["20", "30", "45", "60"]
+        case 4: return ["150", "300", "500", "800"]
+        default: return []
+        }
+    }
+
+    private var targetProgressCard: some View {
+        GlassCard {
+            HStack(spacing: 18) {
+                ZStack {
+                    RingProgress(progress: engine.targetProgress, lineWidth: 11)
+                    VStack(spacing: 1) {
+                        Text(String(format: "%.0f%%", engine.targetProgress * 100))
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                }
+                .frame(width: 84, height: 84)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(engine.target.displayName)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Text(engine.target.targetText(unit: settings.unit))
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(Theme.textPrimary)
+                    if engine.targetReached {
+                        Label("目標已達成", systemImage: "checkmark.seal.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.mint)
+                    } else {
+                        Text(engine.targetRemainingText)
+                            .font(.caption)
+                            .foregroundStyle(Theme.amber)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var metronomeCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("步頻節拍器", systemImage: "metronome")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Button {
+                        metronome.toggle()
+                    } label: {
+                        Image(systemName: metronome.isRunning ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(metronome.isRunning ? Theme.accentWarm : Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+                HStack {
+                    Text(String(format: "%.0f BPM", metronome.bpm))
+                        .font(.title3.weight(.bold).monospacedDigit())
+                        .contentTransition(.numericText())
+                        .foregroundStyle(Theme.accent)
+                    Spacer()
+                    if engine.state != .idle {
+                        Text(String(format: "目前步頻 %.0f", engine.cadence))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(engine.cadence > 0 && abs(engine.cadence - metronome.bpm) < 6
+                                             ? Theme.mint : Theme.textSecondary)
+                    }
+                }
+                Slider(value: $metronome.bpm, in: 120...200, step: 1)
+                    .tint(Theme.accent)
+                HStack(spacing: 8) {
+                    ForEach([150.0, 165.0, 175.0, 180.0], id: \.self) { value in
+                        Button {
+                            metronome.bpm = value
+                        } label: {
+                            Text("\(Int(value))")
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(abs(metronome.bpm - value) < 0.5
+                                                           ? Theme.accent.opacity(0.3)
+                                                           : Color.white.opacity(0.07)))
+                                .foregroundStyle(abs(metronome.bpm - value) < 0.5 ? Theme.accent : Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack(spacing: 16) {
+                    Toggle("聲音", isOn: $metronome.useSound)
+                        .tint(Theme.accent)
+                    Toggle("震動", isOn: $metronome.useHaptics)
+                        .tint(Theme.accent)
+                }
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+                Text("跟著節拍踩步可以穩定步頻，減少受傷風險。多數跑者的舒適區間在 170～180 BPM。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
     }
@@ -268,7 +472,7 @@ struct StepWorkoutView: View {
             switch engine.state {
             case .idle:
                 Button {
-                    engine.start(mode: engine.mode)
+                    engine.start(mode: engine.mode, target: selectedTarget)
                 } label: {
                     Label("開始\(engine.mode.displayName)", systemImage: "play.fill")
                 }

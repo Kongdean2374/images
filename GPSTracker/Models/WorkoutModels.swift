@@ -12,6 +12,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
     case lapCounter
     case indoorInterval
     case indoorReps
+    case fitnessTest
     case manualEntry
 
     var id: String { rawValue }
@@ -26,6 +27,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return "營區計圈"
         case .indoorInterval: return "室內間歇"
         case .indoorReps: return "原地運動"
+        case .fitnessTest: return "體能測驗"
         case .manualEntry: return "手動輸入"
         }
     }
@@ -40,6 +42,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return "計圈"
         case .indoorInterval: return "間歇"
         case .indoorReps: return "原地"
+        case .fitnessTest: return "體測"
         case .manualEntry: return "手動"
         }
     }
@@ -54,6 +57,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return "arrow.triangle.capsulepath"
         case .indoorInterval: return "timer"
         case .indoorReps: return "figure.jumprope"
+        case .fitnessTest: return "medal.fill"
         case .manualEntry: return "square.and.pencil"
         }
     }
@@ -87,6 +91,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .lapCounter: return 8.3
         case .indoorInterval: return 8.0
         case .indoorReps: return 7.0
+        case .fitnessTest: return 8.5
         case .manualEntry: return 7.0
         }
     }
@@ -148,6 +153,8 @@ final class WorkoutSession {
     var healthKitSynced: Bool = false
     /// 距離來源：gps / pedometer / stride / manual
     var distanceSourceRaw: String?
+    /// 自覺強度 RPE 1-10（運動後自行評分）
+    var rpe: Int?
     /// 同路線比較用的識別名稱（GPS 路線名或圈數設定）。
     var routeKey: String?
     var title: String?
