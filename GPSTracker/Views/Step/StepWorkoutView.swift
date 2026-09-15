@@ -18,7 +18,7 @@ struct StepWorkoutView: View {
     @State private var showTreadmillSheet = false
     @State private var actualDistanceText = ""
 
-    private var modes: [WorkoutType] { [.walk, .run, .treadmill, .stairs] }
+    private var modes: [WorkoutType] { [.walk, .run, .treadmill, .stairs, .ruck] }
 
     var body: some View {
         ZStack {
@@ -33,6 +33,7 @@ struct StepWorkoutView: View {
                     topBar
                     if engine.state == .idle {
                         modePicker
+                        if engine.mode == .ruck { loadCard }
                         targetCard
                         metronomeCard
                         infoCard
@@ -152,6 +153,47 @@ struct StepWorkoutView: View {
         case 4: return .calories(value)
         case 5: return .floors(Int(value))
         default: return .none
+        }
+    }
+
+    private var loadCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("負重", systemImage: "backpack.fill")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(String(format: "%.0f 公斤", engine.loadWeight))
+                        .font(.headline.monospacedDigit())
+                        .contentTransition(.numericText())
+                        .foregroundStyle(Theme.color(for: .ruck))
+                }
+                Slider(value: $engine.loadWeight, in: 0...50, step: 1)
+                    .tint(Theme.color(for: .ruck))
+                HStack(spacing: 8) {
+                    ForEach([0.0, 10.0, 15.0, 20.0, 25.0], id: \.self) { value in
+                        Button {
+                            engine.loadWeight = value
+                            CueService.shared.impact(.soft)
+                        } label: {
+                            Text("\(Int(value))kg")
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(engine.loadWeight == value
+                                                           ? Theme.color(for: .ruck).opacity(0.3)
+                                                           : Color.white.opacity(0.07)))
+                                .foregroundStyle(engine.loadWeight == value
+                                                 ? Theme.color(for: .ruck) : Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Text("負重會計入熱量估算：以體重加負重計算，再依負重比例加成。20 公斤裝備對 65 公斤的人約多耗 30% 能量。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+            }
         }
     }
 

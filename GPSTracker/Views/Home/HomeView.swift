@@ -62,6 +62,8 @@ struct HomeView: View {
                         modeTile(.run, subtitle: "步幅換算距離")
                         modeTile(.treadmill, subtitle: "可用實際距離校正")
                         modeTile(.lapCounter, subtitle: "固定圈距計圈")
+                        modeTile(.shuttleRun, subtitle: "碰線計趟・短距衝刺")
+                        modeTile(.ruck, subtitle: "負重計入熱量估算")
                         modeTile(.indoorInterval, subtitle: "衝刺／休息循環")
                         modeTile(.indoorReps, subtitle: "自動計次・循環組")
                         modeTile(.plank, subtitle: "撐體計時・穩定度偵測")
@@ -100,6 +102,10 @@ struct HomeView: View {
                 StepWorkoutView(initialMode: mode)
             case .lapCounter:
                 LapCounterView()
+            case .shuttleRun:
+                LapCounterView(mode: .shuttleRun)
+            case .ruck:
+                StepWorkoutView(initialMode: .ruck)
             case .indoorInterval:
                 IntervalTimerView()
             case .indoorReps:

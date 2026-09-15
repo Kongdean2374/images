@@ -14,6 +14,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
     case indoorReps
     case plank
     case stairs
+    case shuttleRun
+    case ruck
     case fitnessTest
     case manualEntry
 
@@ -31,6 +33,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .indoorReps: return "原地運動"
         case .plank: return "棒式撐體"
         case .stairs: return "爬樓梯"
+        case .shuttleRun: return "折返跑"
+        case .ruck: return "負重行軍"
         case .fitnessTest: return "體能測驗"
         case .manualEntry: return "手動輸入"
         }
@@ -48,6 +52,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .indoorReps: return "原地"
         case .plank: return "棒式"
         case .stairs: return "樓梯"
+        case .shuttleRun: return "折返"
+        case .ruck: return "負重"
         case .fitnessTest: return "體測"
         case .manualEntry: return "手動"
         }
@@ -65,6 +71,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .indoorReps: return "figure.jumprope"
         case .plank: return "figure.core.training"
         case .stairs: return "figure.stair.stepper"
+        case .shuttleRun: return "arrow.left.arrow.right"
+        case .ruck: return "backpack.fill"
         case .fitnessTest: return "medal.fill"
         case .manualEntry: return "square.and.pencil"
         }
@@ -77,7 +85,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
 
     /// 以計步器為主的無定位模式
     var isStepBased: Bool {
-        self == .walk || self == .run || self == .treadmill || self == .stairs
+        self == .walk || self == .run || self == .treadmill || self == .stairs || self == .ruck
     }
 
     /// 步幅校正時歸類為走路或跑步
@@ -101,6 +109,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .indoorReps: return 7.0
         case .plank: return 4.0
         case .stairs: return 8.8
+        case .shuttleRun: return 9.5
+        case .ruck: return 6.5
         case .fitnessTest: return 8.5
         case .manualEntry: return 7.0
         }
@@ -171,6 +181,12 @@ final class WorkoutSession {
     var distanceSourceRaw: String?
     /// 自覺強度 RPE 1-10（運動後自行評分）
     var rpe: Int?
+    /// 運動結束當下的心率（手動量測輸入）
+    var heartRateAfter: Int?
+    /// 結束後一分鐘的心率，用來看恢復能力
+    var heartRateOneMinute: Int?
+    /// 負重行軍的負重（公斤）
+    var loadWeight: Double?
     /// 同路線比較用的識別名稱（GPS 路線名或圈數設定）。
     var routeKey: String?
     var title: String?
@@ -243,6 +259,12 @@ final class WorkoutSession {
     var type: WorkoutType {
         get { WorkoutType(rawValue: typeRaw) ?? .manualEntry }
         set { typeRaw = newValue.rawValue }
+    }
+
+    /// 一分鐘心率下降幅度，越大代表恢復越好
+    var heartRateRecovery: Int? {
+        guard let after = heartRateAfter, let oneMinute = heartRateOneMinute else { return nil }
+        return max(0, after - oneMinute)
     }
 
     var distanceSource: DistanceSource? {

@@ -23,6 +23,8 @@ struct WorkoutSummaryView: View {
     @State private var weatherNote: String = ""
     @State private var temperatureText: String = ""
     @State private var rpe: Int = 0
+    @State private var hrAfter: String = ""
+    @State private var hrOneMinute: String = ""
     @State private var exportURL: URL?
     @State private var showFileShare = false
     @State private var healthMessage: String?
@@ -66,6 +68,7 @@ struct WorkoutSummaryView: View {
                     }
                     if !session.laps.isEmpty { lapsCard }
                     rpeCard
+                    recoveryCard
                     weatherCard
                     actionsCard
                 }
@@ -90,6 +93,8 @@ struct WorkoutSummaryView: View {
             weatherNote = session.weatherNote ?? ""
             if let t = session.temperature { temperatureText = String(format: "%.0f", t) }
             rpe = session.rpe ?? 0
+            if let value = session.heartRateAfter { hrAfter = "\(value)" }
+            if let value = session.heartRateOneMinute { hrOneMinute = "\(value)" }
             health.refreshAvailability()
             if session.hasRoute {
                 routeSnapshot = await MapSnapshotter.snapshot(coordinates: coordinates,
@@ -340,6 +345,73 @@ struct WorkoutSummaryView: View {
         case 7...8: return "吃力"
         case 9...10: return "極限"
         default: return ""
+        }
+    }
+
+    private var recoveryCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("恢復心率", systemImage: "heart.circle")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    if let recovery = session.heartRateRecovery {
+                        Text("下降 \(recovery) bpm")
+                            .font(.subheadline.weight(.semibold))
+                            .contentTransition(.numericText())
+                            .foregroundStyle(recoveryColor(recovery))
+                    }
+                }
+                Text("結束後立刻量一分鐘脈搏填入，休息一分鐘再量一次。下降幅度是判斷體能進步最可靠的簡易指標，不需要任何裝置。")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 10) {
+                    TextField("結束當下", text: $hrAfter)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.07)))
+                    TextField("一分鐘後", text: $hrOneMinute)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.07)))
+                    Text("bpm")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                if let recovery = session.heartRateRecovery {
+                    Text(recoveryAdvice(recovery))
+                        .font(.caption)
+                        .foregroundStyle(recoveryColor(recovery))
+                }
+                Button("儲存心率") {
+                    session.heartRateAfter = Int(hrAfter)
+                    session.heartRateOneMinute = Int(hrOneMinute)
+                    try? context.save()
+                    CueService.shared.notify(.success)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+        }
+    }
+
+    private func recoveryColor(_ drop: Int) -> Color {
+        switch drop {
+        case ..<12: return Theme.accentWarm
+        case ..<20: return Theme.amber
+        case ..<30: return Theme.mint
+        default: return Theme.accent
+        }
+    }
+
+    private func recoveryAdvice(_ drop: Int) -> String {
+        switch drop {
+        case ..<12: return "一分鐘下降不到 12 下，代表當下疲勞較深或體能還有進步空間。"
+        case ..<20: return "恢復速度普通，持續訓練通常會逐漸改善。"
+        case ..<30: return "恢復良好，心肺狀況不錯。"
+        default: return "恢復非常快，是心肺能力強的表現。"
         }
     }
 

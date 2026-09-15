@@ -21,6 +21,8 @@ final class StepWorkoutEngine: ObservableObject {
     @Published private(set) var currentMotion: MotionKind = .unknown
     @Published var mode: WorkoutType = .walk
     @Published var target: WorkoutTarget = .none
+    /// 負重行軍的負重（公斤）
+    @Published var loadWeight: Double = 0
     @Published private(set) var targetReached = false
 
     let pedometer = PedometerManager()
@@ -51,7 +53,13 @@ final class StepWorkoutEngine: ObservableObject {
     var strideLength: Double { StrideCalibration.stride(strideProfile) }
 
     var calories: Double {
-        IntensityCalculator.calories(type: mode, duration: elapsed, bodyWeight: AppSettings.shared.bodyWeight)
+        // 負重會顯著提高能量消耗：以體重加上負重，再依負重比例加成
+        let bodyWeight = AppSettings.shared.bodyWeight
+        let effectiveWeight = bodyWeight + loadWeight
+        let loadFactor = bodyWeight > 0 ? 1 + (loadWeight / bodyWeight) * 0.35 : 1
+        return IntensityCalculator.calories(type: mode,
+                                            duration: elapsed,
+                                            bodyWeight: effectiveWeight) * loadFactor
     }
 
     var isCalibrated: Bool { StrideCalibration.isCalibrated(strideProfile) }
@@ -275,6 +283,7 @@ final class StepWorkoutEngine: ObservableObject {
                                      distanceSource: distanceSource,
                                      routeKey: mode == .treadmill ? "跑步機" : nil)
         session.calories = calories
+        session.loadWeight = loadWeight > 0 ? loadWeight : nil
         session.intensityScore = IntensityCalculator.score(type: mode,
                                                            duration: elapsed,
                                                            distance: distance,

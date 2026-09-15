@@ -45,6 +45,8 @@ enum Theme {
         case .indoorReps: return violet
         case .plank: return Color(red: 0.42, green: 0.86, blue: 0.78)
         case .stairs: return Color(red: 0.98, green: 0.52, blue: 0.62)
+        case .shuttleRun: return Color(red: 0.36, green: 0.72, blue: 0.98)
+        case .ruck: return Color(red: 0.72, green: 0.62, blue: 0.42)
         case .fitnessTest: return Color(red: 0.95, green: 0.82, blue: 0.35)
         case .manualEntry: return Color.gray
         }

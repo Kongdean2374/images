@@ -3,6 +3,8 @@ import SwiftData
 
 /// B1 + B2：營區計圈（完全不需定位）
 struct LapCounterView: View {
+    var mode: WorkoutType = .lapCounter
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
@@ -44,11 +46,11 @@ struct LapCounterView: View {
             }
             .onDisappear { dismiss() }
         }
-        .alert("結束計圈？", isPresented: $showStopConfirm) {
+        .alert(mode == .shuttleRun ? "結束折返跑？" : "結束計圈？", isPresented: $showStopConfirm) {
             Button("繼續", role: .cancel) {}
             Button("結束並儲存", role: .destructive) { finish() }
         } message: {
-            Text("已完成 \(engine.laps.count) 圈，共 \(Fmt.distance(engine.totalDistance, unit: settings.unit))")
+            Text("已完成 \(engine.laps.count) \(mode == .shuttleRun ? "趟" : "圈")，共 \(Fmt.distance(engine.totalDistance, unit: settings.unit))")
         }
         .sheet(isPresented: $showDistanceSheet) { distanceSheet }
     }
@@ -65,7 +67,7 @@ struct LapCounterView: View {
                     .background(Circle().fill(Color.white.opacity(0.1)))
             }
             Spacer()
-            Text("營區計圈")
+            Text(mode.displayName)
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
@@ -89,7 +91,9 @@ struct LapCounterView: View {
                     Label("不需要定位權限", systemImage: "location.slash.circle")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.mint)
-                    Text("設定單圈距離後開始計時，每跑完一圈按下大按鈕，App 會自動換算總距離與平均配速。")
+                    Text(mode == .shuttleRun
+                         ? "設定單趟距離後開始計時，每跑完一趟（碰線）按一下大按鈕，App 會累計趟數、總距離與每趟秒數。"
+                         : "設定單圈距離後開始計時，每跑完一圈按下大按鈕，App 會自動換算總距離與平均配速。")
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -97,11 +101,11 @@ struct LapCounterView: View {
 
             GlassCard {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("單圈距離")
+                    Text(mode == .shuttleRun ? "單趟距離" : "單圈距離")
                         .font(.headline)
                         .foregroundStyle(Theme.textPrimary)
                     HStack(spacing: 10) {
-                        ForEach([200.0, 400.0, 800.0, 1000.0], id: \.self) { value in
+                        ForEach(mode == .shuttleRun ? [10.0, 20.0, 50.0, 100.0] : [200.0, 400.0, 800.0, 1000.0], id: \.self) { value in
                             Button {
                                 engine.lapDistance = value
                                 settings.lapDistance = value
@@ -148,7 +152,8 @@ struct LapCounterView: View {
                         .foregroundStyle(Theme.textPrimary)
 
                     HStack {
-                        StatPill(title: "圈數", value: "\(engine.laps.count)", tint: Theme.amber)
+                        StatPill(title: mode == .shuttleRun ? "趟數" : "圈數",
+                             value: "\(engine.laps.count)", tint: Theme.amber)
                         StatPill(title: "距離（\(Fmt.distanceUnitLabel(settings.unit))）",
                                  value: Fmt.distanceValue(engine.totalDistance, unit: settings.unit),
                                  tint: Theme.accent)
@@ -179,7 +184,7 @@ struct LapCounterView: View {
                 GlassCard {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("分圈")
+                            Text(mode == .shuttleRun ? "分趟" : "分圈")
                                 .font(.headline)
                                 .foregroundStyle(Theme.textPrimary)
                             Spacer()
@@ -195,7 +200,7 @@ struct LapCounterView: View {
                             VStack(spacing: 6) {
                                 ForEach(engine.laps.reversed()) { lap in
                                     HStack {
-                                        Text("第 \(lap.number) 圈")
+                                        Text(mode == .shuttleRun ? "第 \(lap.number) 趟" : "第 \(lap.number) 圈")
                                             .font(.subheadline)
                                             .foregroundStyle(Theme.textPrimary)
                                         Spacer()
@@ -225,10 +230,12 @@ struct LapCounterView: View {
             switch engine.state {
             case .idle:
                 Button {
+                    engine.workoutType = mode
+                    if mode == .shuttleRun, engine.lapDistance > 150 { engine.lapDistance = 20 }
                     engine.start()
                     pedometer.start()
                 } label: {
-                    Label("開始計圈", systemImage: "play.fill")
+                    Label(mode == .shuttleRun ? "開始折返跑" : "開始計圈", systemImage: "play.fill")
                 }
                 .buttonStyle(PrimaryButtonStyle())
 
@@ -237,11 +244,13 @@ struct LapCounterView: View {
                     engine.recordLap()
                 } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: "flag.checkered")
+                        Image(systemName: mode == .shuttleRun ? "arrow.left.arrow.right" : "flag.checkered")
                             .font(.system(size: 34, weight: .bold))
-                        Text("計圈")
+                        Text(mode == .shuttleRun ? "計趟" : "計圈")
                             .font(.title3.weight(.bold))
-                        Text("第 \(engine.laps.count + 1) 圈進行中")
+                        Text(mode == .shuttleRun
+                             ? "第 \(engine.laps.count + 1) 趟進行中"
+                             : "第 \(engine.laps.count + 1) 圈進行中")
                             .font(.caption)
                             .opacity(0.8)
                     }

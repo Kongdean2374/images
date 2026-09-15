@@ -22,6 +22,7 @@ final class LapWorkoutEngine: ObservableObject {
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var currentLapElapsed: TimeInterval = 0
     @Published var lapDistance: Double = AppSettings.shared.lapDistance
+    @Published var workoutType: WorkoutType = .lapCounter
 
     private var timer: Timer?
     private var accumulated: TimeInterval = 0
@@ -54,7 +55,7 @@ final class LapWorkoutEngine: ObservableObject {
         lapSegmentStart = Date()
         state = .running
         startTimer()
-        LiveActivityController.shared.start(mode: .lapCounter, usesDistance: true)
+        LiveActivityController.shared.start(mode: workoutType, usesDistance: true)
         CueService.shared.impact(.heavy)
         CueService.shared.speak("計圈開始")
     }
@@ -147,7 +148,7 @@ final class LapWorkoutEngine: ObservableObject {
     // MARK: 輸出
 
     func buildSession(steps: Int?, cadence: Double?) -> WorkoutSession {
-        let session = WorkoutSession(type: .lapCounter,
+        let session = WorkoutSession(type: workoutType,
                                      startDate: startDate,
                                      endDate: Date(),
                                      duration: elapsed,
@@ -155,11 +156,13 @@ final class LapWorkoutEngine: ObservableObject {
                                      averagePace: averagePace,
                                      stepCount: steps,
                                      cadence: cadence,
-                                     routeKey: "圈道 \(Int(lapDistance)) 公尺")
-        session.calories = IntensityCalculator.calories(type: .lapCounter,
+                                     routeKey: workoutType == .shuttleRun
+                                        ? "折返 \(Int(lapDistance)) 公尺"
+                                        : "圈道 \(Int(lapDistance)) 公尺")
+        session.calories = IntensityCalculator.calories(type: workoutType,
                                                         duration: elapsed,
                                                         bodyWeight: AppSettings.shared.bodyWeight)
-        session.intensityScore = IntensityCalculator.score(type: .lapCounter,
+        session.intensityScore = IntensityCalculator.score(type: workoutType,
                                                            duration: elapsed,
                                                            distance: totalDistance,
                                                            averagePace: averagePace,

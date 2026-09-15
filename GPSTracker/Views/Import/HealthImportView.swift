@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// 一鍵匯入：把健康 App 裡的歷史運動（含其他 App 寫入的）變成本 App 的一般紀錄。
 private struct ImportSourceRow: Identifiable {
@@ -21,6 +22,8 @@ struct HealthImportView: View {
     @State private var previewNew: Int?
     @State private var isPreviewing = false
     @State private var message: String?
+    @State private var showFileImporter = false
+    @State private var fileMessage: String?
 
     private var importedCount: Int { sessions.filter { $0.isImported }.count }
     private var localCount: Int { sessions.filter { !$0.isImported }.count }
@@ -32,6 +35,7 @@ struct HealthImportView: View {
                 rangeCard
                 actionCard
                 if let result = importer.lastResult, !result.isEmpty { resultCard(result) }
+                fileImportCard
                 autoCard
                 explainCard
             }
@@ -210,6 +214,73 @@ struct HealthImportView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var fileImportCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("從檔案匯入", systemImage: "doc.badge.plus")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("支援 GPX 與 TCX。從 Garmin、手錶或其他 App 匯出的軌跡檔都能直接拉進來，含軌跡點、距離、爬升與時間。")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("選擇 GPX / TCX 檔案", systemImage: "folder")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                if let fileMessage {
+                    Text(fileMessage)
+                        .font(.caption)
+                        .foregroundStyle(fileMessage.contains("失敗") || fileMessage.contains("無法")
+                                         ? Theme.accentWarm : Theme.mint)
+                }
+            }
+        }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: gpxContentTypes,
+                      allowsMultipleSelection: true) { result in
+            handleFileImport(result)
+        }
+    }
+
+    private var gpxContentTypes: [UTType] {
+        var types: [UTType] = [.xml, .data]
+        if let gpx = UTType(filenameExtension: "gpx") { types.append(gpx) }
+        if let tcx = UTType(filenameExtension: "tcx") { types.append(tcx) }
+        return types
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        fileMessage = nil
+        switch result {
+        case .success(let urls):
+            var added = 0
+            var failed = 0
+            for url in urls {
+                do {
+                    let route = try RouteFileImporter.parse(url: url)
+                    if let session = RouteFileImporter.makeSession(from: route,
+                                                                   fileName: url.deletingPathExtension().lastPathComponent) {
+                        context.insert(session)
+                        added += 1
+                    } else {
+                        failed += 1
+                    }
+                } catch {
+                    failed += 1
+                }
+            }
+            try? context.save()
+            fileMessage = failed == 0
+                ? "已匯入 \(added) 個檔案"
+                : "已匯入 \(added) 個，\(failed) 個無法解析"
+            if added > 0 { CueService.shared.notify(.success) }
+        case .failure(let error):
+            fileMessage = error.localizedDescription
         }
     }
 

@@ -527,6 +527,8 @@ final class HealthKitManager: ObservableObject {
         case .indoorReps: return .functionalStrengthTraining
         case .plank: return .coreTraining
         case .stairs: return .stairClimbing
+        case .shuttleRun: return .running
+        case .ruck: return .hiking
         case .fitnessTest: return .functionalStrengthTraining
         case .manualEntry: return .other
         }
