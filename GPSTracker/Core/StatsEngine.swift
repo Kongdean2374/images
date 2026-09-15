@@ -194,12 +194,20 @@ enum StatsEngine {
     }
 
     static func label(for date: Date, range: TrendRange) -> String {
+        let calendar = Calendar.current
         switch range {
-        case .week: return Fmt.shortDayFormatter.string(from: date)
-        case .month: return Fmt.monthFormatter.string(from: date)
+        case .week:
+            return Fmt.shortDayFormatter.string(from: date)
+        case .month:
+            let month = calendar.component(.month, from: date)
+            // 一月標上年份，其餘只留月份，避免 X 軸文字擠在一起
+            if month == 1 {
+                let year = calendar.component(.year, from: date) % 100
+                return "\(year)/1"
+            }
+            return "\(month)月"
         case .year:
-            let y = Calendar.current.component(.year, from: date)
-            return "\(y)"
+            return "\(calendar.component(.year, from: date))"
         }
     }
 

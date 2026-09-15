@@ -95,11 +95,18 @@ struct AnalyticsView: View {
                         .foregroundStyle(zoneColor(report.zone))
                 }
 
-                Text("以 sRPE 法計算：自覺強度 × 分鐘數。沒有評 RPE 的紀錄會用強度分數換算。")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textSecondary)
-
-                TrainingLoadChart(daily: Array(report.daily.suffix(42)), average: report.chronic / 7)
+                if report.hasEnoughData {
+                    TrainingLoadChart(daily: Array(report.daily.suffix(42)), average: report.chronic / 7)
+                } else {
+                    EmptyStateView(systemImage: "chart.bar.doc.horizontal",
+                                   title: "再多幾次就能算出負荷趨勢",
+                                   message: "需要近 90 天內至少 5 個有運動的日子。",
+                                   tint: Theme.accent,
+                                   compact: true)
+                    ProgressHint(title: "有運動的天數",
+                                 current: report.daily.filter { $0.load > 0 }.count,
+                                 target: 5)
+                }
 
                 HStack {
                     StatPill(title: "7 天負荷", value: String(format: "%.0f", report.acute), tint: Theme.accent)
@@ -124,11 +131,11 @@ struct AnalyticsView: View {
                     }
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                }
 
-                Text(report.advice)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                    Text(report.advice)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
         }
     }

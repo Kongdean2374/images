@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate the 1024x1024 app icon (pure Python, no third-party deps).
 
-構圖：深色地圖底 → 街道格線 → 等高線 → 海拔剖面 → 配速漸層軌跡（含描邊、
-高光、途經點）→ 起終點標記 → 指北玫瑰 → 玻璃反光 → 邊緣輪廓光。
+設計：速度儀表 + 導航箭頭
+  深色漸層底 → 外圈刻度 → 灰底軌道 → 配速漸層弧（藍→綠→琥珀→橘）
+  → 弧端光點 → 中央立體導航箭頭 → 玻璃反光 → 邊緣輪廓光
 """
 import math
 import os
@@ -10,6 +11,7 @@ import struct
 import zlib
 
 SIZE = 1024
+CX, CY = 512.0, 508.0
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "GPSTracker", "Resources", "Assets.xcassets",
                    "AppIcon.appiconset", "AppIcon1024.png")
@@ -28,11 +30,20 @@ def mix(c1, c2, t):
 def blend(x, y, color, alpha):
     if alpha <= 0 or x < 0 or y < 0 or x >= SIZE or y >= SIZE:
         return
-    a = min(1.0, alpha)
+    a = 1.0 if alpha > 1 else alpha
     i = (y * SIZE + x) * 3
     buf[i] = int(lerp(buf[i], color[0], a))
     buf[i + 1] = int(lerp(buf[i + 1], color[1], a))
     buf[i + 2] = int(lerp(buf[i + 2], color[2], a))
+
+
+def add(x, y, color, alpha):
+    if alpha <= 0 or x < 0 or y < 0 or x >= SIZE or y >= SIZE:
+        return
+    i = (y * SIZE + x) * 3
+    buf[i] = min(255, int(buf[i] + color[0] * alpha))
+    buf[i + 1] = min(255, int(buf[i + 1] + color[1] * alpha))
+    buf[i + 2] = min(255, int(buf[i + 2] + color[2] * alpha))
 
 
 def disc(cx, cy, r, color, alpha=1.0, feather=1.5):
@@ -49,269 +60,192 @@ def disc(cx, cy, r, color, alpha=1.0, feather=1.5):
             blend(x, y, color, a)
 
 
-def ring(cx, cy, r, width, color, alpha=1.0):
-    inner = r - width
-    x0, x1 = max(0, int(cx - r) - 1), min(SIZE, int(cx + r) + 2)
-    y0, y1 = max(0, int(cy - r) - 1), min(SIZE, int(cy + r) + 2)
+def glow_disc(cx, cy, r, color, strength):
+    x0, x1 = max(0, int(cx - r)), min(SIZE, int(cx + r) + 1)
+    y0, y1 = max(0, int(cy - r)), min(SIZE, int(cy + r) + 1)
     for y in range(y0, y1):
         dy = y - cy
         for x in range(x0, x1):
             dx = x - cx
             d = math.sqrt(dx * dx + dy * dy)
-            if d > r or d < inner - 1:
+            if d > r:
                 continue
-            a = alpha
-            if d > r - 1.2:
-                a *= (r - d) / 1.2
-            elif d < inner + 1.2:
-                a *= (d - inner) / 1.2
-            blend(x, y, color, max(0.0, a))
+            add(x, y, color, (1 - d / r) ** 2 * strength)
 
 
-def line(x0, y0, x1, y1, width, color, alpha=1.0):
-    length = math.hypot(x1 - x0, y1 - y0)
-    steps = max(2, int(length))
-    r = width / 2
-    for s in range(steps + 1):
-        t = s / steps
-        disc(lerp(x0, x1, t), lerp(y0, y1, t), r, color, alpha, feather=1.0)
-
-
-def triangle(p0, p1, p2, color, alpha=1.0):
-    minx = max(0, int(min(p0[0], p1[0], p2[0])))
-    maxx = min(SIZE - 1, int(max(p0[0], p1[0], p2[0])) + 1)
-    miny = max(0, int(min(p0[1], p1[1], p2[1])))
-    maxy = min(SIZE - 1, int(max(p0[1], p1[1], p2[1])) + 1)
-
-    def sign(a, b, c):
-        return (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1])
+def polygon(points, color, alpha=1.0):
+    """凸多邊形掃描填色（含 1px 邊緣淡化）。"""
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    minx, maxx = max(0, int(min(xs)) - 1), min(SIZE - 1, int(max(xs)) + 1)
+    miny, maxy = max(0, int(min(ys)) - 1), min(SIZE - 1, int(max(ys)) + 1)
+    n = len(points)
+    # 先判斷繞向，讓順時針與逆時針都能正確填色
+    area = 0.0
+    for i in range(n):
+        ax, ay = points[i]
+        bx, by = points[(i + 1) % n]
+        area += ax * by - bx * ay
+    sign = 1.0 if area >= 0 else -1.0
 
     for y in range(miny, maxy + 1):
         for x in range(minx, maxx + 1):
-            pt = (x + 0.5, y + 0.5)
-            d1 = sign(pt, p0, p1)
-            d2 = sign(pt, p1, p2)
-            d3 = sign(pt, p2, p0)
-            has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-            has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
-            if not (has_neg and has_pos):
-                blend(x, y, color, alpha)
+            px, py = x + 0.5, y + 0.5
+            inside = True
+            min_edge = 1e9
+            for i in range(n):
+                ax, ay = points[i]
+                bx, by = points[(i + 1) % n]
+                cross = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * sign
+                if cross < -0.7:
+                    inside = False
+                    break
+                length = math.hypot(bx - ax, by - ay)
+                if length > 0:
+                    min_edge = min(min_edge, cross / length)
+            if inside:
+                blend(x, y, color, alpha * min(1.0, max(0.2, min_edge)))
+
+
+def rotate(point, cx, cy, degrees):
+    a = math.radians(degrees)
+    dx, dy = point[0] - cx, point[1] - cy
+    return (cx + dx * math.cos(a) - dy * math.sin(a),
+            cy + dx * math.sin(a) + dy * math.cos(a))
+
+
+def arc(radius, thickness, a0, a1, color_fn, alpha=1.0, step=0.25):
+    r = thickness / 2
+    a = a0
+    while a <= a1:
+        t = (a - a0) / max(1e-6, (a1 - a0))
+        rad = math.radians(a)
+        disc(CX + math.cos(rad) * radius, CY + math.sin(rad) * radius,
+             r, color_fn(t), alpha, feather=1.4)
+        a += step
 
 
 def main():
     # ---------- 背景 ----------
-    top = (13, 19, 46)
-    mid = (28, 41, 92)
-    bottom = (10, 15, 36)
+    deep = (9, 12, 30)
+    indigo = (30, 34, 84)
     for y in range(SIZE):
-        fy = y / (SIZE - 1)
-        row = y * SIZE * 3
         for x in range(SIZE):
-            fx = x / (SIZE - 1)
-            d = (fx * 0.45 + fy * 0.55)
-            base = mix(top, mid, d / 0.55) if d < 0.55 else mix(mid, bottom, (d - 0.55) / 0.45)
+            d = math.hypot((x - CX) / SIZE, (y - CY * 0.92) / SIZE) * 1.55
+            base = mix(indigo, deep, min(1.0, d))
+            glow = max(0.0, 1.0 - d * 1.25) ** 2.4 * 40
+            i = (y * SIZE + x) * 3
+            buf[i] = max(0, min(255, int(base[0] + glow * 0.30)))
+            buf[i + 1] = max(0, min(255, int(base[1] + glow * 0.55)))
+            buf[i + 2] = max(0, min(255, int(base[2] + glow)))
 
-            dx = (x - SIZE * 0.44) / SIZE
-            dy = (y - SIZE * 0.40) / SIZE
-            glow = max(0.0, 1.0 - math.hypot(dx, dy) * 1.85) ** 2.2 * 30
-
-            vx = (x - SIZE * 0.5) / (SIZE * 0.5)
-            vy = (y - SIZE * 0.5) / (SIZE * 0.5)
-            vignette = 1.0 - min(1.0, (vx * vx + vy * vy) * 0.26)
-
-            i = row + x * 3
-            buf[i] = max(0, min(255, int((base[0] + glow * 0.3) * vignette)))
-            buf[i + 1] = max(0, min(255, int((base[1] + glow * 0.7) * vignette)))
-            buf[i + 2] = max(0, min(255, int((base[2] + glow) * vignette)))
-
-    # ---------- 街道格線（斜向，像地圖底圖） ----------
-    street = (120, 160, 230)
-    angle = math.radians(26)
-    dxs, dys = math.cos(angle), math.sin(angle)
-    for k in range(-14, 15):
-        offset = k * 96
-        cx = SIZE / 2 - dys * offset
-        cy = SIZE / 2 + dxs * offset
-        alpha = 0.05 if k % 3 else 0.085
-        width = 2.0 if k % 3 else 3.4
-        line(cx - dxs * 1400, cy - dys * 1400, cx + dxs * 1400, cy + dys * 1400,
-             width, street, alpha)
-    angle2 = angle + math.pi / 2
-    dxs2, dys2 = math.cos(angle2), math.sin(angle2)
-    for k in range(-14, 15):
-        offset = k * 132
-        cx = SIZE / 2 - dys2 * offset
-        cy = SIZE / 2 + dxs2 * offset
-        alpha = 0.04 if k % 2 else 0.07
-        line(cx - dxs2 * 1400, cy - dys2 * 1400, cx + dxs2 * 1400, cy + dys2 * 1400,
-             2.4, street, alpha)
-
-    # ---------- 等高線 ----------
-    contour = (150, 190, 255)
-    for ringIndex in range(5):
-        radius = 232 + ringIndex * 118
-        steps = 1800
-        wobble = 0.06 + ringIndex * 0.012
+    # 細微同心圓，做出金屬錶面感
+    for k in range(9):
+        rr = 120 + k * 46
+        steps = int(rr * 7)
         for s in range(steps):
             a = s / steps * math.pi * 2
-            rr = radius * (1 + math.sin(a * 3 + ringIndex) * wobble)
-            px = SIZE * 0.47 + math.cos(a) * rr
-            py = SIZE * 0.52 + math.sin(a) * rr * 0.84
-            blend(int(px), int(py), contour, 0.16)
-            blend(int(px) + 1, int(py), contour, 0.10)
-            blend(int(px), int(py) + 1, contour, 0.10)
+            blend(int(CX + math.cos(a) * rr), int(CY + math.sin(a) * rr),
+                  (150, 180, 255), 0.030)
 
-    # ---------- 底部海拔剖面 ----------
-    profile = []
-    for x in range(SIZE):
-        t = x / SIZE
-        h = (math.sin(t * 7.2) * 34 + math.sin(t * 3.1 + 1.2) * 52
-             + math.sin(t * 13.5 + 0.4) * 14)
-        profile.append(SIZE - 118 + h)
-    for x in range(SIZE):
-        topY = int(profile[x])
-        for y in range(max(0, topY), SIZE):
-            fade = 0.30 * (1 - (y - topY) / max(1, SIZE - topY)) + 0.10
-            blend(x, y, (36, 62, 128), fade)
-        for w in range(3):
-            blend(x, topY + w, (120, 200, 255), 0.30 - w * 0.08)
+    A0, A1 = 135.0, 405.0          # 儀表開口朝下
+    R = 338.0
+    THICK = 58.0
+    PROGRESS = 0.80                # 弧線填滿比例
 
-    # ---------- 路徑 ----------
-    samples = 1700
-    pts = []
-    for s in range(samples + 1):
-        t = s / samples
-        x = lerp(228, 792, t) + math.sin(t * math.pi * 2.05) * 98
-        y = lerp(792, 268, t) + math.sin(t * math.pi * 3.0 + 0.55) * 62
-        pts.append((x, y, t))
+    slow = (58, 142, 255)
+    mid = (46, 214, 160)
+    warm = (255, 196, 66)
+    fast = (255, 96, 66)
 
-    slow = (56, 150, 255)
-    mid_c = (152, 108, 255)
-    fast = (255, 104, 72)
+    def pace_color(t):
+        if t < 0.38:
+            return mix(slow, mid, t / 0.38)
+        if t < 0.72:
+            return mix(mid, warm, (t - 0.38) / 0.34)
+        return mix(warm, fast, (t - 0.72) / 0.28)
 
-    def path_color(t):
-        return mix(slow, mid_c, t / 0.5) if t < 0.5 else mix(mid_c, fast, (t - 0.5) / 0.5)
+    # ---------- 外圈刻度 ----------
+    ticks = 45
+    for i in range(ticks + 1):
+        t = i / ticks
+        a = math.radians(lerp(A0, A1, t))
+        major = (i % 5 == 0)
+        inner = R + THICK / 2 + 16
+        outer = inner + (34 if major else 18)
+        width = 6.0 if major else 3.0
+        color = (210, 228, 255) if major else (150, 178, 230)
+        alpha = 0.55 if major else 0.30
+        steps = int(outer - inner)
+        for s in range(steps + 1):
+            rr = inner + s
+            disc(CX + math.cos(a) * rr, CY + math.sin(a) * rr,
+                 width / 2, color, alpha, feather=1.0)
 
-    # 外光暈
-    glow_r = 62.0
-    for idx in range(0, len(pts), 9):
-        px, py, t = pts[idx]
-        cr, cg, cb = path_color(t)
-        x0, x1 = max(0, int(px - glow_r)), min(SIZE, int(px + glow_r) + 1)
-        y0, y1 = max(0, int(py - glow_r)), min(SIZE, int(py + glow_r) + 1)
-        for y in range(y0, y1):
-            dy = y - py
-            for x in range(x0, x1):
-                dx = x - px
-                d = math.sqrt(dx * dx + dy * dy)
-                if d > glow_r:
-                    continue
-                a = (1 - d / glow_r) ** 2 * 0.09
-                i = (y * SIZE + x) * 3
-                buf[i] = min(255, int(buf[i] + cr * a))
-                buf[i + 1] = min(255, int(buf[i + 1] + cg * a))
-                buf[i + 2] = min(255, int(buf[i + 2] + cb * a))
+    # ---------- 軌道 ----------
+    arc(R, THICK, A0, A1, lambda t: (36, 44, 82), 0.95)
+    arc(R, THICK - 16, A0, A1, lambda t: (22, 28, 58), 0.85)
 
-    # 描邊 → 主體 → 高光，做出立體緞帶感
-    for (px, py, t) in pts:
-        disc(px, py, 39, (9, 13, 32), 0.9, feather=2.0)
-    for (px, py, t) in pts:
-        disc(px, py, 31, path_color(t), 1.0, feather=1.6)
-    for idx, (px, py, t) in enumerate(pts):
-        if idx % 2:
-            continue
-        c = path_color(t)
-        bright = (min(255, c[0] + 90), min(255, c[1] + 90), min(255, c[2] + 90))
-        disc(px, py - 9, 10, bright, 0.30, feather=4.0)
+    # ---------- 進度弧（含外光暈） ----------
+    a_end = lerp(A0, A1, PROGRESS)
+    a = A0
+    while a <= a_end:
+        t = (a - A0) / (A1 - A0)
+        rad = math.radians(a)
+        px, py = CX + math.cos(rad) * R, CY + math.sin(rad) * R
+        glow_disc(px, py, 58, pace_color(t / PROGRESS), 0.05)
+        a += 3.0
+    arc(R, THICK - 10, A0, a_end, lambda t: pace_color(t), 1.0, step=0.2)
+    # 弧內側高光
+    arc(R - 13, 10, A0, a_end, lambda t: mix(pace_color(t), (255, 255, 255), 0.55), 0.35, step=0.4)
 
-    # 途經點：依實際弧長等距分佈，避免在轉彎處擠在一起
-    arc = [0.0]
-    for i in range(1, len(pts)):
-        arc.append(arc[-1] + math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
-    total_arc = arc[-1]
-    for k in range(1, 5):
-        target = total_arc * k / 5
-        idx = min(range(len(arc)), key=lambda j: abs(arc[j] - target))
-        px, py, _ = pts[idx]
-        disc(px, py, 16, (12, 17, 40), 0.92)
-        disc(px, py, 9.5, (255, 255, 255), 0.94)
+    # 弧端光點
+    rad_end = math.radians(a_end)
+    ex, ey = CX + math.cos(rad_end) * R, CY + math.sin(rad_end) * R
+    glow_disc(ex, ey, 92, fast, 0.30)
+    disc(ex, ey, 34, (255, 255, 255), 0.95)
+    disc(ex, ey, 23, fast)
 
-    # ---------- 起點 ----------
-    sx, sy, _ = pts[0]
-    disc(sx, sy, 40, (9, 13, 32), 0.55)
-    disc(sx, sy, 33, (255, 255, 255), 0.96)
-    disc(sx, sy, 23, (52, 217, 162))
-    disc(sx, sy, 9, (255, 255, 255), 0.85)
+    # ---------- 中央導航箭頭 ----------
+    tip = (CX, CY - 186)
+    left = (CX - 140, CY + 150)
+    notch = (CX, CY + 74)
+    right = (CX + 140, CY + 150)
+    tilt = -16.0
+    tip_r = rotate(tip, CX, CY, tilt)
+    left_r = rotate(left, CX, CY, tilt)
+    notch_r = rotate(notch, CX, CY, tilt)
+    right_r = rotate(right, CX, CY, tilt)
 
-    # ---------- 終點 ----------
-    ex, ey, _ = pts[-1]
-    disc(ex, ey, 104, (255, 120, 80), 0.16, feather=64)
-    disc(ex, ey + 6, 64, (8, 12, 30), 0.45)
-    disc(ex, ey, 62, (255, 255, 255), 0.97)
-    disc(ex, ey, 47, (255, 104, 72))
-    ring(ex, ey, 34, 4, (255, 190, 170), 0.55)
-    disc(ex, ey, 19, (255, 255, 255), 0.95)
+    shadow = [(p[0], p[1] + 18) for p in (tip_r, left_r, notch_r, right_r)]
+    polygon([shadow[0], shadow[1], shadow[2]], (6, 9, 24), 0.42)
+    polygon([shadow[0], shadow[2], shadow[3]], (6, 9, 24), 0.42)
 
-    # ---------- 指北玫瑰 ----------
-    cx, cy, R = 168.0, 176.0, 74.0
-    ring(cx, cy, R, 3, (170, 205, 255), 0.30)
-    ring(cx, cy, R - 16, 1.6, (170, 205, 255), 0.18)
-    for i in range(8):
-        a = i * math.pi / 4 - math.pi / 2
-        long_arm = (i % 2 == 0)
-        length = R - 6 if long_arm else R - 30
-        wide = 13 if long_arm else 7
-        tip = (cx + math.cos(a) * length, cy + math.sin(a) * length)
-        left = (cx + math.cos(a + math.pi / 2) * wide, cy + math.sin(a + math.pi / 2) * wide)
-        right = (cx + math.cos(a - math.pi / 2) * wide, cy + math.sin(a - math.pi / 2) * wide)
-        color = (255, 255, 255) if i == 0 else (150, 190, 250)
-        alpha = 0.72 if i == 0 else 0.30
-        triangle(tip, left, right, color, alpha)
-    disc(cx, cy, 9, (255, 255, 255), 0.55)
-
-    # ---------- 配速色階小圖例（右下，膠囊狀） ----------
-    lx, ly, lw, lh = 676.0, 902.0, 244.0, 18.0
-    radius = lh / 2
-    cy_legend = ly + radius
-    for i in range(int(lw)):
-        t = i / lw
-        c = path_color(t)
-        px = lx + i
-        # 兩端做成圓角
-        if i < radius:
-            half = math.sqrt(max(0.0, radius * radius - (radius - i) ** 2))
-        elif i > lw - radius:
-            half = math.sqrt(max(0.0, radius * radius - (i - (lw - radius)) ** 2))
-        else:
-            half = radius
-        for j in range(int(-half), int(half) + 1):
-            edge = 1.0 if abs(j) < half - 1.2 else 0.45
-            blend(int(px), int(cy_legend + j), c, 0.9 * edge)
-    # 兩端刻度
-    for tick in (0.0, 0.5, 1.0):
-        tx = lx + lw * tick
-        for j in range(6):
-            blend(int(tx), int(cy_legend + radius + 4 + j), (190, 215, 255), 0.35)
+    polygon([tip_r, left_r, notch_r], (255, 255, 255), 1.0)
+    polygon([tip_r, notch_r, right_r], (204, 216, 245), 1.0)
+    # 箭頭上的細亮邊
+    polygon([tip_r,
+             (lerp(tip_r[0], left_r[0], 0.12), lerp(tip_r[1], left_r[1], 0.12)),
+             (lerp(tip_r[0], notch_r[0], 0.3), lerp(tip_r[1], notch_r[1], 0.3))],
+            (255, 255, 255), 0.85)
 
     # ---------- 玻璃反光 ----------
-    for y in range(0, int(SIZE * 0.55)):
-        for x in range(0, SIZE):
-            fx = x / SIZE
-            fy = y / SIZE
-            d = 1.0 - min(1.0, math.hypot(fx - 0.18, fy - 0.05) * 1.5)
-            if d <= 0:
-                continue
-            blend(x, y, (255, 255, 255), d * d * 0.055)
+    for y in range(0, int(SIZE * 0.62)):
+        for x in range(SIZE):
+            fx, fy = x / SIZE, y / SIZE
+            d = 1.0 - min(1.0, math.hypot(fx - 0.22, fy - 0.02) * 1.45)
+            if d > 0:
+                blend(x, y, (255, 255, 255), d * d * 0.05)
 
     # ---------- 邊緣輪廓光 ----------
-    for i in range(6):
-        a = 0.10 - i * 0.016
+    for i in range(7):
+        a = 0.11 - i * 0.015
         for x in range(SIZE):
             blend(x, i, (255, 255, 255), a)
-            blend(x, SIZE - 1 - i, (255, 255, 255), a * 0.4)
+            blend(x, SIZE - 1 - i, (255, 255, 255), a * 0.35)
         for y in range(SIZE):
-            blend(i, y, (255, 255, 255), a * 0.8)
-            blend(SIZE - 1 - i, y, (255, 255, 255), a * 0.4)
+            blend(i, y, (255, 255, 255), a * 0.75)
+            blend(SIZE - 1 - i, y, (255, 255, 255), a * 0.35)
 
     raw = bytearray()
     for y in range(SIZE):

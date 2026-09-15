@@ -82,11 +82,11 @@ struct TrendChartView: View {
             }
         }
         .chartXAxis {
-            AxisMarks { value in
+            AxisMarks(values: .automatic(desiredCount: 5)) { value in
                 AxisValueLabel {
                     if let label = value.as(String.self) {
                         Text(label)
-                            .font(.caption2)
+                            .font(.system(size: 10))
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
@@ -414,6 +414,10 @@ struct TrainingLoadChart: View {
     let daily: [DailyLoad]
     let average: Double
 
+    private var upperBound: Double {
+        max(60, (daily.map { $0.load }.max() ?? 0) * 1.15, average * 1.4)
+    }
+
     var body: some View {
         Chart {
             ForEach(daily) { day in
@@ -428,6 +432,7 @@ struct TrainingLoadChart: View {
                 .foregroundStyle(Theme.amber.opacity(0.8))
                 .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
         }
+        .chartYScale(domain: 0...upperBound)
         .chartYAxis {
             AxisMarks(position: .leading) { value in
                 AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
@@ -445,7 +450,7 @@ struct TrainingLoadChart: View {
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
                         Text(Fmt.shortDayFormatter.string(from: date))
-                            .font(.caption2)
+                            .font(.system(size: 10))
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
