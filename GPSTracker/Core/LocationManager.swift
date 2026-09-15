@@ -14,6 +14,16 @@ final class LocationManager: NSObject, ObservableObject {
     @Published private(set) var isUpdating = false
 
     private let manager = CLLocationManager()
+    private var currentPowerMode: PowerMode = .precise
+
+    enum PowerMode {
+        /// 最高精度，適合慢速或剛起步
+        case precise
+        /// 一般跑步，略降取樣密度
+        case balanced
+        /// 低電量模式，明顯降頻
+        case saver
+    }
     /// 供錄製器訂閱的座標串流
     let locationSubject = PassthroughSubject<CLLocation, Never>()
 
@@ -62,6 +72,45 @@ final class LocationManager: NSObject, ObservableObject {
         manager.stopUpdatingHeading()
         manager.allowsBackgroundLocationUpdates = false
         isUpdating = false
+    }
+
+    /// 依速度與低電量狀態調整取樣密度，長距離記錄可省下可觀電力
+    func applyPowerProfile(speed: Double) {
+        guard AppSettings.shared.batterySaver else {
+            setPowerMode(.precise)
+            return
+        }
+        if ProcessInfo.processInfo.isLowPowerModeEnabled {
+            setPowerMode(.saver)
+        } else if speed > 2.2 {
+            setPowerMode(.balanced)
+        } else {
+            setPowerMode(.precise)
+        }
+    }
+
+    private func setPowerMode(_ mode: PowerMode) {
+        guard mode != currentPowerMode else { return }
+        currentPowerMode = mode
+        switch mode {
+        case .precise:
+            manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+            manager.distanceFilter = kCLDistanceFilterNone
+        case .balanced:
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.distanceFilter = 4
+        case .saver:
+            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.distanceFilter = 12
+        }
+    }
+
+    var powerModeText: String {
+        switch currentPowerMode {
+        case .precise: return "最高精度"
+        case .balanced: return "省電平衡"
+        case .saver: return "低電量省電"
+        }
     }
 
     /// 只取一次目前位置（用於地圖初始鏡頭）

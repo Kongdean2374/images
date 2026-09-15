@@ -2,6 +2,7 @@ import Foundation
 import CoreLocation
 import Combine
 import SwiftUI
+import UIKit
 
 /// 軌跡取樣點（記錄期間的輕量結構，結束後才轉成 SwiftData）
 struct TrackSample: Identifiable, Hashable {
@@ -53,6 +54,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     let pedometer = PedometerManager()
     let altimeter = AltimeterManager()
     private let kalman = GPSKalmanFilter()
+    private let announcer = AnnouncementService()
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer?
     private var accumulated: TimeInterval = 0
@@ -86,6 +88,8 @@ final class GPSWorkoutRecorder: ObservableObject {
         subscribe()
         startTimer()
         LiveActivityController.shared.start(mode: type, usesDistance: true)
+        announcer.reset()
+        if settings.keepScreenAwake { UIApplication.shared.isIdleTimerDisabled = true }
         CueService.shared.impact(.heavy)
         CueService.shared.speak("開始記錄")
     }
@@ -116,6 +120,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         location.stopUpdating()
         pedometer.stop()
         altimeter.stop()
+        UIApplication.shared.isIdleTimerDisabled = false
         // 用這次可信的 GPS 距離校正個人步幅，之後沒訊號時就靠它換算
         StrideCalibration.learn(distance: distance,
                                 steps: pedometer.steps,
@@ -226,6 +231,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         let coord = CLLocationCoordinate2D(latitude: smoothed.latitude, longitude: smoothed.longitude)
         currentSpeed = max(0, raw.speed)
         currentAltitude = smoothed.altitude
+        location.applyPowerProfile(speed: currentSpeed)
 
         // 自動暫停狀態下偵測到移動 → 自動恢復
         if isAutoPaused, currentSpeed > 1.1 {
@@ -261,7 +267,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         samples.append(sample)
         lastAccepted = sample
         currentPace = GeoMath.pace(fromSpeed: sample.speed)
-        announceKMIfNeeded()
+        announceIfNeeded()
     }
 
     /// 滑動窗口速度，避免 GPS 漂移造成配速亂跳
@@ -288,20 +294,13 @@ final class GPSWorkoutRecorder: ObservableObject {
         }
     }
 
-    private func announceKMIfNeeded() {
+    private func announceIfNeeded() {
         recordAutoLapIfNeeded()
-        let km = Int(distance / 1000)
-        guard km > announcedKM else { return }
-        announcedKM = km
-        let paceText = Fmt.pace(averagePace)
-        var announcement = "已完成 \(km) 公里，平均配速 \(paceText.replacingOccurrences(of: "'", with: "分").replacingOccurrences(of: "\"", with: "秒"))"
-        if let seconds = timeLead {
-            announcement += seconds >= 0
-                ? "，領先目標 \(Int(abs(seconds))) 秒"
-                : "，落後目標 \(Int(abs(seconds))) 秒"
-        }
-        CueService.shared.speak(announcement)
-        CueService.shared.impact(.medium)
+        announcer.announceIfNeeded(distance: distance,
+                                   elapsed: elapsed,
+                                   averagePace: averagePace,
+                                   currentPace: currentPace,
+                                   pacerDelta: timeLead)
     }
 
     // MARK: 輸出

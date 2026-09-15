@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UIKit
 
 /// 走路 / 跑步 / 跑步機模式：完全不需要定位，
 /// 用計步器 + 氣壓計 + 動作辨識組出距離、爬升與走跑分段。
@@ -27,6 +28,7 @@ final class StepWorkoutEngine: ObservableObject {
     let motion = ActivityTypeDetector()
 
     private var cancellables = Set<AnyCancellable>()
+    private let announcer = AnnouncementService()
     private var timer: Timer?
     private var accumulated: TimeInterval = 0
     private var segmentStart: Date?
@@ -91,6 +93,8 @@ final class StepWorkoutEngine: ObservableObject {
         motion.start()
         startTimer()
         LiveActivityController.shared.start(mode: mode, usesDistance: false)
+        announcer.reset()
+        if AppSettings.shared.keepScreenAwake { UIApplication.shared.isIdleTimerDisabled = true }
 
         CueService.shared.impact(.heavy)
         CueService.shared.speak("\(mode.displayName)開始")
@@ -125,6 +129,7 @@ final class StepWorkoutEngine: ObservableObject {
         altimeter.stop()
         motion.stop()
         state = .finished
+        UIApplication.shared.isIdleTimerDisabled = false
         LiveActivityController.shared.end()
         CueService.shared.speak("記錄結束")
     }
@@ -201,16 +206,16 @@ final class StepWorkoutEngine: ObservableObject {
             distance = StrideCalibration.distance(steps: steps, profile: strideProfile)
             distanceSource = .stride
         }
-        announceKMIfNeeded()
+        announceIfNeeded()
         checkTarget()
     }
 
-    private func announceKMIfNeeded() {
-        let km = Int(distance / 1000)
-        guard km > announcedKM else { return }
-        announcedKM = km
-        CueService.shared.impact(.medium)
-        CueService.shared.speak("已完成 \(km) 公里")
+    private func announceIfNeeded() {
+        announcer.announceIfNeeded(distance: distance,
+                                   elapsed: elapsed,
+                                   averagePace: averagePace,
+                                   currentPace: nil,
+                                   pacerDelta: nil)
     }
 
     private func startTimer() {

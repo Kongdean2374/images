@@ -22,6 +22,8 @@ struct GPSTrackingView: View {
     @State private var targetPaceIndex = 0
     @State private var autoLapIndex = 1
     @State private var showBackToStart = false
+    @State private var bigTextMode = false
+    @State private var exitTaps = 0
 
     private let paceOptions: [(String, Double?)] = [
         ("關閉", nil), ("7'00\"", 420), ("6'30\"", 390), ("6'00\"", 360),
@@ -43,6 +45,8 @@ struct GPSTrackingView: View {
                     permissionPanel
                 }
             }
+
+            if bigTextMode { bigTextOverlay }
         }
         .preferredColorScheme(.dark)
         .onAppear {
@@ -154,6 +158,19 @@ struct GPSTrackingView: View {
             Spacer()
 
             HStack(spacing: 10) {
+                if recorder.state != .idle {
+                    Button {
+                        bigTextMode = true
+                        exitTaps = 0
+                        CueService.shared.impact(.medium)
+                    } label: {
+                        Image(systemName: "textformat.size.larger")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(11)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+                }
                 Button {
                     mapStyleIndex = (mapStyleIndex + 1) % 3
                     CueService.shared.impact(.soft)
@@ -271,6 +288,72 @@ struct GPSTrackingView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
         .animation(.easeInOut(duration: 0.25), value: expandedMetrics)
+    }
+
+    // MARK: 大字模式（跑步中看得清楚，也避免誤觸）
+
+    private var bigTextOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.96).ignoresSafeArea()
+            VStack(spacing: 30) {
+                Spacer()
+                VStack(spacing: 2) {
+                    Text(Fmt.distanceValue(recorder.distance, unit: settings.unit))
+                        .font(.system(size: 92, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(.white)
+                    Text(Fmt.distanceUnitLabel(settings.unit))
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                VStack(spacing: 2) {
+                    Text(Fmt.duration(recorder.elapsed))
+                        .font(.system(size: 62, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(Theme.mint)
+                    Text("時間")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                VStack(spacing: 2) {
+                    Text(Fmt.pace(recorder.currentPace ?? recorder.averagePace, unit: settings.unit))
+                        .font(.system(size: 54, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(Theme.accent)
+                    Text("配速")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                if recorder.isAutoPaused || recorder.state == .paused {
+                    Label("已暫停", systemImage: "pause.circle.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.amber)
+                }
+                Spacer()
+                VStack(spacing: 6) {
+                    Image(systemName: exitTaps > 0 ? "lock.open.fill" : "lock.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text(exitTaps > 0 ? "再點一次離開" : "連點兩下離開大字模式")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                .padding(.bottom, 30)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            exitTaps += 1
+            CueService.shared.impact(.soft)
+            if exitTaps >= 2 {
+                bigTextMode = false
+                exitTaps = 0
+            }
+        }
+        .transition(.opacity)
     }
 
     // MARK: 開始前設定

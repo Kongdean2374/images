@@ -26,6 +26,14 @@ final class AppSettings: ObservableObject {
     @Published var autoImportHealth: Bool { didSet { defaults.set(autoImportHealth, forKey: Keys.autoImportHealth) } }
     @Published var backgroundUpdates: Bool { didSet { defaults.set(backgroundUpdates, forKey: Keys.backgroundUpdates) } }
     @Published var hasSeenOnboarding: Bool { didSet { defaults.set(hasSeenOnboarding, forKey: Keys.hasSeenOnboarding) } }
+    /// 語音播報間隔：0 = 關閉，>0 為公尺；負值代表以分鐘為單位（-5 = 每 5 分鐘）
+    @Published var announceIntervalRaw: Double { didSet { defaults.set(announceIntervalRaw, forKey: Keys.announceIntervalRaw) } }
+    @Published var announceDistance: Bool { didSet { defaults.set(announceDistance, forKey: Keys.announceDistance) } }
+    @Published var announcePace: Bool { didSet { defaults.set(announcePace, forKey: Keys.announcePace) } }
+    @Published var announceDuration: Bool { didSet { defaults.set(announceDuration, forKey: Keys.announceDuration) } }
+    @Published var announcePacerDelta: Bool { didSet { defaults.set(announcePacerDelta, forKey: Keys.announcePacerDelta) } }
+    @Published var keepScreenAwake: Bool { didSet { defaults.set(keepScreenAwake, forKey: Keys.keepScreenAwake) } }
+    @Published var batterySaver: Bool { didSet { defaults.set(batterySaver, forKey: Keys.batterySaver) } }
     @Published var dailyDistanceGoal: Double { didSet { defaults.set(dailyDistanceGoal, forKey: Keys.dailyDistanceGoal) } }
     @Published var lastHealthImport: Double { didSet { defaults.set(lastHealthImport, forKey: Keys.lastHealthImport) } }
 
@@ -49,6 +57,13 @@ final class AppSettings: ObservableObject {
         static let autoImportHealth = "autoImportHealth"
         static let backgroundUpdates = "backgroundUpdates"
         static let hasSeenOnboarding = "hasSeenOnboarding"
+        static let announceIntervalRaw = "announceIntervalRaw"
+        static let announceDistance = "announceDistance"
+        static let announcePace = "announcePace"
+        static let announceDuration = "announceDuration"
+        static let announcePacerDelta = "announcePacerDelta"
+        static let keepScreenAwake = "keepScreenAwake"
+        static let batterySaver = "batterySaver"
         static let dailyDistanceGoal = "dailyDistanceGoal"
         static let lastHealthImport = "lastHealthImport"
     }
@@ -75,6 +90,13 @@ final class AppSettings: ObservableObject {
             Keys.autoImportHealth: false,
             Keys.backgroundUpdates: false,
             Keys.hasSeenOnboarding: false,
+            Keys.announceIntervalRaw: 1000.0,
+            Keys.announceDistance: true,
+            Keys.announcePace: true,
+            Keys.announceDuration: false,
+            Keys.announcePacerDelta: true,
+            Keys.keepScreenAwake: true,
+            Keys.batterySaver: true,
             Keys.dailyDistanceGoal: 5.0,
             Keys.lastHealthImport: 0.0
         ])
@@ -97,8 +119,26 @@ final class AppSettings: ObservableObject {
         autoImportHealth = defaults.bool(forKey: Keys.autoImportHealth)
         backgroundUpdates = defaults.bool(forKey: Keys.backgroundUpdates)
         hasSeenOnboarding = defaults.bool(forKey: Keys.hasSeenOnboarding)
+        announceIntervalRaw = defaults.double(forKey: Keys.announceIntervalRaw)
+        announceDistance = defaults.bool(forKey: Keys.announceDistance)
+        announcePace = defaults.bool(forKey: Keys.announcePace)
+        announceDuration = defaults.bool(forKey: Keys.announceDuration)
+        announcePacerDelta = defaults.bool(forKey: Keys.announcePacerDelta)
+        keepScreenAwake = defaults.bool(forKey: Keys.keepScreenAwake)
+        batterySaver = defaults.bool(forKey: Keys.batterySaver)
         dailyDistanceGoal = defaults.double(forKey: Keys.dailyDistanceGoal)
         lastHealthImport = defaults.double(forKey: Keys.lastHealthImport)
+    }
+
+    /// 播報間隔的顯示文字
+    var announceIntervalText: String {
+        if announceIntervalRaw == 0 { return "關閉" }
+        if announceIntervalRaw < 0 { return "每 \(Int(-announceIntervalRaw)) 分鐘" }
+        if announceIntervalRaw >= 1000 {
+            let km = announceIntervalRaw / 1000
+            return km == km.rounded() ? "每 \(Int(km)) 公里" : String(format: "每 %.1f 公里", km)
+        }
+        return "每 \(Int(announceIntervalRaw)) 公尺"
     }
 
     var lastHealthImportDate: Date? {

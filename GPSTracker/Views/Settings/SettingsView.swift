@@ -32,6 +32,8 @@ struct SettingsView: View {
                 group("運動偏好") {
                     unitCard
                     bodyCard
+                    announcementCard
+                    powerCard
                     cueCard
                     mapCard
                 }
@@ -402,6 +404,95 @@ struct SettingsView: View {
                        in: 50...2000, step: 50)
                     .tint(Theme.accent)
             }
+        }
+    }
+
+    private var announcementCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("語音播報", systemImage: "speaker.wave.2.fill")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(settings.announceIntervalText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(announceOptions, id: \.1) { label, value in
+                            Button {
+                                settings.announceIntervalRaw = value
+                                CueService.shared.impact(.soft)
+                            } label: {
+                                Text(label)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Capsule().fill(settings.announceIntervalRaw == value
+                                                               ? Theme.accent.opacity(0.3)
+                                                               : Color.white.opacity(0.07)))
+                                    .foregroundStyle(settings.announceIntervalRaw == value
+                                                     ? Theme.accent : Theme.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if settings.announceIntervalRaw != 0 {
+                    Text("播報內容")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Toggle("距離", isOn: Binding(get: { settings.announceDistance },
+                                               set: { settings.announceDistance = $0 }))
+                    Toggle("平均配速", isOn: Binding(get: { settings.announcePace },
+                                                 set: { settings.announcePace = $0 }))
+                    Toggle("累計時間", isOn: Binding(get: { settings.announceDuration },
+                                                 set: { settings.announceDuration = $0 }))
+                    Toggle("與虛擬配速員的差距", isOn: Binding(get: { settings.announcePacerDelta },
+                                                      set: { settings.announcePacerDelta = $0 }))
+                }
+            }
+            .tint(Theme.accent)
+            .foregroundStyle(Theme.textPrimary)
+            .font(.subheadline)
+        }
+    }
+
+    private var announceOptions: [(String, Double)] {
+        [("關閉", 0), ("每 0.5 km", 500), ("每 1 km", 1000), ("每 2 km", 2000),
+         ("每 5 分", -5), ("每 10 分", -10)]
+    }
+
+    private var powerCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("電量與螢幕", systemImage: "battery.100percent.bolt")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Toggle("運動中保持螢幕開啟", isOn: Binding(get: { settings.keepScreenAwake },
+                                                 set: { settings.keepScreenAwake = $0 }))
+                Toggle("GPS 智慧省電", isOn: Binding(get: { settings.batterySaver },
+                                                set: { settings.batterySaver = $0 }))
+                Text("智慧省電會依你的速度調整定位取樣密度，並在系統低耗電模式下再降一級。長距離記錄可省下可觀電力，精度影響很小。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                HStack {
+                    Text("目前模式")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Text(location.powerModeText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.mint)
+                }
+            }
+            .tint(Theme.accent)
+            .foregroundStyle(Theme.textPrimary)
+            .font(.subheadline)
         }
     }
 
