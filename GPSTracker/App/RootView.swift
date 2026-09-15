@@ -7,6 +7,7 @@ struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var selection = 0
     @State private var didAutoImport = false
+    @State private var showOnboarding = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -31,6 +32,14 @@ struct RootView: View {
                 .tag(4)
         }
         .tint(Theme.accent)
+        .onAppear {
+            if !settings.hasSeenOnboarding { showOnboarding = true }
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            NavigationStack {
+                OnboardingView()
+            }
+        }
         .task {
             guard !didAutoImport else { return }
             didAutoImport = true

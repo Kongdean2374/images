@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var healthMessage: String?
     @State private var isSyncingAll = false
     @State private var notificationsAuthorized = false
+    @State private var showOnboardingAgain = false
     @State private var exportURL: URL?
     @State private var showExport = false
     @State private var weightText = ""
@@ -37,6 +38,9 @@ struct SettingsView: View {
                 group("系統") {
                     permissionCard
                     dataCard
+                }
+                group("說明與條款") {
+                    documentsCard
                     aboutCard
                 }
             }
@@ -521,6 +525,86 @@ struct SettingsView: View {
         }
     }
 
+    private var documentsCard: some View {
+        GlassCard(padding: 6) {
+            VStack(spacing: 0) {
+                documentRow(icon: "book.fill", title: "使用說明",
+                            subtitle: "九種模式與資料流的圖解", tint: Theme.accent) {
+                    UserGuideView()
+                }
+                rowDivider
+                documentRow(icon: "hand.raised.fill", title: "隱私政策",
+                            subtitle: "中文 / English・含權限一覽", tint: Theme.mint) {
+                    LegalView(document: .privacy)
+                }
+                rowDivider
+                documentRow(icon: "doc.text.fill", title: "使用條款",
+                            subtitle: "中文 / English", tint: Theme.amber) {
+                    LegalView(document: .terms)
+                }
+                rowDivider
+                Button {
+                    settings.hasSeenOnboarding = false
+                    showOnboardingAgain = true
+                } label: {
+                    documentRowContent(icon: "sparkles", title: "重新觀看導覽",
+                                       subtitle: "再看一次開場說明", tint: Theme.violet)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .fullScreenCover(isPresented: $showOnboardingAgain) {
+            NavigationStack { OnboardingView() }
+        }
+    }
+
+    private var rowDivider: some View {
+        Divider()
+            .overlay(Color.white.opacity(0.07))
+            .padding(.leading, 60)
+    }
+
+    private func documentRow<Destination: View>(icon: String,
+                                                title: String,
+                                                subtitle: String,
+                                                tint: Color,
+                                                @ViewBuilder destination: () -> Destination) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            documentRowContent(icon: icon, title: title, subtitle: subtitle, tint: tint)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func documentRowContent(icon: String, title: String, subtitle: String, tint: Color) -> some View {
+        HStack(spacing: 13) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(tint.opacity(0.18))
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: 36, height: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
     private var aboutCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 8) {
@@ -533,9 +617,24 @@ struct SettingsView: View {
                 Text("全程本地端運算與儲存，不連後端伺服器，不需要帳號。")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                Text("版本 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textSecondary)
+                HStack {
+                    Text("App 版本")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                HStack {
+                    Text("條款版本")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Text("\(LegalContent.version)（\(LegalContent.effectiveDate)）")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textPrimary)
+                }
             }
         }
     }

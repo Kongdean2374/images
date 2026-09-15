@@ -25,6 +25,7 @@ final class AppSettings: ObservableObject {
     @Published var liveActivityEnabled: Bool { didSet { defaults.set(liveActivityEnabled, forKey: Keys.liveActivityEnabled) } }
     @Published var autoImportHealth: Bool { didSet { defaults.set(autoImportHealth, forKey: Keys.autoImportHealth) } }
     @Published var backgroundUpdates: Bool { didSet { defaults.set(backgroundUpdates, forKey: Keys.backgroundUpdates) } }
+    @Published var hasSeenOnboarding: Bool { didSet { defaults.set(hasSeenOnboarding, forKey: Keys.hasSeenOnboarding) } }
     @Published var dailyDistanceGoal: Double { didSet { defaults.set(dailyDistanceGoal, forKey: Keys.dailyDistanceGoal) } }
     @Published var lastHealthImport: Double { didSet { defaults.set(lastHealthImport, forKey: Keys.lastHealthImport) } }
 
@@ -47,6 +48,7 @@ final class AppSettings: ObservableObject {
         static let liveActivityEnabled = "liveActivityEnabled"
         static let autoImportHealth = "autoImportHealth"
         static let backgroundUpdates = "backgroundUpdates"
+        static let hasSeenOnboarding = "hasSeenOnboarding"
         static let dailyDistanceGoal = "dailyDistanceGoal"
         static let lastHealthImport = "lastHealthImport"
     }
@@ -72,6 +74,7 @@ final class AppSettings: ObservableObject {
             Keys.liveActivityEnabled: true,
             Keys.autoImportHealth: false,
             Keys.backgroundUpdates: false,
+            Keys.hasSeenOnboarding: false,
             Keys.dailyDistanceGoal: 5.0,
             Keys.lastHealthImport: 0.0
         ])
@@ -93,6 +96,7 @@ final class AppSettings: ObservableObject {
         liveActivityEnabled = defaults.bool(forKey: Keys.liveActivityEnabled)
         autoImportHealth = defaults.bool(forKey: Keys.autoImportHealth)
         backgroundUpdates = defaults.bool(forKey: Keys.backgroundUpdates)
+        hasSeenOnboarding = defaults.bool(forKey: Keys.hasSeenOnboarding)
         dailyDistanceGoal = defaults.double(forKey: Keys.dailyDistanceGoal)
         lastHealthImport = defaults.double(forKey: Keys.lastHealthImport)
     }
