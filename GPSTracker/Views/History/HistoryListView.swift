@@ -21,9 +21,19 @@ struct SessionRow: View {
                     Text(session.displayTitle)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text(Fmt.dateTime(session.startDate))
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textSecondary)
+                    HStack(spacing: 6) {
+                        Text(Fmt.dateTime(session.startDate))
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                        if session.isImported {
+                            Text(session.originLabel)
+                                .font(.system(size: 9, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.mint.opacity(0.18)))
+                                .foregroundStyle(Theme.mint)
+                        }
+                    }
                 }
 
                 Spacer(minLength: 0)

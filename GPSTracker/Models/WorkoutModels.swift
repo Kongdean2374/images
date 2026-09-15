@@ -151,6 +151,12 @@ final class WorkoutSession {
     var runningSeconds: Double?
     /// 是否已寫入健康 App
     var healthKitSynced: Bool = false
+    /// 對應的健康 App 訓練 UUID（避免重複匯入／重複寫入）
+    var healthKitUUID: String?
+    /// 這筆紀錄是從健康 App 匯入的
+    var isImported: Bool = false
+    /// 原始來源 App 名稱（例如 Apple Watch、Nike Run Club）
+    var sourceApp: String?
     /// 距離來源：gps / pedometer / stride / manual
     var distanceSourceRaw: String?
     /// 自覺強度 RPE 1-10（運動後自行評分）
@@ -213,6 +219,9 @@ final class WorkoutSession {
         self.walkingSeconds = walkingSeconds
         self.runningSeconds = runningSeconds
         self.healthKitSynced = false
+        self.healthKitUUID = nil
+        self.isImported = false
+        self.sourceApp = nil
         self.distanceSourceRaw = distanceSource?.rawValue
         self.routeKey = routeKey
         self.title = title
@@ -248,6 +257,15 @@ final class WorkoutSession {
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
         return type.displayName
+    }
+
+    /// 資料是自己記錄的還是從健康 App 匯入的
+    var originLabel: String {
+        if isImported {
+            if let sourceApp, !sourceApp.isEmpty { return sourceApp }
+            return "健康 App"
+        }
+        return "本機記錄"
     }
 }
 

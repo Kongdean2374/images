@@ -3,11 +3,16 @@ import SwiftData
 
 struct HomeView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
+    @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var location = LocationManager.shared
+    @StateObject private var dailyActivity = DailyActivityProvider()
+    @StateObject private var health = HealthKitManager.shared
 
     @State private var activeMode: WorkoutType?
-    @StateObject private var dailyActivity = DailyActivityProvider()
+    @State private var showImport = false
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     private var weekSummary: (distance: Double, duration: TimeInterval, count: Int) {
         let calendar = Calendar.current
@@ -18,34 +23,56 @@ struct HomeView: View {
                 items.count)
     }
 
+    private var hasImported: Bool { sessions.contains { $0.isImported } }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                header
-                stepsCard
-                weekCard
+            VStack(spacing: 20) {
+                summaryHeader
+                if !hasImported { importPrompt }
                 locationBanner
-                sectionTitle("需要定位", subtitle: "戶外路跑與健行")
-                modeCard(.gpsRun, subtitle: "即時軌跡、配速漸層、3D 鏡頭跟隨")
-                modeCard(.gpsHike, subtitle: "海拔爬升與下降記錄")
-                sectionTitle("無定位模式", subtitle: "營區、室內、地下室都能用")
-                modeCard(.walk, subtitle: "計步器記錄步數、步頻與距離，含爬樓層")
-                modeCard(.run, subtitle: "以個人步幅換算距離，走跑自動分段")
-                modeCard(.treadmill, subtitle: "跑步機專用，可用實際距離反向校正步幅")
-                modeCard(.lapCounter, subtitle: "固定圈距手動計圈，純計時計數")
-                modeCard(.indoorInterval, subtitle: "衝刺／休息循環，語音與震動提示")
-                modeCard(.indoorReps, subtitle: "開合跳、波比跳自動計次，可設循環組數")
-                modeCard(.fitnessTest, subtitle: "仰臥起坐／伏地挺身／3000 公尺，自動評等")
-                modeCard(.manualEntry, subtitle: "事後補登里程與時間")
+
+                section("需要定位", subtitle: "戶外路跑與健行") {
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        modeTile(.gpsRun, subtitle: "即時軌跡・3D 鏡頭")
+                        modeTile(.gpsHike, subtitle: "海拔與爬升")
+                    }
+                }
+
+                section("無定位模式", subtitle: "營區、室內、地下室都能用") {
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        modeTile(.walk, subtitle: "計步・步頻・樓層")
+                        modeTile(.run, subtitle: "步幅換算距離")
+                        modeTile(.treadmill, subtitle: "可用實際距離校正")
+                        modeTile(.lapCounter, subtitle: "固定圈距計圈")
+                        modeTile(.indoorInterval, subtitle: "衝刺／休息循環")
+                        modeTile(.indoorReps, subtitle: "自動計次・循環組")
+                        modeTile(.fitnessTest, subtitle: "三項體測評等")
+                        modeTile(.manualEntry, subtitle: "事後補登")
+                    }
+                }
+
                 recentSection
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .padding(.bottom, 28)
         }
         .screenBackground()
-        .task { await dailyActivity.load(dayCount: 7) }
+        .task {
+            await dailyActivity.load(dayCount: 7)
+            health.refreshAvailability()
+        }
         .navigationTitle("開始運動")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    DailyActivityView()
+                } label: {
+                    Image(systemName: "figure.walk.motion")
+                }
+            }
+        }
         .fullScreenCover(item: $activeMode) { mode in
             switch mode {
             case .gpsRun, .gpsHike:
@@ -66,17 +93,57 @@ struct HomeView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(greeting)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(Theme.textPrimary)
-            Text("選一個模式，開始今天的訓練")
-                .font(.subheadline)
-                .foregroundStyle(Theme.textSecondary)
+    // MARK: 頂部總覽
+
+    private var summaryHeader: some View {
+        GlassCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(greeting)
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("選一個模式開始今天的訓練")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                    if dailyActivity.isAvailable {
+                        NavigationLink {
+                            DailyActivityView()
+                        } label: {
+                            ZStack {
+                                RingProgress(progress: stepProgress, lineWidth: 7)
+                                VStack(spacing: 0) {
+                                    Text("\(dailyActivity.todaySteps)")
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                        .monospacedDigit()
+                                        .contentTransition(.numericText())
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Text("步")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                            .frame(width: 66, height: 66)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Divider().overlay(Color.white.opacity(0.08))
+
+                HStack(spacing: 10) {
+                    StatPill(title: "本週里程", value: Fmt.distanceValue(weekSummary.distance, unit: settings.unit), tint: Theme.accent)
+                    StatPill(title: "本週時間", value: Fmt.duration(weekSummary.duration), tint: Theme.mint)
+                    StatPill(title: "本週次數", value: "\(weekSummary.count)", tint: Theme.amber)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8)
+    }
+
+    private var stepProgress: Double {
+        min(1, Double(dailyActivity.todaySteps) / Double(max(1, settings.dailyStepGoal)))
     }
 
     private var greeting: String {
@@ -89,66 +156,38 @@ struct HomeView: View {
         }
     }
 
-    @ViewBuilder
-    private var stepsCard: some View {
-        if dailyActivity.isAvailable {
-            NavigationLink {
-                DailyActivityView()
-            } label: {
-                GlassCard {
-                    HStack(spacing: 16) {
-                        ZStack {
-                            RingProgress(progress: min(1, Double(dailyActivity.todaySteps) / Double(max(1, settings.dailyStepGoal))),
-                                         lineWidth: 8)
-                            Image(systemName: "shoeprints.fill")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(Theme.accent)
-                        }
-                        .frame(width: 60, height: 60)
+    // MARK: 匯入提示
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("今日步數")
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                            Text("\(dailyActivity.todaySteps)")
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                                .foregroundStyle(Theme.textPrimary)
-                            Text("目標 \(settings.dailyStepGoal) 步・爬 \(dailyActivity.todayFloors) 層")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
+    private var importPrompt: some View {
+        NavigationLink {
+            HealthImportView()
+        } label: {
+            GlassCard(padding: 14) {
+                HStack(spacing: 13) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(Theme.mint.opacity(0.18))
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.mint)
+                    }
+                    .frame(width: 42, height: 42)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("匯入過去的運動紀錄")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("把健康 App 裡的歷史訓練（含其他 App 的）一次帶進來")
+                            .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
-                }
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var weekCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("本週累積")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                HStack(spacing: 10) {
-                    StatPill(title: "里程（\(Fmt.distanceUnitLabel(settings.unit))）",
-                             value: Fmt.distanceValue(weekSummary.distance, unit: settings.unit),
-                             tint: Theme.accent)
-                    StatPill(title: "時間",
-                             value: Fmt.duration(weekSummary.duration),
-                             tint: Theme.mint)
-                    StatPill(title: "次數",
-                             value: "\(weekSummary.count)",
-                             tint: Theme.amber)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
         }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -162,8 +201,8 @@ struct HomeView: View {
                         Text("定位權限已關閉")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("GPS 模式不可用，但計圈、間歇、原地運動、手動輸入全部照常運作。")
-                            .font(.caption)
+                        Text("GPS 模式不可用，其餘八種模式全部照常運作。")
+                            .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
@@ -171,50 +210,61 @@ struct HomeView: View {
         }
     }
 
-    private func sectionTitle(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
+    // MARK: 區塊與磚塊
+
+    private func section<Content: View>(_ title: String,
+                                        subtitle: String,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 6)
     }
 
-    private func modeCard(_ type: WorkoutType, subtitle: String) -> some View {
+    private func modeTile(_ type: WorkoutType, subtitle: String) -> some View {
         Button {
             CueService.shared.impact(.soft)
             activeMode = type
         } label: {
-            GlassCard {
-                HStack(spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Theme.color(for: type).opacity(0.18))
-                        Image(systemName: type.systemImage)
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(Theme.color(for: type))
-                    }
-                    .frame(width: 52, height: 52)
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Theme.color(for: type).opacity(0.18))
+                    Image(systemName: type.systemImage)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Theme.color(for: type))
+                }
+                .frame(width: 42, height: 42)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(type.displayName)
-                            .font(.headline)
-                            .foregroundStyle(Theme.textPrimary)
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(type.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(subtitle)
+                        .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+            .padding(13)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Theme.card)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Theme.cardStroke, lineWidth: 1)
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
@@ -222,15 +272,16 @@ struct HomeView: View {
     @ViewBuilder
     private var recentSection: some View {
         if !sessions.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                sectionTitle("最近紀錄", subtitle: "最新 3 筆")
-                ForEach(Array(sessions.prefix(3))) { session in
-                    NavigationLink {
-                        WorkoutDetailView(session: session)
-                    } label: {
-                        SessionRow(session: session)
+            section("最近紀錄", subtitle: "最新 3 筆") {
+                VStack(spacing: 10) {
+                    ForEach(Array(sessions.prefix(3))) { session in
+                        NavigationLink {
+                            WorkoutDetailView(session: session)
+                        } label: {
+                            SessionRow(session: session)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }

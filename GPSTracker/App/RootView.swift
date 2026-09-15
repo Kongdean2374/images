@@ -1,7 +1,12 @@
 import SwiftUI
+import SwiftData
 
 struct RootView: View {
+    @Environment(\.modelContext) private var context
+    @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
+    @EnvironmentObject private var settings: AppSettings
     @State private var selection = 0
+    @State private var didAutoImport = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -26,5 +31,14 @@ struct RootView: View {
                 .tag(4)
         }
         .tint(Theme.accent)
+        .task {
+            guard !didAutoImport else { return }
+            didAutoImport = true
+            guard settings.autoImportHealth, HealthKitManager.shared.isReady else { return }
+            await HealthKitImporter.shared.importNew(context: context, existing: sessions)
+            if settings.backgroundUpdates {
+                await HealthBackgroundMonitor.shared.checkDailyGoals()
+            }
+        }
     }
 }

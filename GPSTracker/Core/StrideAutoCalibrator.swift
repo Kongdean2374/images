@@ -96,12 +96,21 @@ enum StrideAutoCalibrator {
                   let steps = session.stepCount,
                   steps > 300,
                   distance > 300,
-                  session.distanceSource == .gps || session.distanceSource == .manual else { return nil }
+                  session.distanceSource == .gps || session.distanceSource == .manual
+                    || session.isImported else { return nil }
+            let source: StrideSample.Source
+            if session.isImported {
+                source = .healthWorkout
+            } else if session.distanceSource == .manual {
+                source = .manual
+            } else {
+                source = .gpsSession
+            }
             return StrideSample(stride: distance / Double(steps),
                                 distance: distance,
                                 steps: steps,
                                 date: session.startDate,
-                                source: session.distanceSource == .manual ? .manual : .gpsSession,
+                                source: source,
                                 profile: session.type.strideProfile)
         }
     }

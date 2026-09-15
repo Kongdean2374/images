@@ -27,6 +27,13 @@ struct GPSTrackerApp: App {
             RootView()
                 .environmentObject(settings)
                 .preferredColorScheme(settings.preferDarkMode ? .dark : nil)
+                .task {
+                    HealthKitImporter.shared.configure(container: sharedModelContainer)
+                    HealthKitManager.shared.refreshAvailability()
+                    if settings.backgroundUpdates {
+                        HealthBackgroundMonitor.shared.start()
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
     }

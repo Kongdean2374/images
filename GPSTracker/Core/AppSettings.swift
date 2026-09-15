@@ -23,6 +23,10 @@ final class AppSettings: ObservableObject {
     @Published var streakReminderEnabled: Bool { didSet { defaults.set(streakReminderEnabled, forKey: Keys.streakReminderEnabled) } }
     @Published var sedentaryReminderHours: Int { didSet { defaults.set(sedentaryReminderHours, forKey: Keys.sedentaryReminderHours) } }
     @Published var liveActivityEnabled: Bool { didSet { defaults.set(liveActivityEnabled, forKey: Keys.liveActivityEnabled) } }
+    @Published var autoImportHealth: Bool { didSet { defaults.set(autoImportHealth, forKey: Keys.autoImportHealth) } }
+    @Published var backgroundUpdates: Bool { didSet { defaults.set(backgroundUpdates, forKey: Keys.backgroundUpdates) } }
+    @Published var dailyDistanceGoal: Double { didSet { defaults.set(dailyDistanceGoal, forKey: Keys.dailyDistanceGoal) } }
+    @Published var lastHealthImport: Double { didSet { defaults.set(lastHealthImport, forKey: Keys.lastHealthImport) } }
 
     private enum Keys {
         static let unit = "unit"
@@ -41,6 +45,10 @@ final class AppSettings: ObservableObject {
         static let streakReminderEnabled = "streakReminderEnabled"
         static let sedentaryReminderHours = "sedentaryReminderHours"
         static let liveActivityEnabled = "liveActivityEnabled"
+        static let autoImportHealth = "autoImportHealth"
+        static let backgroundUpdates = "backgroundUpdates"
+        static let dailyDistanceGoal = "dailyDistanceGoal"
+        static let lastHealthImport = "lastHealthImport"
     }
 
     init() {
@@ -61,7 +69,11 @@ final class AppSettings: ObservableObject {
             Keys.stepReminderHour: 20,
             Keys.streakReminderEnabled: false,
             Keys.sedentaryReminderHours: 0,
-            Keys.liveActivityEnabled: true
+            Keys.liveActivityEnabled: true,
+            Keys.autoImportHealth: false,
+            Keys.backgroundUpdates: false,
+            Keys.dailyDistanceGoal: 5.0,
+            Keys.lastHealthImport: 0.0
         ])
         unitRaw = defaults.string(forKey: Keys.unit) ?? DistanceUnit.metric.rawValue
         bodyWeight = defaults.double(forKey: Keys.bodyWeight)
@@ -79,6 +91,14 @@ final class AppSettings: ObservableObject {
         streakReminderEnabled = defaults.bool(forKey: Keys.streakReminderEnabled)
         sedentaryReminderHours = defaults.integer(forKey: Keys.sedentaryReminderHours)
         liveActivityEnabled = defaults.bool(forKey: Keys.liveActivityEnabled)
+        autoImportHealth = defaults.bool(forKey: Keys.autoImportHealth)
+        backgroundUpdates = defaults.bool(forKey: Keys.backgroundUpdates)
+        dailyDistanceGoal = defaults.double(forKey: Keys.dailyDistanceGoal)
+        lastHealthImport = defaults.double(forKey: Keys.lastHealthImport)
+    }
+
+    var lastHealthImportDate: Date? {
+        lastHealthImport > 0 ? Date(timeIntervalSince1970: lastHealthImport) : nil
     }
 
     var unit: DistanceUnit {

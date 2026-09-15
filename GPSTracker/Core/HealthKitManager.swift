@@ -2,6 +2,20 @@ import Foundation
 import HealthKit
 import CoreLocation
 
+/// 只允許 continuation 被 resume 一次
+final class ResumeBox {
+    private var done = false
+    private let lock = NSLock()
+
+    func take() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
+}
+
 /// 寫入健康 App 用的值型別快照（在主執行緒建立，之後可安全跨執行緒使用）。
 struct WorkoutSnapshot {
     let type: WorkoutType
@@ -143,9 +157,9 @@ final class HealthKitManager: ObservableObject {
     ///
     /// 傳入的是值型別快照，SwiftData 物件只在主執行緒被讀取過一次。
     @discardableResult
-    func save(_ snapshot: WorkoutSnapshot) async -> Bool {
-        guard HKHealthStore.isHealthDataAvailable() else { return false }
-        guard availability == .ready else { return false }
+    func save(_ snapshot: WorkoutSnapshot) async -> String? {
+        guard HKHealthStore.isHealthDataAvailable() else { return nil }
+        guard availability == .ready else { return nil }
 
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = Self.activityType(for: snapshot.type)
@@ -186,7 +200,7 @@ final class HealthKitManager: ObservableObject {
             try await builder.endCollection(at: end)
             guard let workout = try await builder.finishWorkout() else {
                 update { self.lastError = "健康 App 未建立紀錄" }
-                return false
+                return nil
             }
 
             if snapshot.locations.count > 1 {
@@ -199,10 +213,10 @@ final class HealthKitManager: ObservableObject {
                 self.lastSyncDate = Date()
                 self.lastError = nil
             }
-            return true
+            return workout.uuid.uuidString
         } catch {
             update { self.lastError = error.localizedDescription }
-            return false
+            return nil
         }
     }
 
@@ -360,6 +374,92 @@ final class HealthKitManager: ObservableObject {
         return samples
     }
 
+    /// 匯入用：取得期間內的所有訓練（含其他 App 寫入的）
+    func workouts(from start: Date, to end: Date = Date(), limit: Int = HKObjectQueryNoLimit) async -> [HKWorkout] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
+        return await withCheckedContinuation { continuation in
+            let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
+                                      predicate: predicate,
+                                      limit: limit,
+                                      sortDescriptors: [sort]) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKWorkout]) ?? [])
+            }
+            store.execute(query)
+        }
+    }
+
+    /// 某次訓練期間的步數
+    func steps(during workout: HKWorkout) async -> Int? {
+        if let value = workout.statistics(for: HKQuantityType(.stepCount))?
+            .sumQuantity()?.doubleValue(for: .count()) {
+            return Int(value)
+        }
+        guard let sum = await sumQuantity(HKQuantityType(.stepCount),
+                                          unit: .count(),
+                                          from: workout.startDate,
+                                          to: workout.endDate) else { return nil }
+        return Int(sum)
+    }
+
+    /// 某次訓練的距離（公尺）
+    func distance(of workout: HKWorkout) async -> Double? {
+        if let value = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?
+            .sumQuantity()?.doubleValue(for: .meter()) {
+            return value
+        }
+        if let value = workout.statistics(for: HKQuantityType(.distanceCycling))?
+            .sumQuantity()?.doubleValue(for: .meter()) {
+            return value
+        }
+        return await sumQuantity(HKQuantityType(.distanceWalkingRunning),
+                                 unit: .meter(),
+                                 from: workout.startDate,
+                                 to: workout.endDate)
+    }
+
+    func energy(of workout: HKWorkout) async -> Double? {
+        workout.statistics(for: HKQuantityType(.activeEnergyBurned))?
+            .sumQuantity()?.doubleValue(for: .kilocalorie())
+    }
+
+    /// 讀取訓練的 GPS 路線（其他 App 記錄的軌跡也讀得到）
+    func route(of workout: HKWorkout) async -> [CLLocation] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
+        let routes: [HKWorkoutRoute] = await withCheckedContinuation { continuation in
+            let predicate = HKQuery.predicateForObjects(from: workout)
+            let query = HKAnchoredObjectQuery(type: HKSeriesType.workoutRoute(),
+                                              predicate: predicate,
+                                              anchor: nil,
+                                              limit: HKObjectQueryNoLimit) { _, samples, _, _, _ in
+                continuation.resume(returning: (samples as? [HKWorkoutRoute]) ?? [])
+            }
+            store.execute(query)
+        }
+
+        var collected: [CLLocation] = []
+        for route in routes {
+            let batch = await routeLocations(in: route)
+            collected.append(contentsOf: batch)
+        }
+        return collected.sorted { $0.timestamp < $1.timestamp }
+    }
+
+    private func routeLocations(in route: HKWorkoutRoute) async -> [CLLocation] {
+        await withCheckedContinuation { continuation in
+            let box = ResumeBox()
+            var accumulated: [CLLocation] = []
+            let query = HKWorkoutRouteQuery(route: route) { _, batch, done, error in
+                if let batch { accumulated.append(contentsOf: batch) }
+                if done || error != nil {
+                    if box.take() { continuation.resume(returning: accumulated) }
+                }
+            }
+            store.execute(query)
+        }
+    }
+
     private func fetchWorkouts(from start: Date, limit: Int) async -> [HKWorkout] {
         await withCheckedContinuation { continuation in
             let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
@@ -395,6 +495,24 @@ final class HealthKitManager: ObservableObject {
             block()
         } else {
             DispatchQueue.main.async(execute: block)
+        }
+    }
+
+    /// 健康 App 的訓練類型 → App 內的類型
+    static func workoutType(for activity: HKWorkoutActivityType, hasRoute: Bool) -> WorkoutType {
+        switch activity {
+        case .running:
+            return hasRoute ? .gpsRun : .run
+        case .walking:
+            return hasRoute ? .gpsHike : .walk
+        case .hiking:
+            return .gpsHike
+        case .highIntensityIntervalTraining, .jumpRope:
+            return .indoorInterval
+        case .functionalStrengthTraining, .traditionalStrengthTraining, .coreTraining, .crossTraining:
+            return .indoorReps
+        default:
+            return .manualEntry
         }
     }
 

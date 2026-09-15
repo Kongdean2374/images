@@ -476,9 +476,10 @@ struct WorkoutSummaryView: View {
             }
             AppSettings.shared.healthKitEnabled = true
         }
-        let ok = await health.save(WorkoutSnapshot(session: session))
-        if ok {
+        let uuid = await health.save(WorkoutSnapshot(session: session))
+        if let uuid {
             session.healthKitSynced = true
+            session.healthKitUUID = uuid
             try? context.save()
             healthMessage = nil
             CueService.shared.notify(.success)

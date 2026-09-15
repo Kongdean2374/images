@@ -20,17 +20,25 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                unitCard
-                healthCard
-                notificationCard
-                strideCard
-                bodyCard
-                cueCard
-                mapCard
-                permissionCard
-                dataCard
-                aboutCard
+            VStack(spacing: 18) {
+                group("健康與資料") {
+                    healthCard
+                    strideCard
+                }
+                group("提醒") {
+                    notificationCard
+                }
+                group("運動偏好") {
+                    unitCard
+                    bodyCard
+                    cueCard
+                    mapCard
+                }
+                group("系統") {
+                    permissionCard
+                    dataCard
+                    aboutCard
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 26)
@@ -67,6 +75,20 @@ struct SettingsView: View {
         }
     }
 
+
+    @ViewBuilder
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .textCase(.uppercase)
+                .kerning(0.9)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.leading, 4)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     // MARK: 健康 App
 
@@ -120,6 +142,19 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.amber)
                 }
+
+                NavigationLink {
+                    HealthImportView()
+                } label: {
+                    Label("一鍵匯入健康 App 的歷史紀錄", systemImage: "square.and.arrow.down")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Theme.accentGradient))
+                }
+                .buttonStyle(.plain)
 
                 Button {
                     Task { await syncAll() }
