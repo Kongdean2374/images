@@ -10,6 +10,7 @@ struct AnalyticsView: View {
     @State private var range: TrendRange = .week
     @State private var metric: TrendMetric = .distance
     @State private var selectedRouteKey: String?
+    @State private var selectedClusterID: String?
     @State private var exportURL: URL?
     @State private var showExport = false
     @State private var isExporting = false
@@ -20,6 +21,10 @@ struct AnalyticsView: View {
 
     private var comparableGroups: [String: [WorkoutSession]] {
         StatsEngine.comparableGroups(sessions: sessions)
+    }
+
+    private var routeClusters: [RouteCluster] {
+        RouteClusterEngine.cluster(sessions: sessions)
     }
 
     private var weatherPoints: [StatsEngine.WeatherPoint] {
@@ -35,8 +40,11 @@ struct AnalyticsView: View {
                     insightsLink
                     trendCard
                     trainingLoadCard
+                    IntensityBalanceCard(balance: IntensityBalanceEngine.evaluate(sessions: sessions))
+                    RacePredictionCard(predictions: RacePredictionEngine.predictions(
+                        from: BestEffortEngine.evaluate(sessions: sessions)), unit: settings.unit)
                     goalCard
-                    if !comparableGroups.isEmpty { comparisonCard }
+                    if !routeClusters.isEmpty { autoRouteCard } else if !comparableGroups.isEmpty { comparisonCard }
                     intensityCard
                     distributionCard
                     if weatherPoints.count >= 2 { weatherCard }
@@ -383,6 +391,82 @@ struct AnalyticsView: View {
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
         }
+    }
+
+    private var autoRouteCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("同路線比較")
+                        .font(.headline)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text("自動辨識")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Theme.mint.opacity(0.18)))
+                        .foregroundStyle(Theme.mint)
+                }
+                Text("依起點、終點與總距離自動分群，不用自己命名路線。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(routeClusters) { cluster in
+                            Button {
+                                withAnimation { selectedClusterID = cluster.signature }
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Text(cluster.name)
+                                        .font(.caption.weight(.semibold))
+                                    Text("\(cluster.count) 次")
+                                        .font(.system(size: 10))
+                                }
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(activeCluster?.signature == cluster.signature
+                                                           ? Theme.accent.opacity(0.3)
+                                                           : Color.white.opacity(0.07)))
+                                .foregroundStyle(activeCluster?.signature == cluster.signature
+                                                 ? Theme.accent : Theme.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if let cluster = activeCluster {
+                    let group = RouteClusterEngine.sessions(in: cluster, from: sessions)
+                    RouteComparisonChart(sessions: group, unit: settings.unit)
+                    HStack {
+                        StatPill(title: "平均距離",
+                                 value: Fmt.distance(cluster.averageDistance, unit: settings.unit),
+                                 tint: Theme.accent)
+                        StatPill(title: "最佳配速",
+                                 value: Fmt.pace(cluster.bestPace, unit: settings.unit),
+                                 tint: Theme.mint)
+                        if let improvement = cluster.improvement {
+                            StatPill(title: improvement >= 0 ? "比首次快" : "比首次慢",
+                                     value: String(format: "%.1f%%", abs(improvement)),
+                                     tint: improvement >= 0 ? Theme.mint : Theme.amber)
+                        }
+                    }
+                    Text("首次 \(Fmt.date(cluster.firstDate))　最近 \(Fmt.date(cluster.latestDate))")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var activeCluster: RouteCluster? {
+        if let selectedClusterID,
+           let match = routeClusters.first(where: { $0.signature == selectedClusterID }) {
+            return match
+        }
+        return routeClusters.first
     }
 
     private var comparisonCard: some View {
