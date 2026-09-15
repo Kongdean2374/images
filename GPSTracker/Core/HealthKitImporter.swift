@@ -56,7 +56,6 @@ enum ImportRange: String, CaseIterable, Identifiable {
 ///
 /// 匯入的紀錄會標記 `isImported` 與健康 App 的 UUID，
 /// 之後不會被重複匯入，也不會再寫回健康 App 造成重複。
-@MainActor
 final class HealthKitImporter: ObservableObject {
     static let shared = HealthKitImporter()
 
@@ -68,6 +67,7 @@ final class HealthKitImporter: ObservableObject {
     private let health = HealthKitManager.shared
     private var container: ModelContainer?
 
+    @MainActor
     func configure(container: ModelContainer) {
         self.container = container
     }
@@ -75,6 +75,7 @@ final class HealthKitImporter: ObservableObject {
     // MARK: 預覽
 
     /// 先看看這個範圍裡有幾筆、有多少是新的
+    @MainActor
     func preview(range: ImportRange, existing: [WorkoutSession]) async -> (total: Int, new: Int) {
         guard health.isReady else { return (0, 0) }
         let workouts = await health.workouts(from: range.startDate)
@@ -85,6 +86,7 @@ final class HealthKitImporter: ObservableObject {
 
     // MARK: 匯入
 
+    @MainActor
     @discardableResult
     func importWorkouts(range: ImportRange,
                         context: ModelContext,
@@ -170,6 +172,7 @@ final class HealthKitImporter: ObservableObject {
     }
 
     /// 只抓上次匯入之後的新紀錄（App 啟動與背景更新用）
+    @MainActor
     @discardableResult
     func importNew(context: ModelContext, existing: [WorkoutSession]) async -> ImportResult {
         let since = AppSettings.shared.lastHealthImportDate
@@ -220,6 +223,7 @@ final class HealthKitImporter: ObservableObject {
     }
 
     /// 背景喚醒用：自己開一個 context
+    @MainActor
     @discardableResult
     func importNewInBackground() async -> ImportResult {
         guard let container else { return ImportResult() }
@@ -231,6 +235,7 @@ final class HealthKitImporter: ObservableObject {
 
     // MARK: 建立紀錄
 
+    @MainActor
     private func makeSession(workout: HKWorkout,
                              type: WorkoutType,
                              distance: Double?,
