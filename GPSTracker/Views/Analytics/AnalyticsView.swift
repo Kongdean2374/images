@@ -32,6 +32,7 @@ struct AnalyticsView: View {
                 if sessions.isEmpty {
                     emptyState
                 } else {
+                    insightsLink
                     trendCard
                     trainingLoadCard
                     goalCard
@@ -495,19 +496,50 @@ struct AnalyticsView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "chart.xyaxis.line")
-                .font(.system(size: 46))
-                .foregroundStyle(Theme.textSecondary)
-            Text("還沒有可分析的資料")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-            Text("完成第一次運動後，這裡會出現趨勢、比較與強度圖表。")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
+        VStack(spacing: 14) {
+            EmptyStateView(systemImage: "chart.xyaxis.line",
+                           title: "還沒有可分析的資料",
+                           message: "完成第一次運動，或從健康 App 匯入歷史紀錄。")
+            NavigationLink {
+                HealthImportView()
+            } label: {
+                Label("一鍵匯入歷史紀錄", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(PrimaryButtonStyle())
         }
-        .padding(.top, 80)
+        .padding(.top, 50)
+    }
+
+    private var insightsLink: some View {
+        NavigationLink {
+            HistoryInsightsView()
+        } label: {
+            GlassCard(padding: 14) {
+                HStack(spacing: 13) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(Theme.violet.opacity(0.18))
+                        Image(systemName: "chart.pie.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.violet)
+                    }
+                    .frame(width: 42, height: 42)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("歷史總覽")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("\(sessions.count) 筆紀錄的年度、來源與類型分析")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     @MainActor

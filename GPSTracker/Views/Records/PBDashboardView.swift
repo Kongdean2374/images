@@ -184,17 +184,10 @@ struct PBDashboardView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "trophy")
-                .font(.system(size: 46))
-                .foregroundStyle(Theme.textSecondary)
-            Text("還沒有個人紀錄")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-            Text("完成運動後會自動計算最佳成績與連續天數。")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .padding(.top, 80)
+        EmptyStateView(systemImage: "trophy",
+                       title: "還沒有個人紀錄",
+                       message: "完成運動後會自動計算最佳成績與連續天數。",
+                       tint: Theme.amber)
+            .padding(.top, 70)
     }
 }

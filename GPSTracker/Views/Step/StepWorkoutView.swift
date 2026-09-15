@@ -150,6 +150,7 @@ struct StepWorkoutView: View {
         case 2: return .steps(Int(value))
         case 3: return .duration(value * 60)
         case 4: return .calories(value)
+        case 5: return .floors(Int(value))
         default: return .none
         }
     }
@@ -166,6 +167,7 @@ struct StepWorkoutView: View {
                     Text("步數").tag(2)
                     Text("時間").tag(3)
                     Text("熱量").tag(4)
+                    Text("樓層").tag(5)
                 }
                 .pickerStyle(.segmented)
 
@@ -212,6 +214,7 @@ struct StepWorkoutView: View {
         case 2: return "6000"
         case 3: return "40"
         case 4: return "300"
+        case 5: return "20"
         default: return ""
         }
     }
@@ -222,6 +225,7 @@ struct StepWorkoutView: View {
         case 2: return "步"
         case 3: return "分鐘"
         case 4: return "大卡"
+        case 5: return "層"
         default: return ""
         }
     }
@@ -232,6 +236,7 @@ struct StepWorkoutView: View {
         case 2: return ["3000", "6000", "10000", "15000"]
         case 3: return ["20", "30", "45", "60"]
         case 4: return ["150", "300", "500", "800"]
+        case 5: return ["10", "20", "40", "60"]
         default: return []
         }
     }

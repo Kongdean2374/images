@@ -189,18 +189,18 @@ struct HistoryListView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "figure.run.circle")
-                .font(.system(size: 46))
-                .foregroundStyle(Theme.textSecondary)
-            Text("還沒有紀錄")
-                .font(.headline)
-                .foregroundStyle(Theme.textPrimary)
-            Text("從「開始」分頁選一個模式，或用手動輸入補登。")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
+        VStack(spacing: 14) {
+            EmptyStateView(systemImage: "figure.run.circle",
+                           title: "還沒有紀錄",
+                           message: "從「開始」選一個模式，或把健康 App 的歷史訓練匯入進來。")
+            NavigationLink {
+                HealthImportView()
+            } label: {
+                Label("一鍵匯入", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .padding(.horizontal, 40)
         }
-        .padding(.top, 60)
+        .padding(.top, 40)
     }
 }

@@ -55,7 +55,8 @@ final class StepWorkoutEngine: ObservableObject {
     var isCalibrated: Bool { StrideCalibration.isCalibrated(strideProfile) }
 
     var targetProgress: Double {
-        target.progress(distance: distance, steps: steps, duration: elapsed, calories: calories)
+        target.progress(distance: distance, steps: steps, duration: elapsed,
+                        calories: calories, floors: floorsAscended)
     }
 
     var targetRemainingText: String {
@@ -63,6 +64,7 @@ final class StepWorkoutEngine: ObservableObject {
                              steps: steps,
                              duration: elapsed,
                              calories: calories,
+                             floors: floorsAscended,
                              unit: AppSettings.shared.unit)
     }
 
