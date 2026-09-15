@@ -344,3 +344,113 @@ struct WeatherScatterChart: View {
         .frame(height: 200)
     }
 }
+
+
+// MARK: - 步頻趨勢
+
+struct CadencePoint: Identifiable, Hashable {
+    let id = UUID()
+    let date: Date
+    let cadence: Double
+}
+
+struct CadenceTrendChart: View {
+    let points: [CadencePoint]
+    var reference: Double = 175
+
+    var body: some View {
+        Chart {
+            ForEach(points) { point in
+                LineMark(
+                    x: .value("日期", point.date),
+                    y: .value("步頻", point.cadence)
+                )
+                .foregroundStyle(Theme.mint)
+                .interpolationMethod(.catmullRom)
+            }
+            ForEach(points) { point in
+                PointMark(
+                    x: .value("日期", point.date),
+                    y: .value("步頻", point.cadence)
+                )
+                .foregroundStyle(Theme.mint)
+                .symbolSize(22)
+            }
+            RuleMark(y: .value("建議步頻", reference))
+                .foregroundStyle(Theme.amber.opacity(0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        }
+        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text("\(Int(v))")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(Fmt.shortDayFormatter.string(from: date))
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .frame(height: 150)
+    }
+}
+
+// MARK: - 訓練負荷長條圖
+
+struct TrainingLoadChart: View {
+    let daily: [DailyLoad]
+    let average: Double
+
+    var body: some View {
+        Chart {
+            ForEach(daily) { day in
+                BarMark(
+                    x: .value("日期", day.date, unit: .day),
+                    y: .value("負荷", day.load)
+                )
+                .foregroundStyle(Theme.accent.opacity(0.75))
+                .cornerRadius(3)
+            }
+            RuleMark(y: .value("四週日均", average))
+                .foregroundStyle(Theme.amber.opacity(0.8))
+                .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text("\(Int(v))")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(Fmt.shortDayFormatter.string(from: date))
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+        .frame(height: 150)
+    }
+}

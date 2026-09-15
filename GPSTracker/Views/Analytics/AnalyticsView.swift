@@ -2,12 +2,6 @@ import SwiftUI
 import SwiftData
 import UIKit
 
-struct CadencePoint: Identifiable, Hashable {
-    let id = UUID()
-    let date: Date
-    let cadence: Double
-}
-
 struct AnalyticsView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
     @Query private var goals: [WorkoutGoal]
@@ -105,46 +99,7 @@ struct AnalyticsView: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
 
-                Chart {
-                    ForEach(report.daily.suffix(42)) { day in
-                        BarMark(x: .value("日期", day.date, unit: .day),
-                                y: .value("負荷", day.load))
-                        .foregroundStyle(day.load > 0 ? Theme.accent.opacity(0.75) : Color.clear)
-                        .cornerRadius(3)
-                    }
-                    RuleMark(y: .value("平均", report.chronic / 7))
-                        .foregroundStyle(Theme.amber.opacity(0.8))
-                        .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
-                        .annotation(position: .top, alignment: .leading) {
-                            Text("四週日均")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.amber)
-                        }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .leading) { value in
-                        AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
-                        AxisValueLabel {
-                            if let v = value.as(Double.self) {
-                                Text("\(Int(v))")
-                                    .font(.caption2)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                        }
-                    }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .weekOfYear)) { value in
-                        AxisValueLabel {
-                            if let date = value.as(Date.self) {
-                                Text(Fmt.shortDayFormatter.string(from: date))
-                                    .font(.caption2)
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                        }
-                    }
-                }
-                .frame(height: 150)
+                TrainingLoadChart(daily: Array(report.daily.suffix(42)), average: report.chronic / 7)
 
                 HStack {
                     StatPill(title: "7 天負荷", value: String(format: "%.0f", report.acute), tint: Theme.accent)
@@ -203,46 +158,7 @@ struct AnalyticsView: View {
                         StatPill(title: "最高步頻", value: String(format: "%.0f", stats.best), tint: Theme.mint)
                         StatPill(title: "樣本", value: "\(stats.samples)", tint: Theme.amber)
                     }
-                    Chart {
-                        ForEach(cadenceSeries) { item in
-                            LineMark(x: .value("日期", item.date),
-                                     y: .value("步頻", item.cadence))
-                            .foregroundStyle(Theme.mint)
-                            .interpolationMethod(.catmullRom)
-                            PointMark(x: .value("日期", item.date),
-                                      y: .value("步頻", item.cadence))
-                            .foregroundStyle(Theme.mint)
-                            .symbolSize(20)
-                        }
-                        RuleMark(y: .value("建議步頻", 175.0))
-                            .foregroundStyle(Theme.amber.opacity(0.7))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    }
-                    .chartYScale(domain: .automatic(includesZero: false))
-                    .chartYAxis {
-                        AxisMarks(position: .leading) { value in
-                            AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
-                            AxisValueLabel {
-                                if let v = value.as(Double.self) {
-                                    Text("\(Int(v))")
-                                        .font(.caption2)
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                            }
-                        }
-                    }
-                    .chartXAxis {
-                        AxisMarks { value in
-                            AxisValueLabel {
-                                if let date = value.as(Date.self) {
-                                    Text(Fmt.shortDayFormatter.string(from: date))
-                                        .font(.caption2)
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                            }
-                        }
-                    }
-                    .frame(height: 150)
+                    CadenceTrendChart(points: cadenceSeries)
                     Text("步頻偏低（低於 160）通常代表步幅過大、觸地時間長；用步頻節拍器練習可以逐步改善。")
                         .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
