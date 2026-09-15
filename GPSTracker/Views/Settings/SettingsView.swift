@@ -372,6 +372,8 @@ struct SettingsView: View {
                                               set: { settings.hapticCues = $0 }))
                 Toggle("GPS 自動暫停", isOn: Binding(get: { settings.autoPause },
                                                  set: { settings.autoPause = $0 }))
+                Toggle("靈動島／鎖定畫面即時活動", isOn: Binding(get: { settings.liveActivityEnabled },
+                                                     set: { settings.liveActivityEnabled = $0 }))
             }
             .tint(Theme.accent)
             .foregroundStyle(Theme.textPrimary)

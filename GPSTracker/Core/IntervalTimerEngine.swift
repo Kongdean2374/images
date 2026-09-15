@@ -67,6 +67,7 @@ final class IntervalTimerEngine: ObservableObject {
         currentRound = 1
         enter(config.prepareSeconds > 0 ? .prepare : .work)
         startTimer()
+        LiveActivityController.shared.start(mode: .indoorInterval, usesDistance: false)
     }
 
     func pause() {
@@ -94,6 +95,7 @@ final class IntervalTimerEngine: ObservableObject {
         timer = nil
         phase = .finished
         phaseEnd = nil
+        LiveActivityController.shared.end()
     }
 
     func reset() {
@@ -165,6 +167,7 @@ final class IntervalTimerEngine: ObservableObject {
         phaseEnd = nil
         timer?.invalidate()
         timer = nil
+        LiveActivityController.shared.end()
         CueService.shared.notify(.success)
         CueService.shared.speak("訓練完成，共 \(config.rounds) 組")
     }
@@ -181,6 +184,12 @@ final class IntervalTimerEngine: ObservableObject {
             lastCountdownSpoken = whole
             CueService.shared.impact(.rigid)
         }
+        LiveActivityController.shared.update(elapsed: totalElapsed,
+                                             distance: 0,
+                                             steps: 0,
+                                             pace: nil,
+                                             statusText: "\(phase.displayName) \(Int(ceil(remaining)))s・第 \(min(currentRound, config.rounds))/\(config.rounds) 組",
+                                             isPaused: isPaused)
         if remaining <= 0 {
             lastCountdownSpoken = -1
             advance()

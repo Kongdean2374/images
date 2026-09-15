@@ -78,6 +78,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         altimeter.start()
         subscribe()
         startTimer()
+        LiveActivityController.shared.start(mode: type, usesDistance: true)
         CueService.shared.impact(.heavy)
         CueService.shared.speak("開始記錄")
     }
@@ -86,6 +87,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         guard state == .recording else { return }
         commitSegment()
         state = .paused
+        updateLiveActivity(force: true)
         CueService.shared.impact(.light)
     }
 
@@ -94,6 +96,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         segmentStart = Date()
         state = .recording
         isAutoPaused = false
+        updateLiveActivity(force: true)
         CueService.shared.impact(.light)
     }
 
@@ -110,7 +113,19 @@ final class GPSWorkoutRecorder: ObservableObject {
         StrideCalibration.learn(distance: distance,
                                 steps: pedometer.steps,
                                 profile: workoutType.strideProfile)
+        LiveActivityController.shared.end()
         CueService.shared.speak("記錄結束")
+    }
+
+    private func updateLiveActivity(force: Bool = false) {
+        LiveActivityController.shared.update(elapsed: elapsed,
+                                             distance: distance,
+                                             steps: pedometer.steps,
+                                             pace: currentPace ?? averagePace,
+                                             statusText: isAutoPaused ? "自動暫停"
+                                                : (state == .paused ? "已暫停" : "記錄中"),
+                                             isPaused: state != .recording,
+                                             force: force)
     }
 
     func reset() {
@@ -160,6 +175,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         if distance > 10, elapsed > 0 {
             averagePace = elapsed / (distance / 1000)
         }
+        updateLiveActivity()
         checkAutoPause()
     }
 

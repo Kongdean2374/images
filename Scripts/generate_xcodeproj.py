@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Generate GPSTracker.xcodeproj from the sources under GPSTracker/.
+"""Generate GPSTracker.xcodeproj from the sources on disk.
 
 Run from the repository root:  python3 Scripts/generate_xcodeproj.py
 Re-run after adding or removing source files.
+
+Targets:
+  GPSTracker         — the iOS app
+  GPSTrackerWidgets  — WidgetKit extension (home screen widget + Live Activity)
 """
 import os
 import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = "GPSTracker"
+WIDGET = "GPSTrackerWidgets"
 BUNDLE_ID = "com.gpstracker.app"
+WIDGET_BUNDLE_ID = BUNDLE_ID + ".widgets"
 PROJ_DIR = os.path.join(ROOT, APP + ".xcodeproj")
+
+# App sources that must also compile into the widget extension.
+SHARED_WITH_WIDGET = ["WorkoutActivityAttributes.swift"]
 
 _counter = [0]
 
@@ -23,7 +32,7 @@ def uid():
 class Node:
     def __init__(self, name, path, is_dir):
         self.name = name
-        self.path = path            # path relative to its parent group
+        self.path = path
         self.is_dir = is_dir
         self.children = []
         self.uid = uid()
@@ -72,26 +81,59 @@ def collect(node, out_sources, out_resources):
 
 
 def main():
-    root_node = scan(os.path.join(ROOT, APP), APP)
-    sources, resources = [], []
-    collect(root_node, sources, resources)
+    app_root = scan(os.path.join(ROOT, APP), APP)
+    app_sources, app_resources = [], []
+    collect(app_root, app_sources, app_resources)
 
-    build_files = {}   # file node uid -> build file uid
-    for f in sources + resources:
-        build_files[f.uid] = uid()
+    has_widget = os.path.isdir(os.path.join(ROOT, WIDGET))
+    widget_root = None
+    widget_sources, widget_resources = [], []
+    if has_widget:
+        widget_root = scan(os.path.join(ROOT, WIDGET), WIDGET)
+        collect(widget_root, widget_sources, widget_resources)
+        # shared files compile into both targets
+        for name in SHARED_WITH_WIDGET:
+            for node in app_sources:
+                if node.name == name:
+                    widget_sources.append(node)
 
-    product_uid = uid()
-    products_group_uid = uid()
-    main_group_uid = uid()
-    target_uid = uid()
+    # build files are per target, so key on (target tag, file uid)
+    build_files = {}
+
+    def build_file(tag, node):
+        key = (tag, node.uid)
+        if key not in build_files:
+            build_files[key] = uid()
+        return build_files[key]
+
+    for node in app_sources + app_resources:
+        build_file('app', node)
+    for node in widget_sources + widget_resources:
+        build_file('widget', node)
+
+    app_product = uid()
+    widget_product = uid()
+    products_group = uid()
+    main_group = uid()
+    app_target = uid()
+    widget_target = uid()
     project_uid = uid()
-    sources_phase = uid()
-    frameworks_phase = uid()
-    resources_phase = uid()
+    app_sources_phase = uid()
+    app_frameworks_phase = uid()
+    app_resources_phase = uid()
+    app_embed_phase = uid()
+    widget_sources_phase = uid()
+    widget_frameworks_phase = uid()
+    widget_resources_phase = uid()
+    widget_embed_build_file = uid()
+    widget_dependency = uid()
+    widget_proxy = uid()
     proj_cfg_list = uid()
-    target_cfg_list = uid()
+    app_cfg_list = uid()
+    widget_cfg_list = uid()
     proj_debug, proj_release = uid(), uid()
-    tgt_debug, tgt_release = uid(), uid()
+    app_debug, app_release = uid(), uid()
+    widget_debug, widget_release = uid(), uid()
 
     L = []
     w = L.append
@@ -105,18 +147,59 @@ def main():
     w('')
 
     w('/* Begin PBXBuildFile section */')
-    for f in sources:
+    for node in app_sources:
         w('\t\t%s /* %s in Sources */ = {isa = PBXBuildFile; fileRef = %s /* %s */; };'
-          % (build_files[f.uid], f.name, f.uid, f.name))
-    for f in resources:
+          % (build_file('app', node), node.name, node.uid, node.name))
+    for node in app_resources:
         w('\t\t%s /* %s in Resources */ = {isa = PBXBuildFile; fileRef = %s /* %s */; };'
-          % (build_files[f.uid], f.name, f.uid, f.name))
+          % (build_file('app', node), node.name, node.uid, node.name))
+    if has_widget:
+        for node in widget_sources:
+            w('\t\t%s /* %s in Sources */ = {isa = PBXBuildFile; fileRef = %s /* %s */; };'
+              % (build_file('widget', node), node.name, node.uid, node.name))
+        for node in widget_resources:
+            w('\t\t%s /* %s in Resources */ = {isa = PBXBuildFile; fileRef = %s /* %s */; };'
+              % (build_file('widget', node), node.name, node.uid, node.name))
+        w('\t\t%s /* %s.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; '
+          'fileRef = %s /* %s.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };'
+          % (widget_embed_build_file, WIDGET, widget_product, WIDGET))
     w('/* End PBXBuildFile section */')
     w('')
 
+    if has_widget:
+        w('/* Begin PBXContainerItemProxy section */')
+        w('\t\t%s /* PBXContainerItemProxy */ = {' % widget_proxy)
+        w('\t\t\tisa = PBXContainerItemProxy;')
+        w('\t\t\tcontainerPortal = %s /* Project object */;' % project_uid)
+        w('\t\t\tproxyType = 1;')
+        w('\t\t\tremoteGlobalIDString = %s;' % widget_target)
+        w('\t\t\tremoteInfo = %s;' % WIDGET)
+        w('\t\t};')
+        w('/* End PBXContainerItemProxy section */')
+        w('')
+
+        w('/* Begin PBXCopyFilesBuildPhase section */')
+        w('\t\t%s /* Embed Foundation Extensions */ = {' % app_embed_phase)
+        w('\t\t\tisa = PBXCopyFilesBuildPhase;')
+        w('\t\t\tbuildActionMask = 2147483647;')
+        w('\t\t\tdstPath = "";')
+        w('\t\t\tdstSubfolderSpec = 13;')
+        w('\t\t\tfiles = (')
+        w('\t\t\t\t%s /* %s.appex in Embed Foundation Extensions */,' % (widget_embed_build_file, WIDGET))
+        w('\t\t\t);')
+        w('\t\t\tname = "Embed Foundation Extensions";')
+        w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
+        w('\t\t};')
+        w('/* End PBXCopyFilesBuildPhase section */')
+        w('')
+
     w('/* Begin PBXFileReference section */')
     w('\t\t%s /* %s.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; '
-      'includeInIndex = 0; path = %s.app; sourceTree = BUILT_PRODUCTS_DIR; };' % (product_uid, APP, APP))
+      'includeInIndex = 0; path = %s.app; sourceTree = BUILT_PRODUCTS_DIR; };' % (app_product, APP, APP))
+    if has_widget:
+        w('\t\t%s /* %s.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; '
+          'includeInIndex = 0; path = %s.appex; sourceTree = BUILT_PRODUCTS_DIR; };'
+          % (widget_product, WIDGET, WIDGET))
 
     def emit_refs(node):
         for child in node.children:
@@ -125,34 +208,41 @@ def main():
             else:
                 w('\t\t%s /* %s */ = {isa = PBXFileReference; lastKnownFileType = %s; path = %s; '
                   'sourceTree = "<group>"; };' % (child.uid, child.name, file_type(child.name), child.name))
-    emit_refs(root_node)
+    emit_refs(app_root)
+    if has_widget:
+        emit_refs(widget_root)
     w('/* End PBXFileReference section */')
     w('')
 
     w('/* Begin PBXFrameworksBuildPhase section */')
-    w('\t\t%s /* Frameworks */ = {' % frameworks_phase)
-    w('\t\t\tisa = PBXFrameworksBuildPhase;')
-    w('\t\t\tbuildActionMask = 2147483647;')
-    w('\t\t\tfiles = (')
-    w('\t\t\t);')
-    w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
-    w('\t\t};')
+    for phase in ([app_frameworks_phase, widget_frameworks_phase] if has_widget else [app_frameworks_phase]):
+        w('\t\t%s /* Frameworks */ = {' % phase)
+        w('\t\t\tisa = PBXFrameworksBuildPhase;')
+        w('\t\t\tbuildActionMask = 2147483647;')
+        w('\t\t\tfiles = (')
+        w('\t\t\t);')
+        w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
+        w('\t\t};')
     w('/* End PBXFrameworksBuildPhase section */')
     w('')
 
     w('/* Begin PBXGroup section */')
-    w('\t\t%s = {' % main_group_uid)
+    w('\t\t%s = {' % main_group)
     w('\t\t\tisa = PBXGroup;')
     w('\t\t\tchildren = (')
-    w('\t\t\t\t%s /* %s */,' % (root_node.uid, APP))
-    w('\t\t\t\t%s /* Products */,' % products_group_uid)
+    w('\t\t\t\t%s /* %s */,' % (app_root.uid, APP))
+    if has_widget:
+        w('\t\t\t\t%s /* %s */,' % (widget_root.uid, WIDGET))
+    w('\t\t\t\t%s /* Products */,' % products_group)
     w('\t\t\t);')
     w('\t\t\tsourceTree = "<group>";')
     w('\t\t};')
-    w('\t\t%s /* Products */ = {' % products_group_uid)
+    w('\t\t%s /* Products */ = {' % products_group)
     w('\t\t\tisa = PBXGroup;')
     w('\t\t\tchildren = (')
-    w('\t\t\t\t%s /* %s.app */,' % (product_uid, APP))
+    w('\t\t\t\t%s /* %s.app */,' % (app_product, APP))
+    if has_widget:
+        w('\t\t\t\t%s /* %s.appex */,' % (widget_product, WIDGET))
     w('\t\t\t);')
     w('\t\t\tname = Products;')
     w('\t\t\tsourceTree = "<group>";')
@@ -171,29 +261,54 @@ def main():
         for child in node.children:
             if child.is_dir:
                 emit_groups(child)
-    emit_groups(root_node)
+    emit_groups(app_root)
+    if has_widget:
+        emit_groups(widget_root)
     w('/* End PBXGroup section */')
     w('')
 
     w('/* Begin PBXNativeTarget section */')
-    w('\t\t%s /* %s */ = {' % (target_uid, APP))
+    w('\t\t%s /* %s */ = {' % (app_target, APP))
     w('\t\t\tisa = PBXNativeTarget;')
     w('\t\t\tbuildConfigurationList = %s /* Build configuration list for PBXNativeTarget "%s" */;'
-      % (target_cfg_list, APP))
+      % (app_cfg_list, APP))
     w('\t\t\tbuildPhases = (')
-    w('\t\t\t\t%s /* Sources */,' % sources_phase)
-    w('\t\t\t\t%s /* Frameworks */,' % frameworks_phase)
-    w('\t\t\t\t%s /* Resources */,' % resources_phase)
+    w('\t\t\t\t%s /* Sources */,' % app_sources_phase)
+    w('\t\t\t\t%s /* Frameworks */,' % app_frameworks_phase)
+    w('\t\t\t\t%s /* Resources */,' % app_resources_phase)
+    if has_widget:
+        w('\t\t\t\t%s /* Embed Foundation Extensions */,' % app_embed_phase)
     w('\t\t\t);')
     w('\t\t\tbuildRules = (')
     w('\t\t\t);')
     w('\t\t\tdependencies = (')
+    if has_widget:
+        w('\t\t\t\t%s /* PBXTargetDependency */,' % widget_dependency)
     w('\t\t\t);')
     w('\t\t\tname = %s;' % APP)
     w('\t\t\tproductName = %s;' % APP)
-    w('\t\t\tproductReference = %s /* %s.app */;' % (product_uid, APP))
+    w('\t\t\tproductReference = %s /* %s.app */;' % (app_product, APP))
     w('\t\t\tproductType = "com.apple.product-type.application";')
     w('\t\t};')
+    if has_widget:
+        w('\t\t%s /* %s */ = {' % (widget_target, WIDGET))
+        w('\t\t\tisa = PBXNativeTarget;')
+        w('\t\t\tbuildConfigurationList = %s /* Build configuration list for PBXNativeTarget "%s" */;'
+          % (widget_cfg_list, WIDGET))
+        w('\t\t\tbuildPhases = (')
+        w('\t\t\t\t%s /* Sources */,' % widget_sources_phase)
+        w('\t\t\t\t%s /* Frameworks */,' % widget_frameworks_phase)
+        w('\t\t\t\t%s /* Resources */,' % widget_resources_phase)
+        w('\t\t\t);')
+        w('\t\t\tbuildRules = (')
+        w('\t\t\t);')
+        w('\t\t\tdependencies = (')
+        w('\t\t\t);')
+        w('\t\t\tname = %s;' % WIDGET)
+        w('\t\t\tproductName = %s;' % WIDGET)
+        w('\t\t\tproductReference = %s /* %s.appex */;' % (widget_product, WIDGET))
+        w('\t\t\tproductType = "com.apple.product-type.app-extension";')
+        w('\t\t};')
     w('/* End PBXNativeTarget section */')
     w('')
 
@@ -205,9 +320,13 @@ def main():
     w('\t\t\t\tLastSwiftUpdateCheck = 1500;')
     w('\t\t\t\tLastUpgradeCheck = 1500;')
     w('\t\t\t\tTargetAttributes = {')
-    w('\t\t\t\t\t%s = {' % target_uid)
+    w('\t\t\t\t\t%s = {' % app_target)
     w('\t\t\t\t\t\tCreatedOnToolsVersion = 15.0;')
     w('\t\t\t\t\t};')
+    if has_widget:
+        w('\t\t\t\t\t%s = {' % widget_target)
+        w('\t\t\t\t\t\tCreatedOnToolsVersion = 15.0;')
+        w('\t\t\t\t\t};')
     w('\t\t\t\t};')
     w('\t\t\t};')
     w('\t\t\tbuildConfigurationList = %s /* Build configuration list for PBXProject "%s" */;'
@@ -219,42 +338,74 @@ def main():
     w('\t\t\t\ten,')
     w('\t\t\t\tBase,')
     w('\t\t\t);')
-    w('\t\t\tmainGroup = %s;' % main_group_uid)
-    w('\t\t\tproductRefGroup = %s /* Products */;' % products_group_uid)
+    w('\t\t\tmainGroup = %s;' % main_group)
+    w('\t\t\tproductRefGroup = %s /* Products */;' % products_group)
     w('\t\t\tprojectDirPath = "";')
     w('\t\t\tprojectRoot = "";')
     w('\t\t\ttargets = (')
-    w('\t\t\t\t%s /* %s */,' % (target_uid, APP))
+    w('\t\t\t\t%s /* %s */,' % (app_target, APP))
+    if has_widget:
+        w('\t\t\t\t%s /* %s */,' % (widget_target, WIDGET))
     w('\t\t\t);')
     w('\t\t};')
     w('/* End PBXProject section */')
     w('')
 
     w('/* Begin PBXResourcesBuildPhase section */')
-    w('\t\t%s /* Resources */ = {' % resources_phase)
+    w('\t\t%s /* Resources */ = {' % app_resources_phase)
     w('\t\t\tisa = PBXResourcesBuildPhase;')
     w('\t\t\tbuildActionMask = 2147483647;')
     w('\t\t\tfiles = (')
-    for f in resources:
-        w('\t\t\t\t%s /* %s in Resources */,' % (build_files[f.uid], f.name))
+    for node in app_resources:
+        w('\t\t\t\t%s /* %s in Resources */,' % (build_file('app', node), node.name))
     w('\t\t\t);')
     w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
     w('\t\t};')
+    if has_widget:
+        w('\t\t%s /* Resources */ = {' % widget_resources_phase)
+        w('\t\t\tisa = PBXResourcesBuildPhase;')
+        w('\t\t\tbuildActionMask = 2147483647;')
+        w('\t\t\tfiles = (')
+        for node in widget_resources:
+            w('\t\t\t\t%s /* %s in Resources */,' % (build_file('widget', node), node.name))
+        w('\t\t\t);')
+        w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
+        w('\t\t};')
     w('/* End PBXResourcesBuildPhase section */')
     w('')
 
     w('/* Begin PBXSourcesBuildPhase section */')
-    w('\t\t%s /* Sources */ = {' % sources_phase)
+    w('\t\t%s /* Sources */ = {' % app_sources_phase)
     w('\t\t\tisa = PBXSourcesBuildPhase;')
     w('\t\t\tbuildActionMask = 2147483647;')
     w('\t\t\tfiles = (')
-    for f in sources:
-        w('\t\t\t\t%s /* %s in Sources */,' % (build_files[f.uid], f.name))
+    for node in app_sources:
+        w('\t\t\t\t%s /* %s in Sources */,' % (build_file('app', node), node.name))
     w('\t\t\t);')
     w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
     w('\t\t};')
+    if has_widget:
+        w('\t\t%s /* Sources */ = {' % widget_sources_phase)
+        w('\t\t\tisa = PBXSourcesBuildPhase;')
+        w('\t\t\tbuildActionMask = 2147483647;')
+        w('\t\t\tfiles = (')
+        for node in widget_sources:
+            w('\t\t\t\t%s /* %s in Sources */,' % (build_file('widget', node), node.name))
+        w('\t\t\t);')
+        w('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
+        w('\t\t};')
     w('/* End PBXSourcesBuildPhase section */')
     w('')
+
+    if has_widget:
+        w('/* Begin PBXTargetDependency section */')
+        w('\t\t%s /* PBXTargetDependency */ = {' % widget_dependency)
+        w('\t\t\tisa = PBXTargetDependency;')
+        w('\t\t\ttarget = %s /* %s */;' % (widget_target, WIDGET))
+        w('\t\t\ttargetProxy = %s /* PBXContainerItemProxy */;' % widget_proxy)
+        w('\t\t};')
+        w('/* End PBXTargetDependency section */')
+        w('')
 
     common = [
         ('ALWAYS_SEARCH_USER_PATHS', 'NO'),
@@ -286,23 +437,41 @@ def main():
         ('SWIFT_OPTIMIZATION_LEVEL', '"-O"'),
         ('VALIDATE_PRODUCT', 'YES'),
     ]
-    target_common = [
-        ('ASSETCATALOG_COMPILER_APPICON_NAME', 'AppIcon'),
-        ('ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME', 'AccentColor'),
+    signing = [
         ('CODE_SIGN_IDENTITY', '""'),
         ('CODE_SIGN_STYLE', 'Manual'),
         ('CODE_SIGNING_ALLOWED', 'NO'),
         ('CODE_SIGNING_REQUIRED', 'NO'),
-        ('CURRENT_PROJECT_VERSION', '1'),
         ('DEVELOPMENT_TEAM', '""'),
+        ('PROVISIONING_PROFILE_SPECIFIER', '""'),
+    ]
+    app_settings = signing + [
+        ('ASSETCATALOG_COMPILER_APPICON_NAME', 'AppIcon'),
+        ('ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME', 'AccentColor'),
+        ('CODE_SIGN_ENTITLEMENTS', '%s/Resources/%s.entitlements' % (APP, APP)),
+        ('CURRENT_PROJECT_VERSION', '1'),
         ('ENABLE_PREVIEWS', 'YES'),
         ('GENERATE_INFOPLIST_FILE', 'NO'),
         ('INFOPLIST_FILE', '%s/Resources/Info.plist' % APP),
         ('LD_RUNPATH_SEARCH_PATHS', '(\n\t\t\t\t\t"$(inherited)",\n\t\t\t\t\t"@executable_path/Frameworks",\n\t\t\t\t)'),
-        ('MARKETING_VERSION', '1.0'),
+        ('MARKETING_VERSION', '1.1'),
         ('PRODUCT_BUNDLE_IDENTIFIER', BUNDLE_ID),
         ('PRODUCT_NAME', '"$(TARGET_NAME)"'),
-        ('PROVISIONING_PROFILE_SPECIFIER', '""'),
+        ('SWIFT_EMIT_LOC_STRINGS', 'YES'),
+        ('TARGETED_DEVICE_FAMILY', '"1,2"'),
+    ]
+    widget_settings = signing + [
+        ('CODE_SIGN_ENTITLEMENTS', '%s/%s.entitlements' % (WIDGET, WIDGET)),
+        ('CURRENT_PROJECT_VERSION', '1'),
+        ('ENABLE_PREVIEWS', 'YES'),
+        ('GENERATE_INFOPLIST_FILE', 'NO'),
+        ('INFOPLIST_FILE', '%s/Info.plist' % WIDGET),
+        ('LD_RUNPATH_SEARCH_PATHS', '(\n\t\t\t\t\t"$(inherited)",\n\t\t\t\t\t"@executable_path/Frameworks",\n'
+                                    '\t\t\t\t\t"@executable_path/../../Frameworks",\n\t\t\t\t)'),
+        ('MARKETING_VERSION', '1.1'),
+        ('PRODUCT_BUNDLE_IDENTIFIER', WIDGET_BUNDLE_ID),
+        ('PRODUCT_NAME', '"$(TARGET_NAME)"'),
+        ('SKIP_INSTALL', 'YES'),
         ('SWIFT_EMIT_LOC_STRINGS', 'YES'),
         ('TARGETED_DEVICE_FAMILY', '"1,2"'),
     ]
@@ -320,14 +489,20 @@ def main():
     w('/* Begin XCBuildConfiguration section */')
     emit_cfg(proj_debug, 'Debug', common + debug_only)
     emit_cfg(proj_release, 'Release', common + release_only)
-    emit_cfg(tgt_debug, 'Debug', target_common)
-    emit_cfg(tgt_release, 'Release', target_common)
+    emit_cfg(app_debug, 'Debug', app_settings)
+    emit_cfg(app_release, 'Release', app_settings)
+    if has_widget:
+        emit_cfg(widget_debug, 'Debug', widget_settings)
+        emit_cfg(widget_release, 'Release', widget_settings)
     w('/* End XCBuildConfiguration section */')
     w('')
 
     w('/* Begin XCConfigurationList section */')
-    for cfg_list, kind, dbg, rel in ((proj_cfg_list, 'PBXProject "%s"' % APP, proj_debug, proj_release),
-                                     (target_cfg_list, 'PBXNativeTarget "%s"' % APP, tgt_debug, tgt_release)):
+    lists = [(proj_cfg_list, 'PBXProject "%s"' % APP, proj_debug, proj_release),
+             (app_cfg_list, 'PBXNativeTarget "%s"' % APP, app_debug, app_release)]
+    if has_widget:
+        lists.append((widget_cfg_list, 'PBXNativeTarget "%s"' % WIDGET, widget_debug, widget_release))
+    for cfg_list, kind, dbg, rel in lists:
         w('\t\t%s /* Build configuration list for %s */ = {' % (cfg_list, kind))
         w('\t\t\tisa = XCConfigurationList;')
         w('\t\t\tbuildConfigurations = (')
@@ -348,15 +523,7 @@ def main():
     with open(os.path.join(PROJ_DIR, 'project.pbxproj'), 'w') as fh:
         fh.write('\n'.join(L) + '\n')
 
-    scheme = """<?xml version="1.0" encoding="UTF-8"?>
-<Scheme
-   LastUpgradeVersion = "1500"
-   version = "1.7">
-   <BuildAction
-      parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES">
-      <BuildActionEntries>
-         <BuildActionEntry
+    entry_template = """         <BuildActionEntry
             buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "YES"
@@ -365,11 +532,25 @@ def main():
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "{target}"
-               BuildableName = "{app}.app"
-               BlueprintName = "{app}"
+               BuildableName = "{product}"
+               BlueprintName = "{name}"
                ReferencedContainer = "container:{app}.xcodeproj">
             </BuildableReference>
-         </BuildActionEntry>
+         </BuildActionEntry>"""
+    entries = [entry_template.format(target=app_target, product=APP + '.app', name=APP, app=APP)]
+    if has_widget:
+        entries.append(entry_template.format(target=widget_target, product=WIDGET + '.appex',
+                                             name=WIDGET, app=APP))
+
+    scheme = """<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1500"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+{entries}
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -394,7 +575,7 @@ def main():
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "{target}"
+            BlueprintIdentifier = "{app_target}"
             BuildableName = "{app}.app"
             BlueprintName = "{app}"
             ReferencedContainer = "container:{app}.xcodeproj">
@@ -411,7 +592,7 @@ def main():
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "{target}"
+            BlueprintIdentifier = "{app_target}"
             BuildableName = "{app}.app"
             BlueprintName = "{app}"
             ReferencedContainer = "container:{app}.xcodeproj">
@@ -426,12 +607,13 @@ def main():
       revealArchiveInOrganizer = "YES">
    </ArchiveAction>
 </Scheme>
-""".replace('{target}', target_uid).replace('{app}', APP)
+""".replace('{entries}', '\n'.join(entries)).replace('{app_target}', app_target).replace('{app}', APP)
+
     with open(os.path.join(PROJ_DIR, 'xcshareddata', 'xcschemes', APP + '.xcscheme'), 'w') as fh:
         fh.write(scheme)
 
-    print("Generated %s with %d source files and %d resources."
-          % (PROJ_DIR, len(sources), len(resources)))
+    print("Generated %s\n  app: %d sources, %d resources\n  widget: %d sources, %d resources"
+          % (PROJ_DIR, len(app_sources), len(app_resources), len(widget_sources), len(widget_resources)))
 
 
 if __name__ == '__main__':

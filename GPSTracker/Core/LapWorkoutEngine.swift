@@ -54,6 +54,7 @@ final class LapWorkoutEngine: ObservableObject {
         lapSegmentStart = Date()
         state = .running
         startTimer()
+        LiveActivityController.shared.start(mode: .lapCounter, usesDistance: true)
         CueService.shared.impact(.heavy)
         CueService.shared.speak("計圈開始")
     }
@@ -97,6 +98,7 @@ final class LapWorkoutEngine: ObservableObject {
         timer?.invalidate()
         timer = nil
         state = .finished
+        LiveActivityController.shared.end()
         CueService.shared.speak("計圈結束")
     }
 
@@ -134,6 +136,12 @@ final class LapWorkoutEngine: ObservableObject {
         guard state == .running else { return }
         if let segmentStart { elapsed = accumulated + Date().timeIntervalSince(segmentStart) }
         if let lapSegmentStart { currentLapElapsed = lapAccumulated + Date().timeIntervalSince(lapSegmentStart) }
+        LiveActivityController.shared.update(elapsed: elapsed,
+                                             distance: totalDistance,
+                                             steps: 0,
+                                             pace: averagePace,
+                                             statusText: "第 \(laps.count + 1) 圈",
+                                             isPaused: false)
     }
 
     // MARK: 輸出

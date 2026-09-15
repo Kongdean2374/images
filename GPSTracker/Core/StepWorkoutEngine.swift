@@ -65,6 +65,7 @@ final class StepWorkoutEngine: ObservableObject {
         altimeter.start()
         motion.start()
         startTimer()
+        LiveActivityController.shared.start(mode: mode, usesDistance: false)
 
         CueService.shared.impact(.heavy)
         CueService.shared.speak("\(mode.displayName)開始")
@@ -74,6 +75,13 @@ final class StepWorkoutEngine: ObservableObject {
         guard state == .running else { return }
         commit()
         state = .paused
+        LiveActivityController.shared.update(elapsed: elapsed,
+                                             distance: distance,
+                                             steps: steps,
+                                             pace: averagePace,
+                                             statusText: "已暫停",
+                                             isPaused: true,
+                                             force: true)
         CueService.shared.impact(.light)
     }
 
@@ -92,6 +100,7 @@ final class StepWorkoutEngine: ObservableObject {
         altimeter.stop()
         motion.stop()
         state = .finished
+        LiveActivityController.shared.end()
         CueService.shared.speak("記錄結束")
     }
 
@@ -188,6 +197,13 @@ final class StepWorkoutEngine: ObservableObject {
     private func tick() {
         guard state == .running, let segmentStart else { return }
         elapsed = accumulated + Date().timeIntervalSince(segmentStart)
+        LiveActivityController.shared.update(elapsed: elapsed,
+                                             distance: distance,
+                                             steps: steps,
+                                             pace: averagePace,
+                                             statusText: currentMotion == .unknown
+                                                ? mode.displayName : currentMotion.displayName,
+                                             isPaused: false)
     }
 
     private func commit() {
