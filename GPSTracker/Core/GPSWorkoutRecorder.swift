@@ -66,6 +66,10 @@ final class GPSWorkoutRecorder: ObservableObject {
         segmentStart = Date()
         state = .recording
         kalman.reset()
+        // 背景持續記錄需要「永遠允許」，僅在已取得使用中權限時再詢問一次
+        if location.authorizationStatus == .authorizedWhenInUse {
+            location.requestAlwaysPermission()
+        }
         location.startUpdating(background: true)
         subscribe()
         startTimer()

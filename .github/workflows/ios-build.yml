@@ -40,6 +40,7 @@ jobs:
           xcodebuild -list -project GPSTracker.xcodeproj
 
       - name: Archive (unsigned)
+        timeout-minutes: 20
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -55,6 +56,9 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="" \
             ENABLE_BITCODE=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            OTHER_SWIFT_FLAGS="\$(inherited) -Xfrontend -warn-long-function-bodies=400 -Xfrontend -warn-long-expression-type-checking=400" \
+            -showBuildTimingSummary \
             | tee "$RUNNER_TEMP/build.log"
 
       - name: Package unsigned IPA
@@ -87,7 +91,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload build log on failure
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
