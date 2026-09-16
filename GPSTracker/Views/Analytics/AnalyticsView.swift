@@ -31,6 +31,14 @@ struct AnalyticsView: View {
         StatsEngine.weatherCorrelation(sessions: sessions)
     }
 
+    /// 沒有任何資料的區塊一律不顯示，不要放一張全是 0 的圖表
+    private var hasDurationData: Bool { sessions.contains { $0.duration > 60 } }
+    private var hasPaceData: Bool { sessions.contains { ($0.averagePace ?? 0) > 0 } }
+    private var hasIntensityData: Bool { sessions.contains { ($0.intensityScore ?? 0) > 0 } }
+    private var racePredictions: [RacePrediction] {
+        RacePredictionEngine.predictions(from: BestEffortEngine.evaluate(sessions: sessions))
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
@@ -39,13 +47,16 @@ struct AnalyticsView: View {
                 } else {
                     insightsLink
                     trendCard
-                    trainingLoadCard
-                    IntensityBalanceCard(balance: IntensityBalanceEngine.evaluate(sessions: sessions))
-                    RacePredictionCard(predictions: RacePredictionEngine.predictions(
-                        from: BestEffortEngine.evaluate(sessions: sessions)), unit: settings.unit)
+                    if hasDurationData { trainingLoadCard }
+                    if hasPaceData {
+                        IntensityBalanceCard(balance: IntensityBalanceEngine.evaluate(sessions: sessions))
+                    }
+                    if !racePredictions.isEmpty {
+                        RacePredictionCard(predictions: racePredictions, unit: settings.unit)
+                    }
                     goalCard
                     if !routeClusters.isEmpty { autoRouteCard } else if !comparableGroups.isEmpty { comparisonCard }
-                    intensityCard
+                    if hasIntensityData { intensityCard }
                     distributionCard
                     if weatherPoints.count >= 2 { weatherCard }
                     cadenceCard

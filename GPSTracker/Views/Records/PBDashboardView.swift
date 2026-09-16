@@ -48,36 +48,46 @@ struct PBDashboardView: View {
                     streakCard
                     BestEffortsCard(efforts: BestEffortEngine.evaluate(sessions: sessions),
                                     unit: settings.unit)
-                    recordCard(title: "最快平均配速",
-                               value: Fmt.pace(records.fastestPace?.value, unit: settings.unit),
-                               subtitle: records.fastestPace.map { Fmt.date($0.session.startDate) } ?? "--",
-                               icon: "bolt.fill",
-                               tint: Theme.accentWarm,
-                               session: records.fastestPace?.session)
-                    recordCard(title: "最長距離",
-                               value: Fmt.distance(records.longestDistance?.value, unit: settings.unit),
-                               subtitle: records.longestDistance.map { Fmt.date($0.session.startDate) } ?? "--",
-                               icon: "arrow.left.and.right",
-                               tint: Theme.accent,
-                               session: records.longestDistance?.session)
-                    recordCard(title: "最長時間",
-                               value: Fmt.duration(records.longestDuration?.value),
-                               subtitle: records.longestDuration.map { Fmt.date($0.session.startDate) } ?? "--",
-                               icon: "stopwatch.fill",
-                               tint: Theme.mint,
-                               session: records.longestDuration?.session)
-                    recordCard(title: "最大累積爬升",
-                               value: Fmt.elevation(records.highestClimb?.value),
-                               subtitle: records.highestClimb.map { Fmt.date($0.session.startDate) } ?? "--",
-                               icon: "mountain.2.fill",
-                               tint: Theme.amber,
-                               session: records.highestClimb?.session)
-                    recordCard(title: "最高強度",
-                               value: Fmt.decimal(records.bestIntensity?.value, digits: 0),
-                               subtitle: IntensityCalculator.label(for: records.bestIntensity?.value),
-                               icon: "flame.fill",
-                               tint: Theme.violet,
-                               session: records.bestIntensity?.session)
+                    if records.fastestPace != nil {
+                        recordCard(title: "最快平均配速",
+                                   value: Fmt.pace(records.fastestPace?.value, unit: settings.unit),
+                                   subtitle: records.fastestPace.map { Fmt.date($0.session.startDate) } ?? "--",
+                                   icon: "bolt.fill",
+                                   tint: Theme.accentWarm,
+                                   session: records.fastestPace?.session)
+                    }
+                    if records.longestDistance != nil {
+                        recordCard(title: "最長距離",
+                                   value: Fmt.distance(records.longestDistance?.value, unit: settings.unit),
+                                   subtitle: records.longestDistance.map { Fmt.date($0.session.startDate) } ?? "--",
+                                   icon: "arrow.left.and.right",
+                                   tint: Theme.accent,
+                                   session: records.longestDistance?.session)
+                    }
+                    if records.longestDuration != nil {
+                        recordCard(title: "最長時間",
+                                   value: Fmt.duration(records.longestDuration?.value),
+                                   subtitle: records.longestDuration.map { Fmt.date($0.session.startDate) } ?? "--",
+                                   icon: "stopwatch.fill",
+                                   tint: Theme.mint,
+                                   session: records.longestDuration?.session)
+                    }
+                    if records.highestClimb != nil {
+                        recordCard(title: "最大累積爬升",
+                                   value: Fmt.elevation(records.highestClimb?.value),
+                                   subtitle: records.highestClimb.map { Fmt.date($0.session.startDate) } ?? "--",
+                                   icon: "mountain.2.fill",
+                                   tint: Theme.amber,
+                                   session: records.highestClimb?.session)
+                    }
+                    if records.bestIntensity != nil {
+                        recordCard(title: "最高強度",
+                                   value: Fmt.decimal(records.bestIntensity?.value, digits: 0),
+                                   subtitle: IntensityCalculator.label(for: records.bestIntensity?.value),
+                                   icon: "flame.fill",
+                                   tint: Theme.violet,
+                                   session: records.bestIntensity?.session)
+                    }
                 }
             }
             .padding(.horizontal, 16)

@@ -31,6 +31,17 @@ final class DailyActivityProvider: ObservableObject {
     var weekSteps: Int { days.reduce(0) { $0 + $1.steps } }
     var bestDay: DayStat? { days.max { $0.steps < $1.steps } }
 
+    // MARK: 空資料判斷（完全沒有資料的項目直接在 UI 隱藏，不要顯示 0 或 --）
+
+    /// 這段期間完全沒有任何步數資料
+    var hasAnyData: Bool { days.contains { $0.steps > 0 } }
+    /// 今天有沒有步數
+    var hasTodayData: Bool { todaySteps > 0 }
+    /// 有沒有任何一天量到步行距離
+    var hasDistanceData: Bool { days.contains { ($0.distance ?? 0) > 0 } }
+    /// 有沒有任何一天量到爬樓層
+    var hasFloorData: Bool { days.contains { $0.floors > 0 } }
+
     @MainActor
     func load(dayCount: Int = 7) async {
         guard CMPedometer.isStepCountingAvailable() else {

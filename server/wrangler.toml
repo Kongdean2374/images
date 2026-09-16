@@ -1,0 +1,23 @@
+name = "chaihome-stats"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# 部署到 api.chaihome.cc/v1/*
+# 網域在 Cloudflare 買的，所以 zone 已經在帳號裡，不需要改 Nameserver。
+routes = [
+  { pattern = "api.chaihome.cc/v1/*", zone_name = "chaihome.cc" }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "chaihome-stats"
+# 執行 `npx wrangler d1 create chaihome-stats` 之後，把回傳的 id 貼到這裡
+database_id = "PUT-YOUR-D1-DATABASE-ID-HERE"
+
+[vars]
+# 每支裝置保留的最大筆數，超過會自動清掉最舊的
+MAX_ROWS_PER_DEVICE = "60"
+# 單一密文封包大小上限（bytes），防止有人拿來當免費儲存空間
+MAX_BODY_BYTES = "65536"
+
+# SYNC_TOKEN 不寫在這裡，用 `npx wrangler secret put SYNC_TOKEN` 設定

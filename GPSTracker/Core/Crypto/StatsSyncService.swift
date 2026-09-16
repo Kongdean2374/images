@@ -70,6 +70,18 @@ final class StatsSyncService: ObservableObject {
         didSet { UserDefaults.standard.set(enabled, forKey: Keys.enabled) }
     }
     @Published private(set) var lastSyncAt: Date?
+    /// 伺服器存取密鑰（不是加密金鑰，只用來擋掉不認識的請求）。存在 Keychain。
+    @Published var accessToken: String {
+        didSet {
+            if accessToken.isEmpty {
+                KeychainStore.delete(account: Self.tokenAccount)
+            } else {
+                try? KeychainStore.save(Data(accessToken.utf8), account: Self.tokenAccount)
+            }
+        }
+    }
+
+    private static let tokenAccount = "syncAccessToken"
 
     private enum Keys {
         static let baseURL = "syncBaseURL"
@@ -81,6 +93,8 @@ final class StatsSyncService: ObservableObject {
 
     private init() {
         baseURLText = UserDefaults.standard.string(forKey: Keys.baseURL) ?? ""
+        accessToken = KeychainStore.load(account: Self.tokenAccount)
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
         enabled = UserDefaults.standard.bool(forKey: Keys.enabled)
         let stamp = UserDefaults.standard.double(forKey: Keys.lastSync)
         lastSyncAt = stamp > 0 ? Date(timeIntervalSince1970: stamp) : nil
@@ -124,6 +138,7 @@ final class StatsSyncService: ObservableObject {
         var request = URLRequest(url: base.appendingPathComponent("stats"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
         request.httpBody = try encoder.encode(envelope)
 
         await setStatus(.working("上傳密文中⋯"))
@@ -166,6 +181,7 @@ final class StatsSyncService: ObservableObject {
             .appending(queryItems: [URLQueryItem(name: "device",
                                                  value: DataKeyManager.shared.deviceIdentifier)]))
         request.httpMethod = "GET"
+        applyAuth(to: &request)
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -219,6 +235,59 @@ final class StatsSyncService: ObservableObject {
         } catch {
             return "失敗：\(error.localizedDescription)"
         }
+    }
+
+    /// 刪除伺服器上這支裝置的全部密文
+    func wipeServerData() async throws {
+        guard let base = resolvedBaseURL else {
+            throw baseURLText.isEmpty ? SyncError.notConfigured : SyncError.insecureURL
+        }
+        var request = URLRequest(url: base.appendingPathComponent("stats")
+            .appending(queryItems: [URLQueryItem(name: "device",
+                                                 value: DataKeyManager.shared.deviceIdentifier)]))
+        request.httpMethod = "DELETE"
+        applyAuth(to: &request)
+
+        await setStatus(.working("刪除伺服器資料中⋯"))
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw SyncError.network("沒有收到有效回應")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw SyncError.server(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+            }
+            await setStatus(.success("伺服器上的密文已全部刪除"))
+        } catch let error as SyncError {
+            await setStatus(.failure(error.localizedDescription))
+            throw error
+        } catch {
+            await setStatus(.failure(error.localizedDescription))
+            throw SyncError.network(error.localizedDescription)
+        }
+    }
+
+    /// 測試伺服器是否活著（打 /health，不需要授權）
+    func ping() async -> String {
+        guard let base = resolvedBaseURL else {
+            return baseURLText.isEmpty ? "尚未填寫伺服器位址" : "位址無效：只接受 HTTPS"
+        }
+        var request = URLRequest(url: base.appendingPathComponent("health"))
+        request.httpMethod = "GET"
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return "沒有收到有效回應" }
+            return (200..<300).contains(http.statusCode)
+                ? "連線正常（HTTP \(http.statusCode)）"
+                : "伺服器回應 HTTP \(http.statusCode)"
+        } catch {
+            return "連不上：\(error.localizedDescription)"
+        }
+    }
+
+    private func applyAuth(to request: inout URLRequest) {
+        guard !accessToken.isEmpty else { return }
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     }
 
     @MainActor

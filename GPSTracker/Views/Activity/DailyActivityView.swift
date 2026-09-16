@@ -16,10 +16,13 @@ struct DailyActivityView: View {
             VStack(spacing: 16) {
                 if !provider.isAvailable {
                     unavailableCard
+                } else if !provider.hasAnyData && !provider.isLoading {
+                    noDataCard
+                    goalCard
                 } else {
                     todayCard
-                    weekChartCard
-                    detailCard
+                    if provider.hasAnyData { weekChartCard }
+                    if hasAnyDetail { detailCard }
                     goalCard
                 }
             }
@@ -147,21 +150,50 @@ struct DailyActivityView: View {
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
                 HStack {
-                    StatPill(title: "步行距離",
-                             value: Fmt.distanceValue(provider.todayDistance, unit: settings.unit),
-                             tint: Theme.accent)
-                    StatPill(title: "爬樓層",
-                             value: "\(provider.todayFloors)",
-                             tint: Theme.violet)
-                    StatPill(title: "估算熱量",
-                             value: String(format: "%.0f",
-                                           Double(provider.todaySteps) * 0.04 * settings.bodyWeight / 65),
-                             tint: Theme.accentWarm)
+                    if provider.hasDistanceData {
+                        StatPill(title: "步行距離",
+                                 value: Fmt.distanceValue(provider.todayDistance, unit: settings.unit),
+                                 tint: Theme.accent)
+                    }
+                    if provider.hasFloorData {
+                        StatPill(title: "爬樓層",
+                                 value: "\(provider.todayFloors)",
+                                 tint: Theme.violet)
+                    }
+                    if provider.hasTodayData {
+                        StatPill(title: "估算熱量",
+                                 value: String(format: "%.0f",
+                                               Double(provider.todaySteps) * 0.04 * settings.bodyWeight / 65),
+                                 tint: Theme.accentWarm)
+                    }
                 }
                 Text("資料由 iPhone 內建計步器提供，不需要定位權限，App 未開啟時系統也持續記錄。")
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
             }
+        }
+    }
+
+    /// 今日其他數據裡至少要有一項有值，整張卡才有意義
+    private var hasAnyDetail: Bool {
+        provider.hasDistanceData || provider.hasFloorData || provider.hasTodayData
+    }
+
+    private var noDataCard: some View {
+        GlassCard(padding: 18) {
+            VStack(spacing: 10) {
+                Image(systemName: "shoeprints.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(Theme.textSecondary)
+                Text("最近 7 天沒有任何活動資料")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("把手機帶在身上走一段，或到「設定 → 健康資料」授權讀取，圖表就會自動出現。沒有資料的項目會先隱藏，不用看一堆 0。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 

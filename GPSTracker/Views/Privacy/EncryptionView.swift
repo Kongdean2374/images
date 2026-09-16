@@ -23,6 +23,8 @@ struct EncryptionView: View {
     @State private var isError = false
     @State private var selfTestResult: String?
     @State private var working = false
+    @State private var pingResult: String?
+    @State private var showWipeConfirm = false
 
     var body: some View {
         ScrollView {
@@ -457,18 +459,56 @@ struct EncryptionView: View {
                     Text("伺服器位址（必須是 HTTPS）")
                         .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
-                    TextField("https://api.你的網域/v1", text: $sync.baseURLText)
+                    TextField("https://api.chaihome.cc/v1", text: $sync.baseURLText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.system(.footnote, design: .monospaced))
                         .padding(10)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
+                    if sync.baseURLText.isEmpty {
+                        Button("填入 https://api.chaihome.cc/v1") {
+                            sync.baseURLText = "https://api.chaihome.cc/v1"
+                        }
+                        .font(.caption2.weight(.semibold))
+                    }
                 }
 
                 if !sync.baseURLText.isEmpty && !sync.isConfigured {
                     Label("這個位址不是有效的 HTTPS 網址，不接受明文 HTTP。", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2)
                         .foregroundStyle(Theme.amber)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("存取密鑰（選填，對應伺服器的 SYNC_TOKEN）")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                    SecureField("留空代表伺服器沒有設定密鑰", text: $sync.accessToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.footnote, design: .monospaced))
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
+                    Text("這不是加密金鑰，只是用來擋掉不認識的請求。就算外流，對方拿到的還是解不開的密文。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary.opacity(0.8))
+                }
+
+                Button {
+                    Task {
+                        pingResult = "測試中⋯"
+                        pingResult = await sync.ping()
+                    }
+                } label: {
+                    Label("測試伺服器連線", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(sync.baseURLText.isEmpty)
+
+                if let pingResult {
+                    Text(pingResult)
+                        .font(.caption2)
+                        .foregroundStyle(pingResult.hasPrefix("連線正常") ? Theme.mint : Theme.textSecondary)
                 }
 
                 HStack(spacing: 10) {
@@ -500,6 +540,28 @@ struct EncryptionView: View {
                 Text("同步只會送出彙總統計（次數、距離、時間、熱量），不含路線座標。伺服器端尚未部署前，這裡維持關閉即可，App 其他功能完全不受影響。")
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
+
+                Button(role: .destructive) {
+                    showWipeConfirm = true
+                } label: {
+                    Label("刪除伺服器上的所有資料", systemImage: "trash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accentWarm)
+                }
+                .disabled(!sync.isConfigured)
+                .confirmationDialog("確定要刪除伺服器上的資料？",
+                                    isPresented: $showWipeConfirm,
+                                    titleVisibility: .visible) {
+                    Button("全部刪除", role: .destructive) {
+                        Task {
+                            do { try await sync.wipeServerData() }
+                            catch { report(error.localizedDescription, error: true) }
+                        }
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("會刪除這支裝置上傳過的全部密文。本機的運動紀錄不受影響。")
+                }
             }
         }
     }

@@ -219,7 +219,7 @@ struct HomeView: View {
                             .foregroundStyle(Theme.textSecondary)
                     }
                     Spacer(minLength: 0)
-                    if dailyActivity.isAvailable {
+                    if dailyActivity.isAvailable && dailyActivity.hasAnyData {
                         NavigationLink {
                             DailyActivityView()
                         } label: {
