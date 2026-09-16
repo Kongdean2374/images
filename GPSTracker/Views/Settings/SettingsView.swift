@@ -701,6 +701,11 @@ struct SettingsView: View {
                     UserGuideView()
                 }
                 rowDivider
+                documentRow(icon: "lock.shield.fill", title: "端對端加密",
+                            subtitle: "資料金鑰、金鑰匯出匯入、密文同步", tint: Theme.violet) {
+                    EncryptionView()
+                }
+                rowDivider
                 documentRow(icon: "hand.raised.fill", title: "隱私政策",
                             subtitle: "中文 / English・含權限一覽", tint: Theme.mint) {
                     LegalView(document: .privacy)

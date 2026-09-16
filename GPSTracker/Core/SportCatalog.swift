@@ -232,8 +232,7 @@ enum SportCatalog {
         case "archery": return .archery
         case "hunting": return .hunting
         case "trackAndField": return .trackAndField
-        case "housework": return .householdActivity
-        case "gardening": return .gardening
+        case "housework", "gardening": return .other
         case "manualLabour": return .other
         case "playWithKids": return .play
         case "cooldown": return .cooldown
@@ -294,8 +293,6 @@ enum SportCatalog {
         case .archery: return find("archery")
         case .hunting: return find("hunting")
         case .trackAndField: return find("trackAndField")
-        case .householdActivity: return find("housework")
-        case .gardening: return find("gardening")
         case .play: return find("playWithKids")
         case .cooldown: return find("cooldown")
         case .preparationAndRecovery: return find("warmUp")
