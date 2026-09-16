@@ -3,6 +3,9 @@ import SwiftData
 
 /// B5：間歇訓練（快速設定 or 自訂課表），不需定位
 struct IntervalTimerView: View {
+    /// 開啟該項目的獨立設定頁（由 DisciplineHostView 提供）
+    var onSettings: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
@@ -98,6 +101,19 @@ struct IntervalTimerView: View {
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
+            if let onSettings {
+                Button {
+                    CueService.shared.impact(.soft)
+                    onSettings()
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
+                }
+                .accessibilityLabel("這個項目的設定")
+            }
             if engine.phase == .idle && !useQuickSetup {
                 Button {
                     editingPlan = IntervalPlan(name: "新課表",

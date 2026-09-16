@@ -454,7 +454,7 @@ def main():
         ('GENERATE_INFOPLIST_FILE', 'NO'),
         ('INFOPLIST_FILE', '%s/Resources/Info.plist' % APP),
         ('LD_RUNPATH_SEARCH_PATHS', '(\n\t\t\t\t\t"$(inherited)",\n\t\t\t\t\t"@executable_path/Frameworks",\n\t\t\t\t)'),
-        ('MARKETING_VERSION', '2.2'),
+        ('MARKETING_VERSION', '2.4'),
         ('PRODUCT_BUNDLE_IDENTIFIER', BUNDLE_ID),
         ('PRODUCT_NAME', '"$(TARGET_NAME)"'),
         ('SWIFT_EMIT_LOC_STRINGS', 'YES'),
@@ -468,7 +468,7 @@ def main():
         ('INFOPLIST_FILE', '%s/Info.plist' % WIDGET),
         ('LD_RUNPATH_SEARCH_PATHS', '(\n\t\t\t\t\t"$(inherited)",\n\t\t\t\t\t"@executable_path/Frameworks",\n'
                                     '\t\t\t\t\t"@executable_path/../../Frameworks",\n\t\t\t\t)'),
-        ('MARKETING_VERSION', '2.2'),
+        ('MARKETING_VERSION', '2.4'),
         ('PRODUCT_BUNDLE_IDENTIFIER', WIDGET_BUNDLE_ID),
         ('PRODUCT_NAME', '"$(TARGET_NAME)"'),
         ('SKIP_INSTALL', 'YES'),

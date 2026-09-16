@@ -12,6 +12,8 @@ final class LocationManager: NSObject, ObservableObject {
     /// 裝置指向的方位（度，0 = 正北）
     @Published private(set) var deviceHeading: Double = 0
     @Published private(set) var isUpdating = false
+    /// 精確定位授權（使用者可能只給「大約位置」）
+    @Published private(set) var accuracyAuthorization: CLAccuracyAuthorization = .fullAccuracy
 
     private let manager = CLLocationManager()
     private var currentPowerMode: PowerMode = .precise
@@ -35,6 +37,7 @@ final class LocationManager: NSObject, ObservableObject {
         manager.distanceFilter = kCLDistanceFilterNone
         manager.activityType = .fitness
         manager.pausesLocationUpdatesAutomatically = false
+        accuracyAuthorization = manager.accuracyAuthorization
     }
 
     var isAuthorized: Bool {
@@ -43,6 +46,33 @@ final class LocationManager: NSObject, ObservableObject {
 
     var isDenied: Bool {
         authorizationStatus == .denied || authorizationStatus == .restricted
+    }
+
+    /// 尚未詢問過權限
+    var isUndetermined: Bool { authorizationStatus == .notDetermined }
+
+    /// 目前是否真的能用 GPS 版記錄
+    var canRecordGPS: Bool { isAuthorized }
+
+    /// 使用者只給了「大約位置」，軌跡會不準
+    var isReducedAccuracy: Bool { accuracyAuthorization == .reducedAccuracy }
+
+    var accuracyText: String {
+        switch accuracyAuthorization {
+        case .fullAccuracy: return "精確定位（最高精度）"
+        case .reducedAccuracy: return "僅大約位置（軌跡會不準）"
+        @unknown default: return "未知"
+        }
+    }
+
+    /// 向使用者要求暫時開啟精確定位（Info.plist 需有 TrackingAccuracy 目的說明）
+    func requestFullAccuracy(purposeKey: String = "TrackingAccuracy") {
+        guard isAuthorized, manager.accuracyAuthorization == .reducedAccuracy else { return }
+        manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: purposeKey) { [weak self] _ in
+            guard let self else { return }
+            let value = self.manager.accuracyAuthorization
+            DispatchQueue.main.async { self.accuracyAuthorization = value }
+        }
     }
 
     func requestPermission() {
@@ -58,9 +88,17 @@ final class LocationManager: NSObject, ObservableObject {
             requestPermission()
             return
         }
-        if background && authorizationStatus == .authorizedAlways {
-            manager.allowsBackgroundLocationUpdates = true
-            manager.showsBackgroundLocationIndicator = true
+        if background {
+            if authorizationStatus == .authorizedAlways {
+                manager.allowsBackgroundLocationUpdates = true
+                manager.showsBackgroundLocationIndicator = true
+            } else if authorizationStatus == .authorizedWhenInUse {
+                // 需要背景記錄時才升級要求「永遠允許」，避免一開始就嚇到使用者
+                manager.requestAlwaysAuthorization()
+            }
+        }
+        if manager.accuracyAuthorization == .reducedAccuracy {
+            requestFullAccuracy()
         }
         manager.startUpdatingLocation()
         manager.startUpdatingHeading()
@@ -143,8 +181,10 @@ extension LocationManager: CLLocationManagerDelegate {
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
+        let accuracy = manager.accuracyAuthorization
         DispatchQueue.main.async {
             self.authorizationStatus = status
+            self.accuracyAuthorization = accuracy
         }
     }
 

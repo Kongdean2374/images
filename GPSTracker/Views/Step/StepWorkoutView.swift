@@ -4,6 +4,10 @@ import SwiftData
 /// 走路 / 跑步 / 跑步機：完全不需要定位權限。
 struct StepWorkoutView: View {
     let initialMode: WorkoutType
+    /// 來源運動項目（有的話右上角會出現專屬設定）
+    var discipline: Discipline? = nil
+    /// 開啟該項目的獨立設定頁
+    var onSettings: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -63,7 +67,10 @@ struct StepWorkoutView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { engine.mode = initialMode }
+        .onAppear {
+            engine.mode = initialMode
+            if initialMode == .ruck && settings.ruckLoad > 0 { engine.loadWeight = settings.ruckLoad }
+        }
         .onDisappear {
             if engine.state == .running || engine.state == .paused { engine.stop() }
             metronome.stop()
@@ -104,7 +111,21 @@ struct StepWorkoutView: View {
                 .padding(.vertical, 7)
                 .background(Capsule().fill(Theme.mint.opacity(0.15)))
             Spacer()
-            Color.clear.frame(width: 42, height: 42)
+            if let onSettings {
+                Button {
+                    CueService.shared.impact(.soft)
+                    onSettings()
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
+                }
+                .accessibilityLabel("這個項目的設定")
+            } else {
+                Color.clear.frame(width: 42, height: 42)
+            }
         }
         .padding(.top, 6)
     }

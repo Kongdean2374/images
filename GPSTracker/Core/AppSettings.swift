@@ -40,6 +40,22 @@ final class AppSettings: ObservableObject {
     @Published var pinnedModes: [String] { didSet { defaults.set(pinnedModes, forKey: Keys.pinnedModes) } }
     @Published var dailyDistanceGoal: Double { didSet { defaults.set(dailyDistanceGoal, forKey: Keys.dailyDistanceGoal) } }
     @Published var lastHealthImport: Double { didSet { defaults.set(lastHealthImport, forKey: Keys.lastHealthImport) } }
+    /// 每個運動項目各自的記錄方式偏好（discipline id -> RecordingPreference raw）
+    @Published var disciplinePreferences: [String: String] { didSet { defaults.set(disciplinePreferences, forKey: Keys.disciplinePreferences) } }
+    /// 地圖樣式：0 標準 1 混合 2 衛星
+    @Published var mapStyleIndex: Int { didSet { defaults.set(mapStyleIndex, forKey: Keys.mapStyleIndex) } }
+    /// 虛擬配速員目標配速（秒/公里），0 = 關閉
+    @Published var gpsTargetPace: Double { didSet { defaults.set(gpsTargetPace, forKey: Keys.gpsTargetPace) } }
+    /// GPS 自動分圈距離（公尺），0 = 關閉
+    @Published var gpsAutoLapDistance: Double { didSet { defaults.set(gpsAutoLapDistance, forKey: Keys.gpsAutoLapDistance) } }
+    /// 背景持續記錄軌跡（需要「永遠」定位權限）
+    @Published var backgroundLocation: Bool { didSet { defaults.set(backgroundLocation, forKey: Keys.backgroundLocation) } }
+    /// 負重預設重量（公斤）
+    @Published var ruckLoad: Double { didSet { defaults.set(ruckLoad, forKey: Keys.ruckLoad) } }
+    /// 節拍器預設步頻
+    @Published var metronomeBPM: Int { didSet { defaults.set(metronomeBPM, forKey: Keys.metronomeBPM) } }
+    /// 進入運動畫面預設使用大字幕
+    @Published var preferBigText: Bool { didSet { defaults.set(preferBigText, forKey: Keys.preferBigText) } }
 
     private enum Keys {
         static let unit = "unit"
@@ -72,6 +88,14 @@ final class AppSettings: ObservableObject {
         static let pinnedModes = "pinnedModes"
         static let dailyDistanceGoal = "dailyDistanceGoal"
         static let lastHealthImport = "lastHealthImport"
+        static let disciplinePreferences = "disciplinePreferences"
+        static let mapStyleIndex = "mapStyleIndex"
+        static let gpsTargetPace = "gpsTargetPace"
+        static let gpsAutoLapDistance = "gpsAutoLapDistance"
+        static let backgroundLocation = "backgroundLocation"
+        static let ruckLoad = "ruckLoad"
+        static let metronomeBPM = "metronomeBPM"
+        static let preferBigText = "preferBigText"
     }
 
     init() {
@@ -104,7 +128,14 @@ final class AppSettings: ObservableObject {
             Keys.keepScreenAwake: true,
             Keys.batterySaver: true,
             Keys.dailyDistanceGoal: 5.0,
-            Keys.lastHealthImport: 0.0
+            Keys.lastHealthImport: 0.0,
+            Keys.mapStyleIndex: 0,
+            Keys.gpsTargetPace: 0.0,
+            Keys.gpsAutoLapDistance: 1000.0,
+            Keys.backgroundLocation: true,
+            Keys.ruckLoad: 0.0,
+            Keys.metronomeBPM: 170,
+            Keys.preferBigText: false
         ])
         unitRaw = defaults.string(forKey: Keys.unit) ?? DistanceUnit.metric.rawValue
         bodyWeight = defaults.double(forKey: Keys.bodyWeight)
@@ -136,6 +167,49 @@ final class AppSettings: ObservableObject {
         pinnedModes = defaults.stringArray(forKey: Keys.pinnedModes) ?? []
         dailyDistanceGoal = defaults.double(forKey: Keys.dailyDistanceGoal)
         lastHealthImport = defaults.double(forKey: Keys.lastHealthImport)
+        disciplinePreferences = defaults.dictionary(forKey: Keys.disciplinePreferences) as? [String: String] ?? [:]
+        mapStyleIndex = defaults.integer(forKey: Keys.mapStyleIndex)
+        gpsTargetPace = defaults.double(forKey: Keys.gpsTargetPace)
+        gpsAutoLapDistance = defaults.double(forKey: Keys.gpsAutoLapDistance)
+        backgroundLocation = defaults.bool(forKey: Keys.backgroundLocation)
+        ruckLoad = defaults.double(forKey: Keys.ruckLoad)
+        metronomeBPM = defaults.integer(forKey: Keys.metronomeBPM)
+        preferBigText = defaults.bool(forKey: Keys.preferBigText)
+    }
+
+    // MARK: 運動項目偏好
+
+    func preference(for disciplineID: String) -> RecordingPreference {
+        RecordingPreference(rawValue: disciplinePreferences[disciplineID] ?? "") ?? .auto
+    }
+
+    func setPreference(_ preference: RecordingPreference, for disciplineID: String) {
+        var copy = disciplinePreferences
+        copy[disciplineID] = preference.rawValue
+        disciplinePreferences = copy
+    }
+
+    // MARK: 首頁排列（以項目 id 為準）
+
+    func isHidden(id: String) -> Bool { hiddenModes.contains(id) }
+    func isPinned(id: String) -> Bool { pinnedModes.contains(id) }
+
+    func toggleHidden(id: String) {
+        if let index = hiddenModes.firstIndex(of: id) {
+            hiddenModes.remove(at: index)
+        } else {
+            hiddenModes.append(id)
+            pinnedModes.removeAll { $0 == id }
+        }
+    }
+
+    func togglePinned(id: String) {
+        if let index = pinnedModes.firstIndex(of: id) {
+            pinnedModes.remove(at: index)
+        } else {
+            pinnedModes.append(id)
+            hiddenModes.removeAll { $0 == id }
+        }
     }
 
     func isHidden(_ type: WorkoutType) -> Bool {

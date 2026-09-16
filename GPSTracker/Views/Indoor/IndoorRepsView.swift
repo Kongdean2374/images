@@ -4,6 +4,9 @@ import SwiftData
 /// B3：室內原地運動（加速度計 + 陀螺儀計次，不需定位）
 /// 支援自訂動作庫與循環訓練（每組次數／組數／組間休息）。
 struct IndoorRepsView: View {
+    /// 開啟該項目的獨立設定頁（由 DisciplineHostView 提供）
+    var onSettings: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
@@ -103,6 +106,19 @@ struct IndoorRepsView: View {
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
+            if let onSettings {
+                Button {
+                    CueService.shared.impact(.soft)
+                    onSettings()
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
+                }
+                .accessibilityLabel("這個項目的設定")
+            }
             Button {
                 showAddExercise = true
             } label: {

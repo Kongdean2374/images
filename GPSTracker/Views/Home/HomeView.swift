@@ -9,40 +9,36 @@ struct HomeView: View {
     @StateObject private var dailyActivity = DailyActivityProvider()
     @StateObject private var health = HealthKitManager.shared
 
+    @State private var activeDiscipline: Discipline?
     @State private var activeMode: WorkoutType?
     @State private var showImport = false
+    @State private var showSportPicker = false
     @StateObject private var intentRouter = PendingIntentRouter.shared
 
-    private let gpsModes: [WorkoutType] = [.gpsRun, .gpsHike]
-    private let noGPSModes: [WorkoutType] = [.walk, .run, .treadmill, .stairs, .ruck,
-                                             .lapCounter, .shuttleRun, .indoorInterval,
-                                             .indoorReps, .plank, .fitnessTest, .manualEntry]
+    /// 需要定位（或可用定位）的合併項目
+    private var gpsDisciplines: [Discipline] { DisciplineCatalog.dualOrGPS }
+    /// 完全不需定位的項目
+    private var indoorDisciplines: [Discipline] { DisciplineCatalog.indoorOnly }
 
-    private var pinned: [WorkoutType] {
-        (gpsModes + noGPSModes).filter { settings.isPinned($0) }
+    private var pinned: [Discipline] {
+        DisciplineCatalog.all.filter { settings.isPinned(id: $0.id) }
     }
 
-    private func visible(_ modes: [WorkoutType]) -> [WorkoutType] {
-        modes.filter { !settings.isHidden($0) && !settings.isPinned($0) }
+    private func visible(_ items: [Discipline]) -> [Discipline] {
+        items.filter { !settings.isHidden(id: $0.id) && !settings.isPinned(id: $0.id) }
     }
 
-    private func subtitle(for type: WorkoutType) -> String {
-        switch type {
-        case .gpsRun: return "即時軌跡・3D 鏡頭"
-        case .gpsHike: return "海拔與爬升"
-        case .walk: return "計步・步頻・樓層"
-        case .run: return "步幅換算距離"
-        case .treadmill: return "可用實際距離校正"
-        case .stairs: return "樓層與垂直爬升"
-        case .ruck: return "負重計入熱量估算"
-        case .lapCounter: return "固定圈距計圈"
-        case .shuttleRun: return "碰線計趟・短距衝刺"
-        case .indoorInterval: return "自訂課表・語音提示"
-        case .indoorReps: return "自動計次・循環組"
-        case .plank: return "撐體計時・穩定度偵測"
-        case .fitnessTest: return "四項測驗自動評等"
-        case .manualEntry: return "事後補登"
+    /// 這個項目進去之後實際會用哪個版本
+    private func modeBadge(for discipline: Discipline) -> (text: String, icon: String, warn: Bool) {
+        guard discipline.isDual else {
+            if discipline.supportsGPS { return ("GPS", "location.fill", false) }
+            return ("免定位", "location.slash", false)
         }
+        let usingGPS = DisciplineCatalog.resolve(discipline,
+                                                 preference: settings.preference(for: discipline.id),
+                                                 locationAvailable: location.canRecordGPS)
+        if usingGPS { return ("GPS 版", "location.fill", false) }
+        return (location.canRecordGPS ? "免定位版" : "自動免定位", "location.slash", !location.canRecordGPS)
     }
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -83,34 +79,36 @@ struct HomeView: View {
                 locationBanner
 
                 if !pinned.isEmpty {
-                    section("釘選", subtitle: "長按任一模式可釘選或隱藏") {
+                    section("釘選", subtitle: "長按任一項目可釘選或隱藏") {
                         LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(pinned, id: \.self) { mode in
-                                modeTile(mode, subtitle: subtitle(for: mode))
+                            ForEach(pinned) { item in
+                                disciplineTile(item)
                             }
                         }
                     }
                 }
 
-                if !visible(gpsModes).isEmpty {
-                    section("需要定位", subtitle: "戶外路跑與健行") {
+                if !visible(gpsDisciplines).isEmpty {
+                    section("移動型運動", subtitle: "有定位走 GPS 版，沒定位自動換免定位版") {
                         LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(visible(gpsModes), id: \.self) { mode in
-                                modeTile(mode, subtitle: subtitle(for: mode))
+                            ForEach(visible(gpsDisciplines)) { item in
+                                disciplineTile(item)
                             }
                         }
                     }
                 }
 
-                if !visible(noGPSModes).isEmpty {
-                    section("無定位模式", subtitle: "營區、室內、地下室都能用") {
+                if !visible(indoorDisciplines).isEmpty {
+                    section("免定位訓練", subtitle: "營區、室內、地下室都能用") {
                         LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(visible(noGPSModes), id: \.self) { mode in
-                                modeTile(mode, subtitle: subtitle(for: mode))
+                            ForEach(visible(indoorDisciplines)) { item in
+                                disciplineTile(item)
                             }
                         }
                     }
                 }
+
+                moreSportsTile
 
                 recentSection
             }
@@ -138,32 +136,72 @@ struct HomeView: View {
                 }
             }
         }
+        .fullScreenCover(item: $activeDiscipline) { item in
+            DisciplineHostView(discipline: item)
+        }
         .fullScreenCover(item: $activeMode) { mode in
-            switch mode {
-            case .gpsRun, .gpsHike:
-                GPSTrackingView(type: mode)
-            case .walk, .run, .treadmill:
-                StepWorkoutView(initialMode: mode)
-            case .lapCounter:
-                LapCounterView()
-            case .shuttleRun:
-                LapCounterView(mode: .shuttleRun)
-            case .ruck:
-                StepWorkoutView(initialMode: .ruck)
-            case .indoorInterval:
-                IntervalTimerView()
-            case .indoorReps:
-                IndoorRepsView()
-            case .plank:
-                PlankTimerView()
-            case .stairs:
-                StepWorkoutView(initialMode: .stairs)
-            case .fitnessTest:
-                FitnessTestView()
-            case .manualEntry:
-                ManualEntryView()
+            legacyView(for: mode)
+        }
+    }
+
+    /// Siri／捷徑或 Widget 直接指定 WorkoutType 時的舊路徑
+    @ViewBuilder
+    private func legacyView(for mode: WorkoutType) -> some View {
+        switch mode {
+        case .gpsRun, .gpsHike, .gpsActivity:
+            GPSTrackingView(type: mode)
+        case .walk, .run, .treadmill, .stairs, .ruck:
+            StepWorkoutView(initialMode: mode)
+        case .lapCounter:
+            LapCounterView()
+        case .shuttleRun:
+            LapCounterView(mode: .shuttleRun)
+        case .indoorInterval:
+            IntervalTimerView()
+        case .indoorReps:
+            IndoorRepsView()
+        case .plank:
+            PlankTimerView()
+        case .fitnessTest:
+            FitnessTestView()
+        case .manualEntry, .timedActivity:
+            ManualEntryView()
+        }
+    }
+
+    // MARK: 更多運動
+
+    private var moreSportsTile: some View {
+        NavigationLink {
+            SportPickerView()
+        } label: {
+            GlassCard(padding: 15) {
+                HStack(spacing: 13) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(Theme.accent.opacity(0.18))
+                        Image(systemName: "square.grid.2x2.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .frame(width: 42, height: 42)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("更多運動項目")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("球類、重訓、瑜伽、水上、冰雪⋯⋯共 \(SportCatalog.all.count) 種，都能記錄並寫入健康")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: 頂部總覽
@@ -176,7 +214,7 @@ struct HomeView: View {
                         Text(greeting)
                             .font(.title3.weight(.bold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("選一個模式開始今天的訓練")
+                        Text("選一個項目開始今天的訓練")
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -274,7 +312,7 @@ struct HomeView: View {
                         Text("定位權限已關閉")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("GPS 模式不可用，其餘八種模式全部照常運作。")
+                        Text("所有項目已自動切換成免定位版，計步、計時、計圈、計次全部照常運作。")
                             .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -302,57 +340,89 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func modeTile(_ type: WorkoutType, subtitle: String) -> some View {
-        Button {
+    private func disciplineTile(_ item: Discipline) -> some View {
+        let badge = modeBadge(for: item)
+        return Button {
             CueService.shared.impact(.soft)
-            activeMode = type
+            activeDiscipline = item
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(Theme.color(for: type).opacity(0.18))
-                    Image(systemName: type.systemImage)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Theme.color(for: type))
+                HStack(alignment: .top) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(Theme.color(for: item.colorType).opacity(0.18))
+                        Image(systemName: item.icon)
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(Theme.color(for: item.colorType))
+                    }
+                    .frame(width: 42, height: 42)
+                    Spacer(minLength: 0)
+                    HStack(spacing: 3) {
+                        Image(systemName: badge.icon)
+                            .font(.system(size: 8, weight: .bold))
+                        Text(badge.text)
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(badge.warn ? Theme.amber : Theme.textSecondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.white.opacity(0.07)))
                 }
-                .frame(width: 42, height: 42)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(type.displayName)
+                    Text(item.name)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text(subtitle)
+                    Text(item.subtitle)
                         .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 124, alignment: .topLeading)
             .padding(13)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(Theme.card)
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(settings.isPinned(type) ? Theme.accent.opacity(0.5) : Theme.cardStroke,
+                            .stroke(settings.isPinned(id: item.id) ? Theme.accent.opacity(0.5) : Theme.cardStroke,
                                     lineWidth: 1)
                     )
             )
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(type.displayName)，\(subtitle)")
+        .accessibilityLabel("\(item.name)，\(item.subtitle)，\(badge.text)")
         .accessibilityHint("點兩下開始，長按可釘選或隱藏")
         .contextMenu {
             Button {
-                settings.togglePinned(type)
+                settings.togglePinned(id: item.id)
             } label: {
-                Label(settings.isPinned(type) ? "取消釘選" : "釘選到最上面",
-                      systemImage: settings.isPinned(type) ? "pin.slash" : "pin")
+                Label(settings.isPinned(id: item.id) ? "取消釘選" : "釘選到最上面",
+                      systemImage: settings.isPinned(id: item.id) ? "pin.slash" : "pin")
+            }
+            if item.isDual {
+                Button {
+                    settings.setPreference(.gps, for: item.id)
+                } label: {
+                    Label("固定用 GPS 版", systemImage: "location.fill")
+                }
+                .disabled(!location.canRecordGPS)
+                Button {
+                    settings.setPreference(.indoor, for: item.id)
+                } label: {
+                    Label("固定用免定位版", systemImage: "location.slash")
+                }
+                Button {
+                    settings.setPreference(.auto, for: item.id)
+                } label: {
+                    Label("自動判斷", systemImage: "wand.and.stars")
+                }
             }
             Button(role: .destructive) {
-                settings.toggleHidden(type)
+                settings.toggleHidden(id: item.id)
             } label: {
                 Label("從首頁隱藏", systemImage: "eye.slash")
             }

@@ -154,6 +154,7 @@ final class HealthKitImporter: ObservableObject {
 
             let type = HealthKitManager.workoutType(for: workout.workoutActivityType,
                                                     hasRoute: locations.count > 1)
+            let sport = SportCatalog.sport(for: workout.workoutActivityType)
             if fingerprints.contains(fingerprint(type: type, start: workout.startDate)) {
                 result.skipped += 1
                 continue
@@ -165,6 +166,7 @@ final class HealthKitImporter: ObservableObject {
 
             let session = makeSession(workout: workout,
                                       type: type,
+                                      sport: sport,
                                       distance: distance,
                                       steps: steps,
                                       energy: energy,
@@ -219,6 +221,7 @@ final class HealthKitImporter: ObservableObject {
             let locations = await health.route(of: workout)
             let type = HealthKitManager.workoutType(for: workout.workoutActivityType,
                                                     hasRoute: locations.count > 1)
+            let sport = SportCatalog.sport(for: workout.workoutActivityType)
             if fingerprints.contains(fingerprint(type: type, start: workout.startDate)) {
                 result.skipped += 1
                 continue
@@ -228,6 +231,7 @@ final class HealthKitImporter: ObservableObject {
             let energy = await health.energy(of: workout)
             context.insert(makeSession(workout: workout,
                                        type: type,
+                                       sport: SportCatalog.sport(for: workout.workoutActivityType),
                                        distance: distance,
                                        steps: steps,
                                        energy: energy,
@@ -259,6 +263,7 @@ final class HealthKitImporter: ObservableObject {
     @MainActor
     private func makeSession(workout: HKWorkout,
                              type: WorkoutType,
+                             sport: SportKind?,
                              distance: Double?,
                              steps: Int?,
                              energy: Double?,
@@ -291,14 +296,16 @@ final class HealthKitImporter: ObservableObject {
                                      distanceSource: locations.count > 1 ? .gps : .pedometer,
                                      routeKey: nil,
                                      title: nil)
-        session.calories = energy ?? IntensityCalculator.calories(type: type,
+        let met = sport?.met ?? type.metValue
+        session.calories = energy ?? IntensityCalculator.calories(met: met,
                                                                   duration: duration,
                                                                   bodyWeight: AppSettings.shared.bodyWeight)
-        session.intensityScore = IntensityCalculator.score(type: type,
+        session.intensityScore = IntensityCalculator.score(met: met,
                                                            duration: duration,
                                                            distance: distance,
                                                            averagePace: pace,
                                                            elevationGain: locations.count > 1 ? gain : nil)
+        session.sport = sport
         session.healthKitUUID = workout.uuid.uuidString
         session.healthKitSynced = true   // 來自健康 App，不需要再寫回去
         session.isImported = true

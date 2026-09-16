@@ -24,11 +24,13 @@ struct WorkoutSnapshot {
     let distance: Double?
     let calories: Double?
     let floorsAscended: Int?
+    let sportID: String?
     let locations: [CLLocation]
 
     @MainActor
     init(session: WorkoutSession) {
         type = session.type
+        sportID = session.sportRaw
         start = session.startDate
         end = session.endDate
         distance = session.totalDistance
@@ -88,6 +90,10 @@ final class HealthKitManager: ObservableObject {
         types.insert(HKQuantityType(.distanceWalkingRunning))
         types.insert(HKQuantityType(.activeEnergyBurned))
         types.insert(HKQuantityType(.flightsClimbed))
+        types.insert(HKQuantityType(.distanceCycling))
+        types.insert(HKQuantityType(.distanceSwimming))
+        types.insert(HKQuantityType(.stepCount))
+        types.insert(HKQuantityType(.basalEnergyBurned))
         types.insert(HKSeriesType.workoutRoute())
         return types
     }
@@ -101,6 +107,54 @@ final class HealthKitManager: ObservableObject {
         types.insert(HKQuantityType(.bodyMass))
         types.insert(HKQuantityType(.height))
         types.insert(HKQuantityType(.heartRate))
+        types.insert(HKQuantityType(.restingHeartRate))
+        types.insert(HKQuantityType(.walkingHeartRateAverage))
+        types.insert(HKQuantityType(.heartRateVariabilitySDNN))
+        types.insert(HKQuantityType(.vo2Max))
+        types.insert(HKQuantityType(.basalEnergyBurned))
+        types.insert(HKQuantityType(.appleExerciseTime))
+        types.insert(HKQuantityType(.appleStandTime))
+        types.insert(HKQuantityType(.distanceCycling))
+        types.insert(HKQuantityType(.distanceSwimming))
+        types.insert(HKQuantityType(.swimmingStrokeCount))
+        types.insert(HKQuantityType(.distanceDownhillSnowSports))
+        types.insert(HKQuantityType(.distanceWheelchair))
+        types.insert(HKQuantityType(.pushCount))
+        types.insert(HKQuantityType(.walkingSpeed))
+        types.insert(HKQuantityType(.walkingStepLength))
+        types.insert(HKQuantityType(.walkingAsymmetryPercentage))
+        types.insert(HKQuantityType(.walkingDoubleSupportPercentage))
+        types.insert(HKQuantityType(.sixMinuteWalkTestDistance))
+        types.insert(HKQuantityType(.stairAscentSpeed))
+        types.insert(HKQuantityType(.stairDescentSpeed))
+        types.insert(HKQuantityType(.respiratoryRate))
+        types.insert(HKQuantityType(.oxygenSaturation))
+        types.insert(HKQuantityType(.bodyFatPercentage))
+        types.insert(HKQuantityType(.leanBodyMass))
+        types.insert(HKQuantityType(.bodyMassIndex))
+        if #available(iOS 17.0, *) {
+            types.insert(HKQuantityType(.runningSpeed))
+            types.insert(HKQuantityType(.runningPower))
+            types.insert(HKQuantityType(.runningStrideLength))
+            types.insert(HKQuantityType(.runningVerticalOscillation))
+            types.insert(HKQuantityType(.runningGroundContactTime))
+            types.insert(HKQuantityType(.cyclingPower))
+            types.insert(HKQuantityType(.cyclingCadence))
+            types.insert(HKQuantityType(.cyclingSpeed))
+            types.insert(HKQuantityType(.cyclingFunctionalThresholdPower))
+            types.insert(HKQuantityType(.physicalEffort))
+            types.insert(HKQuantityType(.timeInDaylight))
+        }
+        types.insert(HKCategoryType(.sleepAnalysis))
+        types.insert(HKCategoryType(.mindfulSession))
+        types.insert(HKObjectType.activitySummaryType())
+        if let characteristic = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) {
+            types.insert(characteristic)
+        }
+        if let sex = HKObjectType.characteristicType(forIdentifier: .biologicalSex) {
+            types.insert(sex)
+        }
+        types.insert(HKSeriesType.workoutRoute())
         return types
     }
 
@@ -162,7 +216,11 @@ final class HealthKitManager: ObservableObject {
         guard availability == .ready else { return nil }
 
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = Self.activityType(for: snapshot.type)
+        if let sport = SportCatalog.find(snapshot.sportID) {
+            configuration.activityType = SportCatalog.healthKitType(for: sport)
+        } else {
+            configuration.activityType = Self.activityType(for: snapshot.type)
+        }
         configuration.locationType = snapshot.type.requiresLocation ? .outdoor : .indoor
 
         let start = snapshot.start
@@ -507,17 +565,18 @@ final class HealthKitManager: ObservableObject {
             return hasRoute ? .gpsHike : .walk
         case .hiking:
             return .gpsHike
-        case .highIntensityIntervalTraining, .jumpRope:
-            return .indoorInterval
-        case .functionalStrengthTraining, .traditionalStrengthTraining, .coreTraining, .crossTraining:
-            return .indoorReps
         default:
-            return .manualEntry
+            // 其他所有項目都保留原本的運動種類，用通用類型承接
+            if SportCatalog.sport(for: activity) != nil {
+                return hasRoute ? .gpsActivity : .timedActivity
+            }
+            return hasRoute ? .gpsActivity : .manualEntry
         }
     }
 
     static func activityType(for type: WorkoutType) -> HKWorkoutActivityType {
         switch type {
+        case .gpsActivity, .timedActivity: return .other
         case .gpsRun, .run: return .running
         case .treadmill: return .running
         case .walk: return .walking

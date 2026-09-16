@@ -39,6 +39,8 @@ final class GPSWorkoutRecorder: ObservableObject {
     @Published private(set) var heading: Double = 0
     @Published private(set) var isAutoPaused = false
     @Published var workoutType: WorkoutType = .gpsRun
+    /// 多項運動時的運動種類（決定熱量 MET 與寫入健康的類型）
+    @Published var sport: SportKind?
     @Published var routeKey: String = ""
     /// 虛擬配速員的目標配速（秒/公里），nil 表示不啟用
     @Published var targetPace: Double?
@@ -366,15 +368,28 @@ final class GPSWorkoutRecorder: ObservableObject {
                                         ? distance / Double(pedometer.steps) : nil,
                                      distanceSource: .gps,
                                      routeKey: routeKey.isEmpty ? nil : routeKey,
+                                     title: sport?.name,
                                      notes: nil)
-        session.calories = IntensityCalculator.calories(type: workoutType,
-                                                        duration: elapsed,
-                                                        bodyWeight: settings.bodyWeight)
-        session.intensityScore = IntensityCalculator.score(type: workoutType,
-                                                           duration: elapsed,
-                                                           distance: distance,
-                                                           averagePace: session.averagePace,
-                                                           elevationGain: elevationGain)
+        session.sport = sport
+        if let sport {
+            session.calories = IntensityCalculator.calories(met: sport.met,
+                                                            duration: elapsed,
+                                                            bodyWeight: settings.bodyWeight)
+            session.intensityScore = IntensityCalculator.score(met: sport.met,
+                                                               duration: elapsed,
+                                                               distance: distance,
+                                                               averagePace: session.averagePace,
+                                                               elevationGain: elevationGain)
+        } else {
+            session.calories = IntensityCalculator.calories(type: workoutType,
+                                                            duration: elapsed,
+                                                            bodyWeight: settings.bodyWeight)
+            session.intensityScore = IntensityCalculator.score(type: workoutType,
+                                                               duration: elapsed,
+                                                               distance: distance,
+                                                               averagePace: session.averagePace,
+                                                               elevationGain: elevationGain)
+        }
         session.weatherNote = weatherNote
         session.temperature = temperature
         session.laps = laps.map {

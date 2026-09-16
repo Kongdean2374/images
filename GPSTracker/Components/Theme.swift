@@ -33,6 +33,20 @@ enum Theme {
         return Color(hue: 0.58 * (1 - t), saturation: 0.85, brightness: 1.0)
     }
 
+    static func color(for category: SportCategory) -> Color {
+        switch category {
+        case .endurance: return accent
+        case .ball: return amber
+        case .strength: return accentWarm
+        case .mindBody: return violet
+        case .water: return Color(red: 0.36, green: 0.78, blue: 0.98)
+        case .snow: return Color(red: 0.62, green: 0.86, blue: 0.98)
+        case .outdoor: return mint
+        case .daily: return Color(red: 0.75, green: 0.70, blue: 0.55)
+        case .other: return Color.gray
+        }
+    }
+
     static func color(for type: WorkoutType) -> Color {
         switch type {
         case .gpsRun: return accent
@@ -47,6 +61,8 @@ enum Theme {
         case .stairs: return Color(red: 0.98, green: 0.52, blue: 0.62)
         case .shuttleRun: return Color(red: 0.36, green: 0.72, blue: 0.98)
         case .ruck: return Color(red: 0.72, green: 0.62, blue: 0.42)
+        case .gpsActivity: return Color(red: 0.45, green: 0.80, blue: 0.62)
+        case .timedActivity: return Color(red: 0.62, green: 0.58, blue: 0.95)
         case .fitnessTest: return Color(red: 0.95, green: 0.82, blue: 0.35)
         case .manualEntry: return Color.gray
         }

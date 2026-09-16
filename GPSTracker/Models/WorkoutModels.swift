@@ -16,6 +16,10 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
     case stairs
     case shuttleRun
     case ruck
+    /// 以 GPS 記錄的其他運動（自行車、滑雪、獨木舟…）
+    case gpsActivity
+    /// 以計時為主的其他運動（球類、瑜伽、重訓…）
+    case timedActivity
     case fitnessTest
     case manualEntry
 
@@ -35,6 +39,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .stairs: return "爬樓梯"
         case .shuttleRun: return "折返跑"
         case .ruck: return "負重行軍"
+        case .gpsActivity: return "戶外運動"
+        case .timedActivity: return "其他運動"
         case .fitnessTest: return "體能測驗"
         case .manualEntry: return "手動輸入"
         }
@@ -54,6 +60,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .stairs: return "樓梯"
         case .shuttleRun: return "折返"
         case .ruck: return "負重"
+        case .gpsActivity: return "戶外"
+        case .timedActivity: return "運動"
         case .fitnessTest: return "體測"
         case .manualEntry: return "手動"
         }
@@ -73,6 +81,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .stairs: return "figure.stair.stepper"
         case .shuttleRun: return "arrow.left.arrow.right"
         case .ruck: return "backpack.fill"
+        case .gpsActivity: return "map.circle.fill"
+        case .timedActivity: return "figure.mixed.cardio"
         case .fitnessTest: return "medal.fill"
         case .manualEntry: return "square.and.pencil"
         }
@@ -80,7 +90,12 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
 
     /// 是否需要定位權限；無定位模組（模組 B）全部為 false。
     var requiresLocation: Bool {
-        self == .gpsRun || self == .gpsHike
+        self == .gpsRun || self == .gpsHike || self == .gpsActivity
+    }
+
+    /// 需要搭配「運動項目」才知道是哪一種
+    var usesSportKind: Bool {
+        self == .gpsActivity || self == .timedActivity
     }
 
     /// 以計步器為主的無定位模式
@@ -111,6 +126,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .stairs: return 8.8
         case .shuttleRun: return 9.5
         case .ruck: return 6.5
+        case .gpsActivity: return 7.5
+        case .timedActivity: return 6.0
         case .fitnessTest: return 8.5
         case .manualEntry: return 7.0
         }
@@ -187,6 +204,10 @@ final class WorkoutSession {
     var heartRateOneMinute: Int?
     /// 負重行軍的負重（公斤）
     var loadWeight: Double?
+    /// 具體的運動項目（來自運動目錄），例如籃球、瑜伽、自行車
+    var sportRaw: String?
+    /// 自訂計次（球類局數、重訓組數等）
+    var setCount: Int?
     /// 同路線比較用的識別名稱（GPS 路線名或圈數設定）。
     var routeKey: String?
     var title: String?
@@ -262,6 +283,22 @@ final class WorkoutSession {
     }
 
     /// 一分鐘心率下降幅度，越大代表恢復越好
+    /// 對應的運動項目
+    var sport: SportKind? {
+        get { SportCatalog.find(sportRaw) }
+        set { sportRaw = newValue?.id }
+    }
+
+    /// 熱量與強度估算用的 MET：有指定項目就用項目的
+    var effectiveMET: Double {
+        sport?.met ?? type.metValue
+    }
+
+    /// 顯示用的圖示
+    var displayIcon: String {
+        sport?.icon ?? type.systemImage
+    }
+
     var heartRateRecovery: Int? {
         guard let after = heartRateAfter, let oneMinute = heartRateOneMinute else { return nil }
         return max(0, after - oneMinute)
@@ -288,6 +325,7 @@ final class WorkoutSession {
 
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
+        if let sport { return sport.name }
         return type.displayName
     }
 

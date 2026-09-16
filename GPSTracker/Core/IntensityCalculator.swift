@@ -40,6 +40,31 @@ enum IntensityCalculator {
         type.metValue * bodyWeight * (duration / 3600)
     }
 
+    /// 指定 MET 的版本（用於運動目錄裡的各種項目）
+    static func calories(met: Double, duration: TimeInterval, bodyWeight: Double) -> Double {
+        met * bodyWeight * (duration / 3600)
+    }
+
+    /// 以 MET 直接計算強度分數
+    static func score(met: Double,
+                      duration: TimeInterval,
+                      distance: Double?,
+                      averagePace: Double?,
+                      elevationGain: Double?) -> Double {
+        var paceFactor = min(1.0, max(0.25, met / 11.0))
+        if let pace = averagePace, pace > 0 {
+            let clamped = min(max(pace, 210), 540)
+            paceFactor = 1.0 - (clamped - 210) / 330 * 0.75
+        }
+        var climbFactor = 0.0
+        if let gain = elevationGain, let dist = distance, dist > 100 {
+            climbFactor = min(0.3, gain / (dist / 1000) / 50 * 0.15)
+        }
+        let durationFactor = min(1.4, 0.55 + duration / 3600 * 0.55)
+        let raw = (paceFactor + climbFactor) * durationFactor * met / 9.0
+        return min(100, max(0, raw * 100))
+    }
+
     static func label(for score: Double?) -> String {
         guard let score else { return "--" }
         switch score {

@@ -3,6 +3,9 @@ import SwiftData
 
 /// 棒式／靜態撐體：計時 + 穩定度偵測，不需定位
 struct PlankTimerView: View {
+    /// 開啟該項目的獨立設定頁（由 DisciplineHostView 提供）
+    var onSettings: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
@@ -82,7 +85,22 @@ struct PlankTimerView: View {
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
-            Color.clear.frame(width: 42, height: 42)
+            if let onSettings {
+                Button {
+                    CueService.shared.impact(.soft)
+                    onSettings()
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
+                }
+                .accessibilityLabel("這個項目的設定")
+            }
+            else {
+                Color.clear.frame(width: 42, height: 42)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 6)

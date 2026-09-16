@@ -6,6 +6,12 @@ import UIKit
 
 struct GPSTrackingView: View {
     let type: WorkoutType
+    /// 多項運動時對應的運動種類（跑步／健行留空）
+    var sport: SportKind? = nil
+    /// 來源運動項目（有的話右上角會出現專屬設定）
+    var discipline: Discipline? = nil
+    /// 開啟該項目的獨立設定頁
+    var onSettings: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -18,11 +24,11 @@ struct GPSTrackingView: View {
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
     @State private var expandedMetrics = true
-    @State private var mapStyleIndex = 0
     @State private var targetPaceIndex = 0
     @State private var autoLapIndex = 1
     @State private var showBackToStart = false
     @State private var bigTextMode = false
+    @State private var showAccuracyHint = false
     @State private var exitTaps = 0
 
     private let paceOptions: [(String, Double?)] = [
@@ -50,9 +56,15 @@ struct GPSTrackingView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            recorder.workoutType = type
+            recorder.sport = sport
+            bigTextMode = settings.preferBigText
+            applyStoredOptions()
             if location.isAuthorized {
-                location.startUpdating(background: false)
+                location.startUpdating(background: settings.backgroundLocation)
                 location.requestOneShot()
+                location.requestFullAccuracy()
+                showAccuracyHint = location.isReducedAccuracy
             } else if !location.isDenied {
                 location.requestPermission()
             }
@@ -78,6 +90,22 @@ struct GPSTrackingView: View {
         } message: {
             Text("已記錄 \(Fmt.distance(recorder.distance, unit: settings.unit))，時間 \(Fmt.duration(recorder.elapsed))")
         }
+    }
+
+    /// 從設定頁帶入這個項目儲存的偏好
+    private func applyStoredOptions() {
+        if let index = paceOptions.firstIndex(where: { ($0.1 ?? 0) == settings.gpsTargetPace }) {
+            targetPaceIndex = index
+        } else {
+            targetPaceIndex = 0
+        }
+        recorder.targetPace = settings.gpsTargetPace > 0 ? settings.gpsTargetPace : nil
+        if let index = lapOptions.firstIndex(where: { $0.1 == settings.gpsAutoLapDistance }) {
+            autoLapIndex = index
+        } else {
+            autoLapIndex = 0
+        }
+        recorder.autoLapDistance = settings.gpsAutoLapDistance
     }
 
     // MARK: 地圖
@@ -108,7 +136,7 @@ struct GPSTrackingView: View {
     }
 
     private var currentMapStyle: MapStyle {
-        switch mapStyleIndex {
+        switch settings.mapStyleIndex {
         case 1: return .hybrid(elevation: .realistic, pointsOfInterest: .excludingAll)
         case 2: return .imagery(elevation: .realistic)
         default: return .standard(elevation: .realistic, pointsOfInterest: .excludingAll)
@@ -158,6 +186,19 @@ struct GPSTrackingView: View {
             Spacer()
 
             HStack(spacing: 10) {
+                if let onSettings {
+                    Button {
+                        CueService.shared.impact(.soft)
+                        onSettings()
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(11)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+                    .accessibilityLabel("這個項目的設定")
+                }
                 if recorder.state != .idle {
                     Button {
                         bigTextMode = true
@@ -172,10 +213,10 @@ struct GPSTrackingView: View {
                     }
                 }
                 Button {
-                    mapStyleIndex = (mapStyleIndex + 1) % 3
+                    settings.mapStyleIndex = (settings.mapStyleIndex + 1) % 3
                     CueService.shared.impact(.soft)
                 } label: {
-                    Image(systemName: mapStyleIndex == 0 ? "map" : (mapStyleIndex == 1 ? "globe.americas" : "photo"))
+                    Image(systemName: settings.mapStyleIndex == 0 ? "map" : (settings.mapStyleIndex == 1 ? "globe.americas" : "photo"))
                         .font(.headline)
                         .foregroundStyle(.white)
                         .padding(11)
@@ -363,10 +404,12 @@ struct GPSTrackingView: View {
             chipRow(title: "虛擬配速員", options: paceOptions.map { $0.0 }, selected: targetPaceIndex) { index in
                 targetPaceIndex = index
                 recorder.targetPace = paceOptions[index].1
+                settings.gpsTargetPace = paceOptions[index].1 ?? 0
             }
             chipRow(title: "自動分圈", options: lapOptions.map { $0.0 }, selected: autoLapIndex) { index in
                 autoLapIndex = index
                 recorder.autoLapDistance = lapOptions[index].1
+                settings.gpsAutoLapDistance = lapOptions[index].1
             }
         }
     }
