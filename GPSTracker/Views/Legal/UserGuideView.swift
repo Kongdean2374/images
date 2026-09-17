@@ -66,7 +66,7 @@ struct UserGuideView: View {
                         .foregroundStyle(.white)
                         .rotationEffect(.degrees(-16))
                 }
-                Text("\(SportCatalog.all.count)＋ 種運動，訊號好壞都能練")
+                Text("各種運動都能記，訊號好壞都能練")
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
                     .multilineTextAlignment(.center)

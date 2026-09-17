@@ -64,8 +64,8 @@ struct OnboardingView: View {
 
     private var sportsPage: some View {
         page(illustration: sportsIllustration,
-             title: "\(SportCatalog.all.count) 種以上的運動",
-             subtitle: "跑步、健行、單車、球類、重訓、瑜伽⋯⋯\n都能記錄，也都能寫進健康 App。")
+             title: "不只有跑步",
+             subtitle: "單車、球類、重訓、游泳、瑜伽都能記，\n沒有的項目可以自己新增。")
     }
 
     private var gpsPage: some View {

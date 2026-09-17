@@ -40,9 +40,7 @@ enum Theme {
         case .strength: return accentWarm
         case .mindBody: return violet
         case .water: return Color(red: 0.36, green: 0.78, blue: 0.98)
-        case .snow: return Color(red: 0.62, green: 0.86, blue: 0.98)
         case .outdoor: return mint
-        case .daily: return Color(red: 0.75, green: 0.70, blue: 0.55)
         case .other: return Color.gray
         }
     }

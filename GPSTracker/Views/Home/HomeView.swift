@@ -189,7 +189,7 @@ struct HomeView: View {
                         Text("更多運動項目")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("球類、重訓、瑜伽、水上、冰雪⋯⋯共 \(SportCatalog.all.count) 種，都能記錄並寫入健康")
+                        Text("單車、球類、重訓、游泳、瑜伽⋯⋯沒有的還能自己新增")
                             .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(2)

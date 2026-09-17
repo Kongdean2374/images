@@ -4,9 +4,12 @@ import SwiftUI
 struct SportPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var location = LocationManager.shared
+    @StateObject private var customStore = CustomSportStore.shared
 
     @State private var search = ""
     @State private var launchDiscipline: Discipline?
+    @State private var showEditor = false
+    @State private var editingSport: SportKind?
     @State private var category: SportCategory?
     @State private var selected: SportKind?
     @State private var launchMode: WorkoutType?
@@ -14,9 +17,18 @@ struct SportPickerView: View {
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     private var results: [SportKind] {
-        var list = search.isEmpty ? SportCatalog.all : SportCatalog.search(search)
+        var list = search.isEmpty ? SportCatalog.visible : SportCatalog.search(search)
         if let category {
             list = list.filter { $0.category == category }
+        }
+        return list.filter { !$0.isCustom }
+    }
+
+    private var customSports: [SportKind] {
+        var list = customStore.sports
+        if let category { list = list.filter { $0.category == category } }
+        if !search.isEmpty {
+            list = list.filter { $0.name.localizedCaseInsensitiveContains(search) }
         }
         return list
     }
@@ -36,7 +48,19 @@ struct SportPickerView: View {
 
                 categoryBar
 
-                section(category?.displayName ?? (search.isEmpty ? "全部項目" : "搜尋結果")) {
+                if !customSports.isEmpty {
+                    section("我的運動") {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(customSports) { sport in
+                                tile(sport)
+                            }
+                        }
+                    }
+                }
+
+                addCustomButton
+
+                section(category?.displayName ?? (search.isEmpty ? "常見項目" : "搜尋結果")) {
                     if results.isEmpty {
                         EmptyStateView(systemImage: "magnifyingglass",
                                        title: "找不到符合的項目",
@@ -50,6 +74,12 @@ struct SportPickerView: View {
                         }
                     }
                 }
+
+                Text("只列常見項目，其餘請用「新增自訂運動」自己加，\n這樣清單才不會塞滿你永遠用不到的東西。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 28)
@@ -71,9 +101,53 @@ struct SportPickerView: View {
         .fullScreenCover(item: $launchDiscipline) { discipline in
             DisciplineHostView(discipline: discipline)
         }
+        .sheet(isPresented: $showEditor) {
+            CustomSportEditor { created in
+                selected = created
+            }
+        }
+        .sheet(item: $editingSport) { sport in
+            CustomSportEditor(editing: sport) { _ in }
+        }
     }
 
     @State private var pendingSport: SportKind?
+
+    private var addCustomButton: some View {
+        Button {
+            showEditor = true
+            CueService.shared.impact(.soft)
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.violet.opacity(0.18))
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(Theme.violet)
+                }
+                .frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("新增自訂運動")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("取個名字、選圖示與強度，就能跟內建項目一樣記錄")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(13)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.card)
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Theme.violet.opacity(0.35), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -137,6 +211,10 @@ struct SportPickerView: View {
                         .font(.system(size: 9))
                     Text(sport.tracksDistance ? "可 GPS" : "計時")
                     Text("・MET \(String(format: "%.1f", sport.met))")
+                    if sport.isCustom {
+                        Text("・自訂")
+                            .foregroundStyle(Theme.violet)
+                    }
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.textSecondary)
@@ -154,6 +232,20 @@ struct SportPickerView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(sport.name)
         .accessibilityHint(sport.tracksDistance ? "可用 GPS 記錄或計時" : "以計時記錄")
+        .contextMenu {
+            if sport.isCustom {
+                Button {
+                    editingSport = sport
+                } label: {
+                    Label("編輯", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    customStore.remove(sport)
+                } label: {
+                    Label("刪除", systemImage: "trash")
+                }
+            }
+        }
     }
 
     private func startSheet(_ sport: SportKind) -> some View {
