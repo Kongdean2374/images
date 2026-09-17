@@ -697,13 +697,8 @@ struct SettingsView: View {
         GlassCard(padding: 6) {
             VStack(spacing: 0) {
                 documentRow(icon: "book.fill", title: "使用說明",
-                            subtitle: "九種模式與資料流的圖解", tint: Theme.accent) {
+                            subtitle: "各種模式與資料流的圖解", tint: Theme.accent) {
                     UserGuideView()
-                }
-                rowDivider
-                documentRow(icon: "lock.shield.fill", title: "端對端加密",
-                            subtitle: "資料金鑰、金鑰匯出匯入、密文同步", tint: Theme.violet) {
-                    EncryptionView()
                 }
                 rowDivider
                 documentRow(icon: "hand.raised.fill", title: "隱私政策",

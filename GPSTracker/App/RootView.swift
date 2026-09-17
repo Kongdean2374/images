@@ -36,8 +36,6 @@ struct RootView: View {
         .onAppear {
             if !settings.hasSeenOnboarding { showOnboarding = true }
             if DatabaseHealth.needsAttention { showDatabaseNotice = true }
-            // 首次啟動時就在本機生成資料金鑰，之後要開同步隨時可用
-            try? DataKeyManager.shared.ensureKey()
         }
         .sheet(isPresented: $showDatabaseNotice) {
             DatabaseNoticeView()

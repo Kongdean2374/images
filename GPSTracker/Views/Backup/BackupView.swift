@@ -20,6 +20,11 @@ struct BackupView: View {
     @State private var message: String?
     @State private var errorMessage: String?
     @State private var showRestoreConfirm = false
+    @State private var usePassword = false
+    @State private var password = ""
+    @State private var passwordConfirm = ""
+    @State private var lockedEnvelope: BackupCrypto.Envelope?
+    @State private var unlockPassword = ""
 
     private var routePointCount: Int {
         sessions.reduce(0) { $0 + $1.routePoints.count }
@@ -60,9 +65,13 @@ struct BackupView: View {
             }
         }
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.json],
+                      allowedContentTypes: [.json, .data],
                       allowsMultipleSelection: false) { result in
             handleImport(result)
+        }
+        .sheet(item: Binding(get: { lockedEnvelope.map { LockedBox(envelope: $0) } },
+                             set: { if $0 == nil { lockedEnvelope = nil } })) { box in
+            unlockSheet(box.envelope)
         }
         .alert("確定要還原？", isPresented: $showRestoreConfirm) {
             Button("取消", role: .cancel) {}
@@ -128,18 +137,148 @@ struct BackupView: View {
                     }
                 }
 
+                Divider().overlay(Color.white.opacity(0.08))
+
+                Toggle("用密碼加密這份備份", isOn: $usePassword)
+                    .tint(Theme.violet)
+                    .foregroundStyle(Theme.textPrimary)
+
+                if usePassword {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SecureField("設定密碼（至少 8 字）", text: $password)
+                            .textFieldStyle(.plain)
+                            .padding(11)
+                            .background(RoundedRectangle(cornerRadius: 11).fill(Color.white.opacity(0.06)))
+                        SecureField("再輸入一次", text: $passwordConfirm)
+                            .textFieldStyle(.plain)
+                            .padding(11)
+                            .background(RoundedRectangle(cornerRadius: 11).fill(Color.white.opacity(0.06)))
+                        strengthBar
+                        Text("備份會用 AES-256-GCM 加密，密碼經 PBKDF2 衍生 21 萬輪。全程在這支手機完成，不連網、不上傳。忘記密碼就救不回來，沒有後門。")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                } else {
+                    Text("不加密的備份是純文字 JSON，任何人拿到檔案都看得到內容。要存到雲端硬碟或傳給自己的話，建議打開加密。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+
                 Button {
                     exportURL = manager.exportBackup(sessions: sessions,
                                                      goals: goals,
-                                                     includeRoutes: includeRoutes)
+                                                     includeRoutes: includeRoutes,
+                                                     password: usePassword ? password : nil)
                     showShare = exportURL != nil
                     if exportURL == nil { errorMessage = "備份建立失敗" }
                 } label: {
-                    Label("匯出備份檔", systemImage: "square.and.arrow.up")
+                    Label(usePassword ? "加密並匯出備份檔" : "匯出備份檔",
+                          systemImage: usePassword ? "lock.doc" : "square.and.arrow.up")
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(manager.isWorking || sessions.isEmpty)
+                .disabled(manager.isWorking || sessions.isEmpty || exportBlocked)
             }
+        }
+    }
+
+    private var exportBlocked: Bool {
+        usePassword && (password.count < 8 || password != passwordConfirm)
+    }
+
+    private var strengthBar: some View {
+        let strength = BackupCrypto.passwordStrength(password)
+        return VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule()
+                        .fill(strength > 0.7 ? Theme.mint : (strength > 0.4 ? Theme.amber : Theme.accentWarm))
+                        .frame(width: geo.size.width * strength)
+                }
+            }
+            .frame(height: 6)
+            Text(password.isEmpty ? "尚未輸入密碼"
+                 : (password != passwordConfirm ? "兩次輸入不一致"
+                    : (strength > 0.7 ? "強度：足夠" : (strength > 0.4 ? "強度：普通" : "強度：太弱"))))
+                .font(.caption2)
+                .foregroundStyle(password != passwordConfirm && !passwordConfirm.isEmpty
+                                 ? Theme.accentWarm : Theme.textSecondary)
+        }
+    }
+
+    private func unlockSheet(_ envelope: BackupCrypto.Envelope) -> some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle().fill(Theme.violet.opacity(0.18))
+                    Image(systemName: "lock.doc.fill")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(Theme.violet)
+                }
+                .frame(width: 74, height: 74)
+                .padding(.top, 24)
+
+                Text("這是加密備份檔")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("建立於 \(Fmt.dateTime(envelope.createdAt))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+
+                SecureField("輸入備份密碼", text: $unlockPassword)
+                    .textFieldStyle(.plain)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.07)))
+                    .padding(.horizontal, 24)
+
+                Button {
+                    unlock(envelope)
+                } label: {
+                    Label("解開備份", systemImage: "lock.open.fill")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .padding(.horizontal, 24)
+                .disabled(unlockPassword.isEmpty)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(Theme.accentWarm)
+                        .padding(.horizontal, 24)
+                        .multilineTextAlignment(.center)
+                }
+
+                Spacer()
+            }
+            .screenBackground()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("取消") {
+                        lockedEnvelope = nil
+                        unlockPassword = ""
+                        errorMessage = nil
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.height(400)])
+    }
+
+    private func unlock(_ envelope: BackupCrypto.Envelope) {
+        errorMessage = nil
+        do {
+            let payload = try manager.unlock(envelope, password: unlockPassword)
+            guard payload.formatVersion <= BackupManager.currentFormatVersion else {
+                errorMessage = "這份備份來自較新版本的 App，請先更新後再還原。"
+                return
+            }
+            lockedEnvelope = nil
+            unlockPassword = ""
+            pendingPayload = payload
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -157,7 +296,7 @@ struct BackupView: View {
                 Label("從備份還原", systemImage: "arrow.up.doc")
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
-                Text("選擇先前匯出的 .json 備份檔。")
+                Text("選擇先前匯出的備份檔（.json 或加密的 .gtbak）。加密備份會自動要求輸入密碼。")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
 
@@ -280,15 +419,19 @@ struct BackupView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            guard let payload = manager.readPayload(from: url) else {
+            switch manager.read(from: url) {
+            case .needsPassword(let envelope):
+                unlockPassword = ""
+                lockedEnvelope = envelope
+            case .payload(let payload):
+                guard payload.formatVersion <= BackupManager.currentFormatVersion else {
+                    errorMessage = "這份備份來自較新版本的 App，請先更新後再還原。"
+                    return
+                }
+                pendingPayload = payload
+            case .unreadable:
                 errorMessage = "這個檔案無法讀取，請確認是本 App 匯出的備份檔。"
-                return
             }
-            guard payload.formatVersion <= BackupManager.currentFormatVersion else {
-                errorMessage = "這份備份來自較新版本的 App，請先更新後再還原。"
-                return
-            }
-            pendingPayload = payload
         case .failure(let error):
             errorMessage = error.localizedDescription
         }
@@ -368,4 +511,11 @@ struct DatabaseNoticeView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
     }
+}
+
+
+/// 讓加密封包能用在 sheet(item:)
+private struct LockedBox: Identifiable {
+    let envelope: BackupCrypto.Envelope
+    var id: String { envelope.salt }
 }

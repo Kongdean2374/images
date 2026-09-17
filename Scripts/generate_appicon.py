@@ -133,7 +133,7 @@ def main():
         for x in range(SIZE):
             d = math.hypot((x - CX) / SIZE, (y - CY * 0.92) / SIZE) * 1.55
             base = mix(indigo, deep, min(1.0, d))
-            glow = max(0.0, 1.0 - d * 1.25) ** 2.4 * 40
+            glow = max(0.0, 1.0 - d * 1.22) ** 2.2 * 52
             i = (y * SIZE + x) * 3
             buf[i] = max(0, min(255, int(base[0] + glow * 0.30)))
             buf[i + 1] = max(0, min(255, int(base[1] + glow * 0.55)))
@@ -166,16 +166,16 @@ def main():
         return mix(warm, fast, (t - 0.72) / 0.28)
 
     # ---------- 外圈刻度 ----------
-    ticks = 45
+    ticks = 24
     for i in range(ticks + 1):
         t = i / ticks
         a = math.radians(lerp(A0, A1, t))
-        major = (i % 5 == 0)
+        major = (i % 4 == 0)
         inner = R + THICK / 2 + 16
-        outer = inner + (34 if major else 18)
-        width = 6.0 if major else 3.0
-        color = (210, 228, 255) if major else (150, 178, 230)
-        alpha = 0.55 if major else 0.30
+        outer = inner + (38 if major else 17)
+        width = 9.0 if major else 4.0
+        color = (226, 238, 255) if major else (146, 174, 226)
+        alpha = 0.70 if major else 0.24
         steps = int(outer - inner)
         for s in range(steps + 1):
             rr = inner + s
@@ -195,7 +195,7 @@ def main():
         px, py = CX + math.cos(rad) * R, CY + math.sin(rad) * R
         glow_disc(px, py, 58, pace_color(t / PROGRESS), 0.05)
         a += 3.0
-    arc(R, THICK - 10, A0, a_end, lambda t: pace_color(t), 1.0, step=0.2)
+    arc(R, THICK - 4, A0, a_end, lambda t: pace_color(t), 1.0, step=0.2)
     # 弧內側高光
     arc(R - 13, 10, A0, a_end, lambda t: mix(pace_color(t), (255, 255, 255), 0.55), 0.35, step=0.4)
 
@@ -207,22 +207,26 @@ def main():
     disc(ex, ey, 23, fast)
 
     # ---------- 中央導航箭頭 ----------
-    tip = (CX, CY - 186)
-    left = (CX - 140, CY + 150)
-    notch = (CX, CY + 74)
-    right = (CX + 140, CY + 150)
+    # 整體上移，讓箭頭在儀表開口內視覺置中
+    AY = CY - 26
+    tip = (CX, AY - 232)
+    left = (CX - 174, AY + 186)
+    notch = (CX, AY + 92)
+    right = (CX + 174, AY + 186)
     tilt = -16.0
     tip_r = rotate(tip, CX, CY, tilt)
     left_r = rotate(left, CX, CY, tilt)
     notch_r = rotate(notch, CX, CY, tilt)
     right_r = rotate(right, CX, CY, tilt)
 
-    shadow = [(p[0], p[1] + 18) for p in (tip_r, left_r, notch_r, right_r)]
-    polygon([shadow[0], shadow[1], shadow[2]], (6, 9, 24), 0.42)
-    polygon([shadow[0], shadow[2], shadow[3]], (6, 9, 24), 0.42)
+    # 兩層位移陰影，讓箭頭在弧線上浮起來
+    for offset, alpha in ((30, 0.30), (16, 0.45)):
+        shadow = [(p[0], p[1] + offset) for p in (tip_r, left_r, notch_r, right_r)]
+        polygon([shadow[0], shadow[1], shadow[2]], (5, 8, 22), alpha)
+        polygon([shadow[0], shadow[2], shadow[3]], (5, 8, 22), alpha)
 
     polygon([tip_r, left_r, notch_r], (255, 255, 255), 1.0)
-    polygon([tip_r, notch_r, right_r], (204, 216, 245), 1.0)
+    polygon([tip_r, notch_r, right_r], (186, 201, 236), 1.0)
     # 箭頭上的細亮邊
     polygon([tip_r,
              (lerp(tip_r[0], left_r[0], 0.12), lerp(tip_r[1], left_r[1], 0.12)),
@@ -235,7 +239,7 @@ def main():
             fx, fy = x / SIZE, y / SIZE
             d = 1.0 - min(1.0, math.hypot(fx - 0.22, fy - 0.02) * 1.45)
             if d > 0:
-                blend(x, y, (255, 255, 255), d * d * 0.05)
+                blend(x, y, (255, 255, 255), d * d * 0.065)
 
     # ---------- 邊緣輪廓光 ----------
     for i in range(7):

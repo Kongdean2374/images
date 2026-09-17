@@ -224,10 +224,12 @@ final class BackupManager: ObservableObject {
         )
     }
 
+    /// 匯出備份。password 非空時會用 AES-256-GCM 加密整份備份，副檔名改為 .gtbak。
     @MainActor
     func exportBackup(sessions: [WorkoutSession],
                       goals: [WorkoutGoal],
-                      includeRoutes: Bool) -> URL? {
+                      includeRoutes: Bool,
+                      password: String? = nil) -> URL? {
         isWorking = true
         statusText = "整理資料…"
         defer {
@@ -238,19 +240,58 @@ final class BackupManager: ObservableObject {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(payload) else { return nil }
+
+        if let password, !password.isEmpty {
+            statusText = "加密中…"
+            guard let envelope = try? BackupCrypto.seal(data, password: password),
+                  let sealed = try? BackupCrypto.encode(envelope) else { return nil }
+            let name = "gpstracker-backup-\(DataExporter.stamp()).gtbak"
+            return DataExporter.write(sealed, filename: name)
+        }
+
         let name = "gpstracker-backup-\(DataExporter.stamp()).json"
         return DataExporter.write(data, filename: name)
     }
 
     // MARK: 讀取備份檔
 
-    func readPayload(from url: URL) -> BackupPayload? {
+    /// 讀檔結果：一般備份直接回 payload，加密備份要先拿到密碼
+    enum ReadResult {
+        case payload(BackupPayload)
+        case needsPassword(BackupCrypto.Envelope)
+        case unreadable
+    }
+
+    func read(from url: URL) -> ReadResult {
         let needsAccess = url.startAccessingSecurityScopedResource()
         defer { if needsAccess { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return .unreadable }
+
+        if let envelope = BackupCrypto.envelope(in: data) {
+            return .needsPassword(envelope)
+        }
+        guard let payload = decodePayload(data) else { return .unreadable }
+        return .payload(payload)
+    }
+
+    /// 用密碼解開加密備份
+    func unlock(_ envelope: BackupCrypto.Envelope, password: String) throws -> BackupPayload {
+        let data = try BackupCrypto.open(envelope, password: password)
+        guard let payload = decodePayload(data) else {
+            throw BackupCrypto.CryptoError.badFile
+        }
+        return payload
+    }
+
+    private func decodePayload(_ data: Data) -> BackupPayload? {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(BackupPayload.self, from: data)
+    }
+
+    func readPayload(from url: URL) -> BackupPayload? {
+        if case .payload(let payload) = read(from: url) { return payload }
+        return nil
     }
 
     // MARK: 還原

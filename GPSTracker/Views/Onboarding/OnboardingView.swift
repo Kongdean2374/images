@@ -11,7 +11,7 @@ struct OnboardingView: View {
     @State private var animate = false
     @State private var notificationsGranted = false
 
-    private let pageCount = 5
+    private let pageCount = 6
 
     var body: some View {
         ZStack {
@@ -34,10 +34,11 @@ struct OnboardingView: View {
 
                 TabView(selection: $page) {
                     welcomePage.tag(0)
-                    gpsPage.tag(1)
-                    noGPSPage.tag(2)
-                    healthPage.tag(3)
-                    permissionPage.tag(4)
+                    sportsPage.tag(1)
+                    gpsPage.tag(2)
+                    noGPSPage.tag(3)
+                    healthPage.tag(4)
+                    permissionPage.tag(5)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -58,13 +59,19 @@ struct OnboardingView: View {
     private var welcomePage: some View {
         page(illustration: gaugeIllustration,
              title: "記錄每一次訓練",
-             subtitle: "九種模式，訊號好壞都能練。\n所有資料留在這台裝置上。")
+             subtitle: "有訊號、沒訊號都能練。\n所有資料只留在這台裝置上，不上傳。")
+    }
+
+    private var sportsPage: some View {
+        page(illustration: sportsIllustration,
+             title: "\(SportCatalog.all.count) 種以上的運動",
+             subtitle: "跑步、健行、單車、球類、重訓、瑜伽⋯⋯\n都能記錄，也都能寫進健康 App。")
     }
 
     private var gpsPage: some View {
         page(illustration: routeIllustration,
-             title: "GPS 模式",
-             subtitle: "軌跡依配速變色、鏡頭跟著你轉，\n結束後還能回放整段路線。")
+             title: "自動判斷要用哪一種",
+             subtitle: "有定位就開 GPS 軌跡版，\n沒定位自動換成計步版，不用你切。")
     }
 
     private var noGPSPage: some View {
@@ -214,6 +221,36 @@ struct OnboardingView: View {
                 .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
         }
         .frame(width: 230, height: 230)
+    }
+
+    private var sportsIllustration: some View {
+        let icons = ["figure.run", "bicycle", "figure.hiking", "basketball.fill",
+                     "dumbbell.fill", "figure.pool.swim", "figure.yoga", "backpack.fill",
+                     "figure.jumprope"]
+        let tints: [Color] = [Theme.accent, Theme.mint, Theme.amber, Theme.violet,
+                              Theme.accentWarm, Theme.accent, Theme.mint, Theme.amber, Theme.violet]
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3),
+                         spacing: 14) {
+            ForEach(Array(icons.enumerated()), id: \.offset) { index, icon in
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(tints[index].opacity(0.16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(tints[index].opacity(0.3), lineWidth: 1)
+                        )
+                    Image(systemName: icon)
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(tints[index])
+                }
+                .frame(height: 66)
+                .scaleEffect(animate ? 1 : 0.6)
+                .opacity(animate ? 1 : 0)
+                .animation(.spring(response: 0.5, dampingFraction: 0.7)
+                    .delay(Double(index) * 0.05), value: animate)
+            }
+        }
+        .frame(width: 230)
     }
 
     private var routeIllustration: some View {

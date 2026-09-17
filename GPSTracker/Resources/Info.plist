@@ -49,20 +49,10 @@
 	<string>讓你用 Siri 或捷徑直接說一句話就開始或結束記錄運動。</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>在步數或距離達標、久坐提醒與運動記錄背景更新時通知你。</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>用於在你開啟資料鎖定時，保護運動與健康紀錄的存取。</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
 		<string>audio</string>
-		<string>fetch</string>
-		<string>processing</string>
-		<string>remote-notification</string>
-	</array>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.gpstracker.healthsync</string>
-		<string>com.gpstracker.refresh</string>
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>

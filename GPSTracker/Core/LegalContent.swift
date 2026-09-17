@@ -9,7 +9,7 @@ enum LegalContent {
         let body: String
     }
 
-    static let version = "1.3"
+    static let version = "1.4"
     static let effectiveDate = "2026 年 9 月 15 日"
     static let effectiveDateEN = "15 September 2026"
     static let appName = "GPS 軌跡記錄器"
@@ -77,9 +77,9 @@ enum LegalContent {
     static let privacyZH: [Section] = [
         Section(heading: "一、總則",
                 body: """
-                \(appName)（以下稱「本 App」）是一款以「資料留在你自己裝置上」為原則的運動記錄工具。本 App 不需要註冊帳號，預設狀態下不會將你的任何資料上傳到開發者或第三方。
+                \(appName)（以下稱「本 App」）是一款完全在你的裝置上運作的運動記錄工具。本 App 沒有後端伺服器、不需要註冊帳號、不會將你的任何資料上傳到開發者或第三方。
 
-                本 App 另外提供一項「端對端加密統計同步」的選用功能，預設為關閉。只有在你自行開啟、並自行填入伺服器位址之後，才會有資料離開裝置；且離開裝置前資料已在本機用只有你持有的金鑰加密，伺服器端只會看到無法解讀的密文。詳見第九節。
+                本 App 不含任何網路同步功能。所有資料只存在你的手機裡，要不要備份、備份到哪裡，完全由你自己決定（見第九節）。
 
                 本政策說明本 App 會存取哪些資料、為什麼需要、存放在哪裡，以及你可以如何控制。本政策自 \(effectiveDate) 起生效，適用版本 \(version)。
                 """),
@@ -137,25 +137,19 @@ enum LegalContent {
                 本政策若有修訂，會隨 App 更新一併提供，並更新版本與生效日期。由於本 App 不收集聯絡資訊，若你對本政策有疑問，請透過你取得本 App 的管道與開發者聯繫。
                 """)
 ,
-        Section(heading: "九、端對端加密統計（選用功能，預設關閉）",
+        Section(heading: "九、備份與加密",
                 body: """
-                本 App 內建一套端對端加密（End-to-End Encryption）機制，供你選擇是否把「彙總統計數字」同步到你自己指定的伺服器。這項功能預設關閉，不開啟就完全不會有任何資料離開裝置。
+                本 App 不含雲端同步，也沒有任何伺服器。你的資料只存在這支手機裡。
 
-                【資料金鑰】首次啟動時，本 App 會在你的裝置上用系統亂數產生器生成一把 256 位元的資料金鑰（Key A），存放於 iOS Keychain，受系統層級加密保護。這把金鑰不會傳送給開發者、不會上傳到任何伺服器，也不會隨 iCloud 備份離開這支手機。
+                【備份】你可以隨時在「設定 → 備份與還原」把所有紀錄、設定、校正值與課表匯出成一個檔案。這個檔案要存到哪裡（「檔案」App、iCloud 雲碟、電腦、傳給自己）完全由你決定，本 App 不會代你上傳到任何地方。
 
-                【加密方式】若你開啟同步，資料會在離開裝置之前，先於本機以 AES-256-GCM 演算法加密。GCM 模式附帶完整性驗證，資料若在傳輸或儲存過程中被竄改，解密會直接失敗而非回傳錯誤結果。
+                【加密備份】匯出時可以選擇設定一組密碼。勾選之後，整份備份會先用 PBKDF2-HMAC-SHA256（21 萬輪迭代）從你的密碼衍生金鑰，再以 AES-256-GCM 加密後才寫入檔案，副檔名為 .gtbak。加密與解密全程都在你的裝置上完成，不需要連網。
 
-                【伺服器看得到什麼】伺服器只會收到並儲存密文、一組隨機產生且不含個人資訊的裝置識別碼，以及時間戳記。伺服器沒有你的金鑰，因此無法解讀內容；即使伺服器遭入侵，取得的也只是無法還原的密文。
+                【你的責任】備份密碼由你自行保管。本 App 與開發者皆無從得知，也沒有任何後門可以還原。密碼遺失，該備份檔將永久無法開啟。
 
-                【傳輸安全】所有同步請求僅接受 HTTPS，本 App 會主動拒絕明文 HTTP 位址。
+                【不加密的備份】若不勾選加密，備份檔是純文字 JSON，任何拿到檔案的人都能直接閱讀內容。要放到雲端硬碟或用通訊軟體傳送時，建議務必開啟加密。
 
-                【同步的資料範圍】僅包含彙總後的統計數字（訓練次數、總距離、總時間、估算熱量、各類型次數等），不包含路線座標、地圖軌跡、健康資料原始樣本或任何可識別個人身分的資訊。
-
-                【金鑰匯出與匯入】若你要換手機或與信任的人共用同一份統計，可將金鑰匯出成檔案。匯出時必須設定一組密碼，本 App 會以 PBKDF2-HMAC-SHA256（21 萬輪迭代）從該密碼衍生出包裝金鑰，再以 AES-256-GCM 將 Key A 加密後才寫入檔案。匯出檔內不含金鑰原文。
-
-                【你的責任】匯出密碼由你自行保管，本 App 與開發者皆無從得知，亦無任何後門可供還原。請務必透過與檔案不同的管道（例如當面或電話）告知需要匯入的一方。若密碼遺失，該匯出檔將永久無法還原。
-
-                【刪除】你可以隨時在「設定 → 端對端加密」中刪除裝置上的金鑰。刪除後，先前上傳到伺服器的密文將永久無法解密。
+                【刪除】解除安裝 App 會一併刪除裝置上的所有資料。已經匯出的備份檔不受影響，需要自行刪除。
                 """)
     ]
     // MARK: - Privacy Policy (English)
@@ -163,9 +157,9 @@ enum LegalContent {
     static let privacyEN: [Section] = [
         Section(heading: "1. Overview",
                 body: """
-                \(appNameEN) ("the App") is a workout tracker built around the principle that your data stays on your own device. It requires no account and, in its default state, never uploads any of your data to the developer or to any third party.
+                \(appNameEN) ("the App") is a workout tracker that runs entirely on your device. It has no backend server, requires no account, and never uploads your data to the developer or to any third party.
 
-                The App additionally offers an optional end-to-end encrypted statistics sync, which is off by default. Data leaves the device only if you turn it on and supply your own server address, and even then it is encrypted on-device beforehand with a key only you hold, so the server only ever sees ciphertext it cannot read. See section 9.
+                The App contains no network sync of any kind. All data lives only on your phone; whether and where to back it up is entirely your decision (see section 9).
 
                 This policy explains what the App accesses, why it needs it, where it is stored and how you stay in control. It takes effect on \(effectiveDateEN) and applies to version \(version).
                 """),
@@ -223,25 +217,19 @@ enum LegalContent {
                 Any revision ships with an App update and carries a new version and effective date. Because the App collects no contact information, please reach the developer through the channel you obtained the App from if you have questions.
                 """)
 ,
-        Section(heading: "9. End-to-end encrypted statistics (optional, off by default)",
+        Section(heading: "9. Backup and encryption",
                 body: """
-                The App includes an end-to-end encryption system that lets you optionally sync aggregate statistics to a server you control. It is off by default; with it off, nothing ever leaves your device.
+                The App has no cloud sync and no server of any kind. Your data lives only on this phone.
 
-                [Data key] On first launch the App generates a 256-bit data key (Key A) on your device using the system random number generator and stores it in the iOS Keychain, protected by system-level encryption. This key is never sent to the developer, never uploaded to any server, and never leaves this device through iCloud backup.
+                [Backup] You can export all records, settings, calibration values and workout plans to a single file at any time under Settings → Backup & Restore. Where that file goes (the Files app, iCloud Drive, a computer, a message to yourself) is entirely your decision; the App never uploads it anywhere on your behalf.
 
-                [Encryption] If you enable sync, data is encrypted on-device with AES-256-GCM before it leaves the device. GCM provides integrity verification, so data tampered with in transit or at rest fails decryption outright rather than returning an incorrect result.
+                [Encrypted backup] You may optionally set a password when exporting. If you do, the entire backup is encrypted with AES-256-GCM using a key derived from your password with PBKDF2-HMAC-SHA256 (210,000 iterations) before anything is written to disk; the file extension becomes .gtbak. Encryption and decryption happen entirely on your device and require no network connection.
 
-                [What the server sees] The server receives and stores only ciphertext, a randomly generated device identifier containing no personal information, and a timestamp. The server does not hold your key and cannot read the content. Even if the server were breached, only unreadable ciphertext would be exposed.
+                [Your responsibility] The backup password is yours alone. Neither the App nor the developer can learn it, and there is no backdoor to recover it. If the password is lost, that backup file can never be opened again.
 
-                [Transport] All sync requests are HTTPS only; the App actively rejects plaintext HTTP addresses.
+                [Unencrypted backups] Without the password option, the backup file is plain-text JSON that anyone holding it can read. Always enable encryption before placing a backup on cloud storage or sending it through a messaging app.
 
-                [Scope of synced data] Aggregate figures only (workout count, total distance, total duration, estimated calories, counts per type). No route coordinates, map traces, raw health samples or personally identifying information are included.
-
-                [Key export and import] To move to a new phone or share one set of statistics with someone you trust, you can export the key to a file. Export requires a password you choose; the App derives a wrapping key from it with PBKDF2-HMAC-SHA256 (210,000 iterations) and encrypts Key A with AES-256-GCM before writing the file. The exported file never contains the raw key.
-
-                [Your responsibility] The export password is yours alone. Neither the App nor the developer can learn it, and there is no backdoor to recover it. Always share it through a channel separate from the file itself (in person or by phone). If the password is lost, that export file can never be recovered.
-
-                [Deletion] You can delete the device key at any time under Settings → End-to-end encryption. Once deleted, any ciphertext previously uploaded to the server can never be decrypted again.
+                [Deletion] Deleting the App removes all of its data from the device. Backup files you have already exported are unaffected and must be deleted separately.
                 """)
     ]
 

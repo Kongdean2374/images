@@ -66,12 +66,14 @@ struct UserGuideView: View {
                         .foregroundStyle(.white)
                         .rotationEffect(.degrees(-16))
                 }
-                Text("九種模式，訊號好壞都能練")
+                Text("\(SportCatalog.all.count)＋ 種運動，訊號好壞都能練")
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
-                Text("全部資料留在這台裝置上")
+                    .multilineTextAlignment(.center)
+                Text("進入項目會自動判斷用 GPS 版還是免定位版\n全部資料留在這台裝置上，不上傳任何地方")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
@@ -126,6 +128,9 @@ struct UserGuideView: View {
                 tip("跑道計圈比步幅估算更準，體測 3000 公尺建議用計圈")
                 tip("運動後補一個 RPE 分數，訓練負荷會更貼近真實感受")
                 tip("在分析頁可以看到哪些資料還缺，補齊後圖表更完整")
+                tip("每個運動畫面右上角的齒輪，是那個項目專屬的設定")
+                tip("首頁長按任一項目，可以釘選到最上面或從首頁隱藏")
+                tip("備份時可以勾選加密，存到雲端硬碟才安全")
             }
         }
     }
