@@ -56,6 +56,10 @@ final class AppSettings: ObservableObject {
     @Published var metronomeBPM: Int { didSet { defaults.set(metronomeBPM, forKey: Keys.metronomeBPM) } }
     /// 進入運動畫面預設使用大字幕
     @Published var preferBigText: Bool { didSet { defaults.set(preferBigText, forKey: Keys.preferBigText) } }
+    /// 自訂的目標配速清單（秒/公里），顯示在運動畫面的快捷列
+    @Published var customPaces: [Double] { didSet { defaults.set(customPaces, forKey: Keys.customPaces) } }
+    /// 自訂的自動分圈距離清單（公尺）
+    @Published var customLapDistances: [Double] { didSet { defaults.set(customLapDistances, forKey: Keys.customLapDistances) } }
 
     private enum Keys {
         static let unit = "unit"
@@ -96,6 +100,8 @@ final class AppSettings: ObservableObject {
         static let ruckLoad = "ruckLoad"
         static let metronomeBPM = "metronomeBPM"
         static let preferBigText = "preferBigText"
+        static let customPaces = "customPaces"
+        static let customLapDistances = "customLapDistances"
     }
 
     init() {
@@ -175,6 +181,44 @@ final class AppSettings: ObservableObject {
         ruckLoad = defaults.double(forKey: Keys.ruckLoad)
         metronomeBPM = defaults.integer(forKey: Keys.metronomeBPM)
         preferBigText = defaults.bool(forKey: Keys.preferBigText)
+        customPaces = (defaults.array(forKey: Keys.customPaces) as? [Double]) ?? AppSettings.defaultPaces
+        customLapDistances = (defaults.array(forKey: Keys.customLapDistances) as? [Double]) ?? AppSettings.defaultLapDistances
+    }
+
+    // MARK: 自訂快捷清單
+
+    static let defaultPaces: [Double] = [420, 390, 360, 330, 300, 270]
+    static let defaultLapDistances: [Double] = [400, 500, 1000, 1609.344]
+
+    /// 加入一組自訂配速（秒/公里），自動去重、排序、最多 8 筆
+    func addCustomPace(_ secondsPerKM: Double) {
+        guard secondsPerKM > 0 else { return }
+        let rounded = (secondsPerKM).rounded()
+        var list = customPaces.filter { abs($0 - rounded) > 0.5 }
+        list.append(rounded)
+        customPaces = Array(list.sorted(by: >).prefix(8))
+    }
+
+    func removeCustomPace(_ secondsPerKM: Double) {
+        customPaces = customPaces.filter { abs($0 - secondsPerKM) > 0.5 }
+    }
+
+    /// 加入一組自訂分圈距離（公尺）
+    func addCustomLapDistance(_ meters: Double) {
+        guard meters > 0 else { return }
+        let rounded = (meters * 100).rounded() / 100
+        var list = customLapDistances.filter { abs($0 - rounded) > 0.5 }
+        list.append(rounded)
+        customLapDistances = Array(list.sorted().prefix(8))
+    }
+
+    func removeCustomLapDistance(_ meters: Double) {
+        customLapDistances = customLapDistances.filter { abs($0 - meters) > 0.5 }
+    }
+
+    func resetCustomLists() {
+        customPaces = AppSettings.defaultPaces
+        customLapDistances = AppSettings.defaultLapDistances
     }
 
     // MARK: 運動項目偏好

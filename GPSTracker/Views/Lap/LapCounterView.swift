@@ -18,7 +18,6 @@ struct LapCounterView: View {
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
     @State private var showDistanceSheet = false
-    @State private var customDistance: String = ""
 
     var body: some View {
         ZStack {
@@ -304,34 +303,14 @@ struct LapCounterView: View {
     }
 
     private var distanceSheet: some View {
-        NavigationStack {
-            VStack(spacing: 18) {
-                Text("輸入單圈距離（公尺）")
-                    .font(.headline)
-                    .foregroundStyle(Theme.textPrimary)
-                TextField("例如 400", text: $customDistance)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.plain)
-                    .font(.title2)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.08)))
-                Button("套用") {
-                    if let value = Double(customDistance), value > 0 {
-                        engine.lapDistance = value
-                        settings.lapDistance = value
-                    }
-                    showDistanceSheet = false
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                Spacer()
-            }
-            .padding()
-            .screenBackground()
-            .navigationTitle("自訂圈距")
-            .navigationBarTitleDisplayMode(.inline)
+        DistanceEditorSheet(title: "自訂圈距",
+                            unit: settings.unit,
+                            initialMeters: engine.lapDistance > 0 ? engine.lapDistance : settings.lapDistance,
+                            suggestions: [50, 100, 200, 250, 300, 400, 800, 1000],
+                            allowsOff: false) { value in
+            engine.lapDistance = value
+            settings.lapDistance = value
         }
-        .presentationDetents([.height(280)])
     }
 
     private func finish() {

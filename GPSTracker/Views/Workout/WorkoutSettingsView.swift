@@ -12,6 +12,11 @@ struct WorkoutSettingsView: View {
     @StateObject private var location = LocationManager.shared
 
     @State private var preference: RecordingPreference = .auto
+    @State private var showPaceEditor = false
+    @State private var showLapEditor = false
+    @State private var showAnnounceEditor = false
+    @State private var showLapCounterEditor = false
+    @State private var editingPresets = false
 
     private var gpsBlocked: Bool { !location.canRecordGPS }
 
@@ -36,6 +41,37 @@ struct WorkoutSettingsView: View {
                 }
             }
             .onAppear { preference = settings.preference(for: discipline.id) }
+            .sheet(isPresented: $showPaceEditor) {
+                PaceEditorSheet(unit: settings.unit,
+                                initialSecondsPerKM: settings.gpsTargetPace) { value in
+                    settings.gpsTargetPace = value
+                    if value > 0 { settings.addCustomPace(value) }
+                }
+            }
+            .sheet(isPresented: $showLapEditor) {
+                DistanceEditorSheet(title: "自訂分圈距離",
+                                    unit: settings.unit,
+                                    initialMeters: settings.gpsAutoLapDistance,
+                                    suggestions: [200, 400, 500, 1000, 1609.344, 2000, 5000]) { value in
+                    settings.gpsAutoLapDistance = value
+                    if value > 0 { settings.addCustomLapDistance(value) }
+                }
+            }
+            .sheet(isPresented: $showAnnounceEditor) {
+                AnnounceIntervalEditorSheet(unit: settings.unit,
+                                            initialRaw: settings.announceIntervalRaw) { value in
+                    settings.announceIntervalRaw = value
+                }
+            }
+            .sheet(isPresented: $showLapCounterEditor) {
+                DistanceEditorSheet(title: "自訂每圈距離",
+                                    unit: settings.unit,
+                                    initialMeters: settings.lapDistance,
+                                    suggestions: [100, 200, 300, 400, 800, 1000],
+                                    allowsOff: false) { value in
+                    settings.lapDistance = value
+                }
+            }
         }
         .preferredColorScheme(.dark)
     }
@@ -152,21 +188,20 @@ struct WorkoutSettingsView: View {
                 Text("衛星").tag(2)
             }
 
-            Picker("自動分圈", selection: $settings.gpsAutoLapDistance) {
-                Text("關閉").tag(0.0)
-                Text("每 500 m").tag(500.0)
-                Text("每 1 km").tag(1000.0)
-                Text("每 1 mi").tag(1609.344)
+            valueRow(title: "自動分圈",
+                     value: settings.gpsAutoLapDistance > 0
+                        ? Fmt.distance(settings.gpsAutoLapDistance, unit: settings.unit)
+                        : "關閉",
+                     icon: "flag.checkered") {
+                showLapEditor = true
             }
 
-            Picker("虛擬配速員", selection: $settings.gpsTargetPace) {
-                Text("關閉").tag(0.0)
-                Text("7'00\"/km").tag(420.0)
-                Text("6'30\"/km").tag(390.0)
-                Text("6'00\"/km").tag(360.0)
-                Text("5'30\"/km").tag(330.0)
-                Text("5'00\"/km").tag(300.0)
-                Text("4'30\"/km").tag(270.0)
+            valueRow(title: "虛擬配速員",
+                     value: settings.gpsTargetPace > 0
+                        ? Fmt.pace(settings.gpsTargetPace, unit: settings.unit) + Fmt.paceUnitLabel(settings.unit)
+                        : "關閉",
+                     icon: "figure.run.circle") {
+                showPaceEditor = true
             }
 
             Toggle("背景持續記錄", isOn: $settings.backgroundLocation)
@@ -181,7 +216,101 @@ struct WorkoutSettingsView: View {
         } header: {
             Text("GPS 軌跡")
         } footer: {
-            Text("背景持續記錄需要「永遠允許」定位；精確位置關閉時軌跡與距離會明顯偏移。")
+            Text("分圈距離與目標配速都可以自己輸入任意數值，不限於預設選項。背景持續記錄需要「永遠允許」定位。")
+        }
+
+        presetSection
+    }
+
+    /// 自訂快捷清單：運動當下快捷列上會出現的選項，由使用者自己決定
+    private var presetSection: some View {
+        Section {
+            DisclosureGroup("編輯快捷選項", isExpanded: $editingPresets) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("目標配速")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                    presetChips(values: settings.customPaces,
+                                label: { Fmt.pace($0, unit: settings.unit) },
+                                remove: { settings.removeCustomPace($0) },
+                                add: { showPaceEditor = true })
+
+                    Divider().overlay(Color.white.opacity(0.08))
+
+                    Text("分圈距離")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                    presetChips(values: settings.customLapDistances,
+                                label: { Fmt.distance($0, unit: settings.unit) },
+                                remove: { settings.removeCustomLapDistance($0) },
+                                add: { showLapEditor = true })
+
+                    Button("恢復成預設清單") { settings.resetCustomLists() }
+                        .font(.caption.weight(.semibold))
+                        .padding(.top, 4)
+                }
+                .padding(.vertical, 6)
+            }
+        } header: {
+            Text("快捷選項")
+        } footer: {
+            Text("這裡列出的值，會直接出現在運動畫面的快捷列上。點一下標籤可以刪除；用「自訂」新增的值會自動加進來，最多 8 個。")
+        }
+    }
+
+    private func presetChips(values: [Double],
+                             label: @escaping (Double) -> String,
+                             remove: @escaping (Double) -> Void,
+                             add: @escaping () -> Void) -> some View {
+        FlowChips {
+            ForEach(values, id: \.self) { value in
+                Button {
+                    remove(value)
+                    CueService.shared.impact(.soft)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(label(value))
+                            .monospacedDigit()
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Theme.accent.opacity(0.18)))
+                    .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            Button(action: add) {
+                Label("新增", systemImage: "plus")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Theme.violet.opacity(0.22)))
+                    .foregroundStyle(Theme.violet)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 一列：左邊名稱、右邊目前值，點了開自訂編輯器
+    private func valueRow(title: String,
+                          value: String,
+                          icon: String,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Label(title, systemImage: icon)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text(value)
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Theme.accent)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
         }
     }
 
@@ -209,11 +338,10 @@ struct WorkoutSettingsView: View {
                         value: $settings.ruckLoad, in: 0...60, step: 1)
             }
             if discipline.indoorType == .lapCounter || discipline.indoorType == .shuttleRun {
-                Picker("每圈距離", selection: $settings.lapDistance) {
-                    Text("200 m").tag(200.0)
-                    Text("300 m").tag(300.0)
-                    Text("400 m").tag(400.0)
-                    Text("800 m").tag(800.0)
+                valueRow(title: "每圈距離",
+                         value: Fmt.distance(settings.lapDistance, unit: settings.unit),
+                         icon: "repeat.circle") {
+                    showLapCounterEditor = true
                 }
             }
             if discipline.indoorType == .run || discipline.indoorType == .walk || discipline.indoorType == .ruck {
@@ -243,13 +371,10 @@ struct WorkoutSettingsView: View {
             Toggle("語音播報", isOn: $settings.voiceCues)
             Toggle("震動提示", isOn: $settings.hapticCues)
             if settings.voiceCues && discipline.supportsGPS {
-                Picker("播報間隔", selection: $settings.announceIntervalRaw) {
-                    Text("關閉").tag(0.0)
-                    Text("每 500 m").tag(500.0)
-                    Text("每 1 km").tag(1000.0)
-                    Text("每 2 km").tag(2000.0)
-                    Text("每 5 分鐘").tag(-5.0)
-                    Text("每 10 分鐘").tag(-10.0)
+                valueRow(title: "播報間隔",
+                         value: settings.announceIntervalText,
+                         icon: "speaker.wave.2") {
+                    showAnnounceEditor = true
                 }
                 Toggle("播報距離", isOn: $settings.announceDistance)
                 Toggle("播報配速", isOn: $settings.announcePace)

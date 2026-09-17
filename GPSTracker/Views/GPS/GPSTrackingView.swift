@@ -24,18 +24,13 @@ struct GPSTrackingView: View {
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
     @State private var expandedMetrics = true
-    @State private var targetPaceIndex = 0
-    @State private var autoLapIndex = 1
+    @State private var showPaceEditor = false
+    @State private var showLapEditor = false
     @State private var showBackToStart = false
     @State private var bigTextMode = false
     @State private var showAccuracyHint = false
     @State private var exitTaps = 0
 
-    private let paceOptions: [(String, Double?)] = [
-        ("關閉", nil), ("7'00\"", 420), ("6'30\"", 390), ("6'00\"", 360),
-        ("5'30\"", 330), ("5'00\"", 300), ("4'30\"", 270)
-    ]
-    private let lapOptions: [(String, Double)] = [("關閉", 0), ("1 km", 1000), ("500 m", 500), ("1 mi", 1609.344)]
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -84,6 +79,22 @@ struct GPSTrackingView: View {
             }
             .onDisappear { dismiss() }
         }
+        .sheet(isPresented: $showPaceEditor) {
+            PaceEditorSheet(unit: settings.unit,
+                            initialSecondsPerKM: settings.gpsTargetPace) { value in
+                applyPace(value)
+                if value > 0 { settings.addCustomPace(value) }
+            }
+        }
+        .sheet(isPresented: $showLapEditor) {
+            DistanceEditorSheet(title: "自訂分圈距離",
+                                unit: settings.unit,
+                                initialMeters: settings.gpsAutoLapDistance,
+                                suggestions: [200, 400, 500, 1000, 1609.344, 2000, 5000]) { value in
+                applyLap(value)
+                if value > 0 { settings.addCustomLapDistance(value) }
+            }
+        }
         .alert("結束這次運動？", isPresented: $showStopConfirm) {
             Button("繼續記錄", role: .cancel) {}
             Button("結束並儲存", role: .destructive) { finish() }
@@ -94,17 +105,7 @@ struct GPSTrackingView: View {
 
     /// 從設定頁帶入這個項目儲存的偏好
     private func applyStoredOptions() {
-        if let index = paceOptions.firstIndex(where: { ($0.1 ?? 0) == settings.gpsTargetPace }) {
-            targetPaceIndex = index
-        } else {
-            targetPaceIndex = 0
-        }
         recorder.targetPace = settings.gpsTargetPace > 0 ? settings.gpsTargetPace : nil
-        if let index = lapOptions.firstIndex(where: { $0.1 == settings.gpsAutoLapDistance }) {
-            autoLapIndex = index
-        } else {
-            autoLapIndex = 0
-        }
         recorder.autoLapDistance = settings.gpsAutoLapDistance
     }
 
@@ -401,51 +402,90 @@ struct GPSTrackingView: View {
 
     private var setupPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            chipRow(title: "虛擬配速員", options: paceOptions.map { $0.0 }, selected: targetPaceIndex) { index in
-                targetPaceIndex = index
-                recorder.targetPace = paceOptions[index].1
-                settings.gpsTargetPace = paceOptions[index].1 ?? 0
+            valueChipRow(title: "虛擬配速員",
+                         values: settings.customPaces,
+                         current: settings.gpsTargetPace,
+                         label: { Fmt.pace($0, unit: settings.unit) }) { value in
+                applyPace(value)
+            } onCustom: {
+                showPaceEditor = true
             }
-            chipRow(title: "自動分圈", options: lapOptions.map { $0.0 }, selected: autoLapIndex) { index in
-                autoLapIndex = index
-                recorder.autoLapDistance = lapOptions[index].1
-                settings.gpsAutoLapDistance = lapOptions[index].1
+
+            valueChipRow(title: "自動分圈",
+                         values: settings.customLapDistances,
+                         current: settings.gpsAutoLapDistance,
+                         label: { Fmt.distance($0, unit: settings.unit) }) { value in
+                applyLap(value)
+            } onCustom: {
+                showLapEditor = true
             }
         }
     }
 
-    private func chipRow(title: String,
-                         options: [String],
-                         selected: Int,
-                         action: @escaping (Int) -> Void) -> some View {
+    private func applyPace(_ value: Double) {
+        settings.gpsTargetPace = value
+        recorder.targetPace = value > 0 ? value : nil
+    }
+
+    private func applyLap(_ value: Double) {
+        settings.gpsAutoLapDistance = value
+        recorder.autoLapDistance = value
+    }
+
+    /// 快捷列：關閉 + 使用者自訂的清單 + 自訂按鈕
+    private func valueChipRow(title: String,
+                              values: [Double],
+                              current: Double,
+                              label: @escaping (Double) -> String,
+                              onSelect: @escaping (Double) -> Void,
+                              onCustom: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
-                    ForEach(Array(options.enumerated()), id: \.offset) { index, label in
-                        Button {
-                            action(index)
-                            CueService.shared.impact(.soft)
-                        } label: {
-                            Text(label)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 13)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(selected == index
-                                                           ? Theme.accent.opacity(0.3)
-                                                           : Color.white.opacity(0.08)))
-                                .foregroundStyle(selected == index ? Theme.accent : Theme.textSecondary)
+                    chip(text: "關閉", selected: current == 0) { onSelect(0) }
+                    ForEach(values, id: \.self) { value in
+                        chip(text: label(value), selected: abs(current - value) < 0.5) {
+                            onSelect(value)
                         }
-                        .buttonStyle(.plain)
                     }
+                    if current > 0 && !values.contains(where: { abs($0 - current) < 0.5 }) {
+                        chip(text: label(current), selected: true) {}
+                    }
+                    Button {
+                        onCustom()
+                        CueService.shared.impact(.soft)
+                    } label: {
+                        Label("自訂", systemImage: "slider.horizontal.3")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(Theme.violet.opacity(0.25)))
+                            .foregroundStyle(Theme.violet)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
-    // MARK: 虛擬配速員
+    private func chip(text: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            CueService.shared.impact(.soft)
+        } label: {
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(selected ? Theme.accent.opacity(0.3) : Color.white.opacity(0.08)))
+                .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+        }
+        .buttonStyle(.plain)
+    }
 
     private var pacerBar: some View {
         let lead = recorder.timeLead ?? 0

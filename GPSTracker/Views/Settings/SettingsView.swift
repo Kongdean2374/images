@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var isSyncingAll = false
     @State private var notificationsAuthorized = false
     @State private var showOnboardingAgain = false
+    @State private var showAnnounceEditor = false
     @State private var exportURL: URL?
     @State private var showExport = false
     @State private var weightText = ""
@@ -51,6 +52,12 @@ struct SettingsView: View {
             .padding(.bottom, 26)
         }
         .screenBackground()
+        .sheet(isPresented: $showAnnounceEditor) {
+            AnnounceIntervalEditorSheet(unit: settings.unit,
+                                        initialRaw: settings.announceIntervalRaw) { value in
+                settings.announceIntervalRaw = value
+            }
+        }
         .navigationTitle("設定")
         .onAppear {
             weightText = String(format: "%.0f", settings.bodyWeight)
@@ -503,6 +510,18 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        Button {
+                            showAnnounceEditor = true
+                            CueService.shared.impact(.soft)
+                        } label: {
+                            Label("自訂", systemImage: "slider.horizontal.3")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(Theme.violet.opacity(0.25)))
+                                .foregroundStyle(Theme.violet)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
 
