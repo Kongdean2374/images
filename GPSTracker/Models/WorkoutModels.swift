@@ -208,6 +208,8 @@ final class WorkoutSession {
     var sportRaw: String?
     /// 自訂計次（球類局數、重訓組數等）
     var setCount: Int?
+    /// 暫停／繼續的時間點（成對出現），用來讓健康 App 算出正確的「體能訓練時間」
+    var pauseLog: [Date]?
     /// 同路線比較用的識別名稱（GPS 路線名或圈數設定）。
     var routeKey: String?
     var title: String?
@@ -292,6 +294,33 @@ final class WorkoutSession {
     /// 熱量與強度估算用的 MET：有指定項目就用項目的
     var effectiveMET: Double {
         sport?.met ?? type.metValue
+    }
+
+    /// 這種運動在健康 App 裡是以「速度」而不是「配速」呈現（單車、滑雪、划船之類）
+    var prefersSpeed: Bool {
+        guard let sport else { return false }
+        switch SportCatalog.healthKitType(for: sport) {
+        case .cycling, .handCycling, .downhillSkiing, .crossCountrySkiing,
+             .snowboarding, .rowing, .paddleSports, .sailing, .skatingSports:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// 平均速度（公尺/秒）
+    var averageSpeed: Double? {
+        guard let distance = totalDistance, distance > 0, duration > 0 else { return nil }
+        return distance / duration
+    }
+
+    /// 這種運動用計步器數出來的步數才有意義（騎車、游泳的步數只是雜訊）
+    var stepsAreMeaningful: Bool {
+        guard let sport else { return true }
+        switch SportCatalog.healthKitType(for: sport) {
+        case .walking, .running, .hiking: return true
+        default: return false
+        }
     }
 
     /// 顯示用的圖示

@@ -61,6 +61,8 @@ final class GPSWorkoutRecorder: ObservableObject {
     private var timer: Timer?
     private var accumulated: TimeInterval = 0
     private var segmentStart: Date?
+    /// 暫停／繼續的時間點，成對出現；寫進健康 App 讓它算出正確的訓練時間
+    private(set) var pauseLog: [Date] = []
     private var lastAccepted: TrackSample?
     private var lastAltitude: Double?
     private var announcedKM = 0
@@ -99,6 +101,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     func pause() {
         guard state == .recording else { return }
         commitSegment()
+        pauseLog.append(Date())
         state = .paused
         updateLiveActivity(force: true)
         CueService.shared.impact(.light)
@@ -106,6 +109,7 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     func resume() {
         guard state == .paused else { return }
+        if pauseLog.count.isMultiple(of: 2) == false { pauseLog.append(Date()) }
         segmentStart = Date()
         state = .recording
         isAutoPaused = false
@@ -156,6 +160,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         currentSpeed = 0
         accumulated = 0
         segmentStart = nil
+        pauseLog = []
         lastAccepted = nil
         lastAltitude = nil
         announcedKM = 0
@@ -352,6 +357,14 @@ final class GPSWorkoutRecorder: ObservableObject {
     /// 存進 SwiftData 的完整場次
     func buildSession(weatherNote: String?, temperature: Double?) -> WorkoutSession {
         let end = Date()
+        // 騎車、游泳這類運動，計步器數出來的是震動雜訊，不該當成步數
+        let footBased: Bool = {
+            guard let sport else { return true }
+            switch SportCatalog.healthKitType(for: sport) {
+            case .walking, .running, .hiking: return true
+            default: return false
+            }
+        }()
         let session = WorkoutSession(type: workoutType,
                                      startDate: startDate,
                                      endDate: end,
@@ -360,11 +373,11 @@ final class GPSWorkoutRecorder: ObservableObject {
                                      averagePace: distance > 50 ? elapsed / (distance / 1000) : nil,
                                      elevationGain: elevationGain,
                                      elevationLoss: elevationLoss,
-                                     stepCount: pedometer.steps > 0 ? pedometer.steps : nil,
-                                     cadence: pedometer.cadence > 0 ? pedometer.cadence : nil,
-                                     floorsAscended: pedometer.floorsAscended,
-                                     floorsDescended: pedometer.floorsDescended,
-                                     strideLength: pedometer.steps > 400 && distance > 300
+                                     stepCount: footBased && pedometer.steps > 0 ? pedometer.steps : nil,
+                                     cadence: footBased && pedometer.cadence > 0 ? pedometer.cadence : nil,
+                                     floorsAscended: footBased ? pedometer.floorsAscended : nil,
+                                     floorsDescended: footBased ? pedometer.floorsDescended : nil,
+                                     strideLength: footBased && pedometer.steps > 400 && distance > 300
                                         ? distance / Double(pedometer.steps) : nil,
                                      distanceSource: .gps,
                                      routeKey: routeKey.isEmpty ? nil : routeKey,
@@ -392,6 +405,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         }
         session.weatherNote = weatherNote
         session.temperature = temperature
+        session.pauseLog = pauseLog.isEmpty ? nil : pauseLog
         session.laps = laps.map {
             LapRecord(lapNumber: $0.number,
                       lapDuration: $0.duration,

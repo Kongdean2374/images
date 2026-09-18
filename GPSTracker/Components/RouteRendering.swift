@@ -4,7 +4,10 @@ import CoreLocation
 
 /// 依配速著色的軌跡片段
 struct RouteSegment: Identifiable {
-    let id = UUID()
+    /// 用起點索引當 id，重新計算時 SwiftUI 才不會把每一段都當成新的而整條重畫
+    var id: Int { startIndex }
+    let startIndex: Int
+    let endIndex: Int
     let coordinates: [CLLocationCoordinate2D]
     let color: Color
 }
@@ -29,7 +32,10 @@ enum RouteRenderer {
             let speedSlice = speeds.isEmpty ? [] : Array(speeds[index...min(end, speeds.count - 1)])
             let avg = speedSlice.isEmpty ? low : speedSlice.reduce(0, +) / Double(speedSlice.count)
             let fraction = (avg - low) / span
-            result.append(RouteSegment(coordinates: slice, color: Theme.paceColor(fraction: fraction)))
+            result.append(RouteSegment(startIndex: index,
+                                       endIndex: end,
+                                       coordinates: slice,
+                                       color: Theme.paceColor(fraction: fraction)))
             index = end
         }
         return result

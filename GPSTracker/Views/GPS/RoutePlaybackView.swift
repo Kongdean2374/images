@@ -13,31 +13,58 @@ struct RoutePlaybackView: View {
     @State private var isPlaying = true
     @State private var rate: Double = 1
     @State private var camera: MapCameraPosition = .automatic
-    @State private var timer: Timer?
+    @State private var showExport = false
 
-    private var points: [RoutePoint] { session.sortedPoints }
-    private var coordinates: [CLLocationCoordinate2D] {
-        points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+    /// 全部預先算好，播放時完全不重算，這是流暢的關鍵
+    @State private var points: [RoutePoint] = []
+    @State private var coordinates: [CLLocationCoordinate2D] = []
+    @State private var speeds: [Double] = []
+    @State private var allSegments: [RouteSegment] = []
+    @State private var fastestRange: ClosedRange<Int>?
+
+    /// 動畫時鐘
+    @State private var lastTick: Date?
+    @State private var lastCameraUpdate: Date = .distantPast
+
+    /// 以浮點數表示的進度位置，頭部座標會在兩個點之間內插，不會一格一格跳
+    private var exactPosition: Double {
+        guard coordinates.count > 1 else { return 0 }
+        return progress * Double(coordinates.count - 1)
     }
-    private var speeds: [Double] { points.map { $0.speed } }
 
-    /// 目前播放到的索引
+    /// 目前播放到的索引（整數部分）
     private var currentIndex: Int {
         guard coordinates.count > 1 else { return 0 }
-        return min(coordinates.count - 1, max(1, Int(progress * Double(coordinates.count - 1))))
+        return min(coordinates.count - 1, max(0, Int(exactPosition)))
     }
 
-    private var visibleCoordinates: [CLLocationCoordinate2D] {
-        guard coordinates.count > 1 else { return coordinates }
-        return Array(coordinates[0...currentIndex])
+    /// 內插後的頭部座標
+    private var headCoordinate: CLLocationCoordinate2D? {
+        guard coordinates.count > 1 else { return coordinates.first }
+        let index = currentIndex
+        guard index < coordinates.count - 1 else { return coordinates.last }
+        let t = exactPosition - Double(index)
+        let a = coordinates[index]
+        let b = coordinates[index + 1]
+        return CLLocationCoordinate2D(latitude: a.latitude + (b.latitude - a.latitude) * t,
+                                      longitude: a.longitude + (b.longitude - a.longitude) * t)
     }
 
-    /// 最快配速段（用於特寫）
-    private var fastestRange: ClosedRange<Int>? {
-        let splits = StatsEngine.gpsSplits(points: points, splitDistance: 1000)
-        guard let best = splits.filter({ $0.pace != nil && !$0.isPartial })
-            .min(by: { ($0.pace ?? .infinity) < ($1.pace ?? .infinity) }) else { return nil }
-        return best.pointRange
+    /// 已走過的路徑：只挑出整段落在進度之前的，不重新計算顏色
+    private var visibleSegments: [RouteSegment] {
+        let index = currentIndex
+        return allSegments.filter { $0.startIndex <= index }
+    }
+
+    /// 銜接到頭部的那一小段，讓線條跟著頭一起長出來
+    private var leadingCoordinates: [CLLocationCoordinate2D] {
+        guard let head = headCoordinate, currentIndex < coordinates.count else { return [] }
+        let anchor = max(0, currentIndex)
+        return [coordinates[anchor], head]
+    }
+
+    private var playbackDuration: Double {
+        max(8.0, Double(coordinates.count) / 30.0)
     }
 
     private var isInFastestSection: Bool {
@@ -56,17 +83,66 @@ struct RoutePlaybackView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { startTimer() }
-        .onDisappear { timer?.invalidate() }
+        .background {
+            // 以畫面更新頻率驅動（60 / 120 Hz），不是固定 30 Hz 的 Timer
+            TimelineView(.animation(minimumInterval: nil, paused: !isPlaying)) { context in
+                Color.clear
+                    .onChange(of: context.date) { _, now in
+                        advance(to: now)
+                    }
+            }
+            .allowsHitTesting(false)
+        }
+        .onAppear { prepare() }
+        .onChange(of: isPlaying) { _, playing in
+            if playing { lastTick = nil }
+        }
+        .sheet(isPresented: $showExport) {
+            RouteVideoExportView(session: session)
+        }
+    }
+
+    /// 進場時一次算完所有繁重的東西
+    private func prepare() {
+        let sorted = session.sortedPoints
+        points = sorted
+        coordinates = sorted.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+        speeds = sorted.map { $0.speed }
+        allSegments = RouteRenderer.segments(coordinates: coordinates, speeds: speeds)
+
+        let splits = StatsEngine.gpsSplits(points: sorted, splitDistance: 1000)
+        fastestRange = splits.filter { $0.pace != nil && !$0.isPartial }
+            .min { ($0.pace ?? .infinity) < ($1.pace ?? .infinity) }?
+            .pointRange
+
+        lastTick = nil
+        updateCamera(force: true)
+    }
+
+    /// 依實際經過的時間推進，掉幀也不會變慢
+    private func advance(to now: Date) {
+        guard isPlaying, coordinates.count > 1 else { return }
+        defer { lastTick = now }
+        guard let last = lastTick else { return }
+        let delta = now.timeIntervalSince(last)
+        guard delta > 0, delta < 0.5 else { return }
+
+        progress = min(1, progress + (delta / playbackDuration) * rate)
+        if progress >= 1 { isPlaying = false }
+        updateCamera()
     }
 
     private var mapLayer: some View {
         Map(position: $camera, interactionModes: .all) {
             // 已走過的路徑（依配速著色）
-            ForEach(RouteRenderer.segments(coordinates: visibleCoordinates,
-                                           speeds: Array(speeds.prefix(visibleCoordinates.count)))) { segment in
+            ForEach(visibleSegments) { segment in
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color, style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+            }
+            // 頭部那一小段，跟著內插座標一起長
+            if leadingCoordinates.count == 2 {
+                MapPolyline(coordinates: leadingCoordinates)
+                    .stroke(Theme.accentWarm, style: StrokeStyle(lineWidth: 7, lineCap: .round))
             }
             // 尚未走到的路徑（淡色預覽）
             if currentIndex < coordinates.count - 1 {
@@ -74,7 +150,7 @@ struct RoutePlaybackView: View {
                     .stroke(Color.white.opacity(0.18),
                             style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [6, 8]))
             }
-            if let head = visibleCoordinates.last {
+            if let head = headCoordinate {
                 Annotation("", coordinate: head) {
                     TimelineView(.animation) { context in
                         let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 3.2) + 1) / 2
@@ -116,16 +192,30 @@ struct RoutePlaybackView: View {
                     .transition(.scale.combined(with: .opacity))
             }
             Spacer()
-            Menu {
-                ForEach([1.0, 2.0, 4.0, 8.0], id: \.self) { value in
-                    Button("\(Int(value))×") { rate = value }
+            HStack(spacing: 10) {
+                Button {
+                    isPlaying = false
+                    showExport = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(.ultraThinMaterial))
                 }
-            } label: {
-                Text("\(Int(rate))×")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .padding(11)
-                    .background(Circle().fill(.ultraThinMaterial))
+                .accessibilityLabel("匯出回放動畫")
+
+                Menu {
+                    ForEach([1.0, 2.0, 4.0, 8.0], id: \.self) { value in
+                        Button("\(Int(value))×") { rate = value }
+                    }
+                } label: {
+                    Text("\(Int(rate))×")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(11)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -137,21 +227,21 @@ struct RoutePlaybackView: View {
         VStack(spacing: 14) {
             HStack {
                 MetricTile(title: "已回放距離",
-                           value: Fmt.distanceValue(points.isEmpty ? 0 : points[currentIndex].distanceFromStart,
+                           value: Fmt.distanceValue(points.isEmpty ? 0 : points[min(currentIndex, points.count - 1)].distanceFromStart,
                                                     unit: settings.unit),
                            unit: Fmt.distanceUnitLabel(settings.unit),
                            tint: Theme.accent, size: 26)
                 MetricTile(title: "當下配速",
-                           value: Fmt.pace(points.isEmpty ? nil : points[currentIndex].pace, unit: settings.unit),
+                           value: Fmt.pace(points.isEmpty ? nil : points[min(currentIndex, points.count - 1)].pace, unit: settings.unit),
                            tint: Theme.mint, size: 26)
                 MetricTile(title: "海拔",
-                           value: Fmt.decimal(points.isEmpty ? 0 : points[currentIndex].altitude, digits: 0),
+                           value: Fmt.decimal(points.isEmpty ? 0 : points[min(currentIndex, points.count - 1)].altitude, digits: 0),
                            unit: "m", tint: Theme.amber, size: 26)
             }
 
             Slider(value: $progress, in: 0...1)
                 .tint(Theme.accent)
-                .onChange(of: progress) { _, _ in updateCamera() }
+                .onChange(of: progress) { _, _ in updateCamera(force: true) }
 
             HStack(spacing: 30) {
                 Button {
@@ -186,30 +276,20 @@ struct RoutePlaybackView: View {
         .padding(.bottom, 12)
     }
 
-    private func startTimer() {
-        timer?.invalidate()
-        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { _ in
-            Task { @MainActor in
-                guard self.isPlaying else { return }
-                let total = max(8.0, Double(self.coordinates.count) / 30.0)   // 基準播放長度（秒）
-                self.progress = min(1, self.progress + (1.0 / (total * 30.0)) * self.rate)
-                if self.progress >= 1 { self.isPlaying = false }
-                self.updateCamera()
-            }
-        }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
+    /// 鏡頭每 0.35 秒更新一次，動畫長度剛好接上，看起來是連續移動而不是一直重啟
+    private func updateCamera(force: Bool = false) {
+        guard let head = headCoordinate else { return }
+        let now = Date()
+        if !force && now.timeIntervalSince(lastCameraUpdate) < 0.35 { return }
+        lastCameraUpdate = now
 
-    private func updateCamera() {
-        guard let head = visibleCoordinates.last else { return }
         let heading: Double
-        if currentIndex > 2 {
-            heading = GeoMath.bearing(from: coordinates[currentIndex - 2], to: head)
+        if currentIndex > 3 {
+            heading = GeoMath.bearing(from: coordinates[currentIndex - 3], to: head)
         } else {
             heading = 0
         }
-        withAnimation(.easeOut(duration: 0.4)) {
+        withAnimation(.linear(duration: force ? 0 : 0.36)) {
             camera = .camera(MapCamera(centerCoordinate: head,
                                        distance: isInFastestSection ? 380 : 900,
                                        heading: heading,

@@ -29,6 +29,8 @@ struct WorkoutSummaryView: View {
     @State private var showFileShare = false
     @State private var healthMessage: String?
     @State private var isSyncing = false
+    @State private var isInspecting = false
+    @State private var inspection: [HealthKitManager.StoredField] = []
     @StateObject private var health = HealthKitManager.shared
 
     private var splits: [SplitSegment] { StatsEngine.splits(for: session) }
@@ -210,6 +212,11 @@ struct WorkoutSummaryView: View {
                     .foregroundStyle(Theme.textPrimary)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
                           spacing: 12) {
+                    if session.prefersSpeed, let speed = session.averageSpeed {
+                        StatPill(title: "平均速度",
+                                 value: String(format: "%.1f km/h", speed * 3.6),
+                                 tint: Theme.accent)
+                    }
                     StatPill(title: "爬升", value: Fmt.elevation(session.elevationGain), tint: Theme.amber)
                     StatPill(title: "下降", value: Fmt.elevation(session.elevationLoss), tint: Theme.violet)
                     StatPill(title: "熱量", value: Fmt.decimal(session.calories, digits: 0), tint: Theme.accentWarm)
@@ -504,8 +511,46 @@ struct WorkoutSummaryView: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(isSyncing)
+
+                if session.healthKitSynced, session.healthKitUUID != nil {
+                    Button {
+                        Task { await inspectHealth() }
+                    } label: {
+                        Label(isInspecting ? "讀取中⋯" : "檢查健康 App 實際收到什麼",
+                              systemImage: "magnifyingglass")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(isInspecting)
+                }
+
+                if !inspection.isEmpty {
+                    VStack(spacing: 6) {
+                        ForEach(inspection) { field in
+                            HStack(spacing: 8) {
+                                Image(systemName: field.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(field.ok ? Theme.mint : Theme.accentWarm)
+                                Text(field.name)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textSecondary)
+                                Spacer(minLength: 0)
+                                Text(field.value)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(field.ok ? Theme.textPrimary : Theme.accentWarm)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
             }
         }
+    }
+
+    private func inspectHealth() async {
+        guard let uuid = session.healthKitUUID else { return }
+        isInspecting = true
+        inspection = await health.inspect(uuid: uuid)
+        isInspecting = false
     }
 
     private var exportCard: some View {

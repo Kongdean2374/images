@@ -21,9 +21,18 @@ struct WorkoutSnapshot {
     let type: WorkoutType
     let start: Date
     let end: Date
+    let duration: TimeInterval
     let distance: Double?
     let calories: Double?
     let floorsAscended: Int?
+    let elevationGain: Double?
+    let elevationLoss: Double?
+    let temperature: Double?
+    let averageSpeed: Double?
+    let maxSpeed: Double?
+    let met: Double
+    let stepsAreMeaningful: Bool
+    let pauseLog: [Date]
     let sportID: String?
     let locations: [CLLocation]
 
@@ -33,9 +42,18 @@ struct WorkoutSnapshot {
         sportID = session.sportRaw
         start = session.startDate
         end = session.endDate
+        duration = session.duration
         distance = session.totalDistance
         calories = session.calories
         floorsAscended = session.floorsAscended
+        elevationGain = session.elevationGain
+        elevationLoss = session.elevationLoss
+        temperature = session.temperature
+        averageSpeed = session.averageSpeed
+        met = session.effectiveMET
+        stepsAreMeaningful = session.stepsAreMeaningful
+        pauseLog = session.pauseLog ?? []
+        maxSpeed = session.routePoints.map { $0.speed }.filter { $0 > 0 }.max()
         locations = session.sortedPoints.map { point in
             CLLocation(coordinate: CLLocationCoordinate2D(latitude: point.latitude,
                                                           longitude: point.longitude),
@@ -215,13 +233,22 @@ final class HealthKitManager: ObservableObject {
         guard HKHealthStore.isHealthDataAvailable() else { return nil }
         guard availability == .ready else { return nil }
 
-        let configuration = HKWorkoutConfiguration()
-        if let sport = SportCatalog.find(snapshot.sportID) {
-            configuration.activityType = SportCatalog.healthKitType(for: sport)
+        let activity: HKWorkoutActivityType
+        let sport = SportCatalog.find(snapshot.sportID)
+        if let sport {
+            activity = SportCatalog.healthKitType(for: sport)
         } else {
-            configuration.activityType = Self.activityType(for: snapshot.type)
+            activity = Self.activityType(for: snapshot.type)
         }
-        configuration.locationType = snapshot.type.requiresLocation ? .outdoor : .indoor
+
+        let isIndoor = sport?.indoor ?? !snapshot.type.requiresLocation
+
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = activity
+        configuration.locationType = isIndoor ? .indoor : .outdoor
+        if activity == .swimming {
+            configuration.swimmingLocationType = isIndoor ? .pool : .openWater
+        }
 
         let start = snapshot.start
         let end = max(snapshot.end, snapshot.start.addingTimeInterval(1))
@@ -232,9 +259,17 @@ final class HealthKitManager: ObservableObject {
                                            device: .local())
             try await builder.beginCollection(at: start)
 
+            // 暫停／繼續：不寫進去的話，健康 App 會把整段牆上時間都算成訓練時間
+            let events = Self.workoutEvents(from: snapshot.pauseLog, start: start, end: end)
+            if !events.isEmpty {
+                try await builder.addWorkoutEvents(events)
+            }
+
             var samples: [HKSample] = []
             if let distance = snapshot.distance, distance > 0 {
-                samples.append(HKQuantitySample(type: HKQuantityType(.distanceWalkingRunning),
+                // 關鍵：不同運動要寫到不同的距離型態，
+                // 騎車寫成 distanceWalkingRunning 的話，健康 App 讀不到距離，速度會是 0。
+                samples.append(HKQuantitySample(type: Self.distanceType(for: activity),
                                                 quantity: HKQuantity(unit: .meter(), doubleValue: distance),
                                                 start: start,
                                                 end: end))
@@ -245,7 +280,9 @@ final class HealthKitManager: ObservableObject {
                                                 start: start,
                                                 end: end))
             }
-            if let floors = snapshot.floorsAscended, floors > 0 {
+            // 爬樓層只有腳踩出來的才算，騎車那種是計步器誤判
+            if snapshot.stepsAreMeaningful,
+               let floors = snapshot.floorsAscended, floors > 0 {
                 samples.append(HKQuantitySample(type: HKQuantityType(.flightsClimbed),
                                                 quantity: HKQuantity(unit: .count(), doubleValue: Double(floors)),
                                                 start: start,
@@ -254,6 +291,8 @@ final class HealthKitManager: ObservableObject {
             if !samples.isEmpty {
                 try await builder.addSamples(samples)
             }
+
+            try await builder.addMetadata(Self.metadata(for: snapshot, isIndoor: isIndoor))
 
             try await builder.endCollection(at: end)
             guard let workout = try await builder.finishWorkout() else {
@@ -276,6 +315,159 @@ final class HealthKitManager: ObservableObject {
             update { self.lastError = error.localizedDescription }
             return nil
         }
+    }
+
+    // MARK: 寫入用的對應表
+
+    /// 各種運動對應的距離型態。寫錯的話健康 App 會讀不到距離。
+    static func distanceType(for activity: HKWorkoutActivityType) -> HKQuantityType {
+        switch activity {
+        case .cycling, .handCycling:
+            return HKQuantityType(.distanceCycling)
+        case .swimming:
+            return HKQuantityType(.distanceSwimming)
+        case .wheelchairWalkPace, .wheelchairRunPace:
+            return HKQuantityType(.distanceWheelchair)
+        case .downhillSkiing, .snowboarding, .crossCountrySkiing, .snowSports:
+            return HKQuantityType(.distanceDownhillSnowSports)
+        case .paddleSports, .rowing, .sailing, .surfingSports:
+            return HKQuantityType(.distanceSwimming)
+        default:
+            return HKQuantityType(.distanceWalkingRunning)
+        }
+    }
+
+    /// 把暫停紀錄轉成健康 App 看得懂的訓練事件
+    static func workoutEvents(from log: [Date], start: Date, end: Date) -> [HKWorkoutEvent] {
+        guard !log.isEmpty else { return [] }
+        var events: [HKWorkoutEvent] = []
+        for (index, date) in log.enumerated() {
+            guard date > start, date < end else { continue }
+            let type: HKWorkoutEventType = index.isMultiple(of: 2) ? .pause : .resume
+            events.append(HKWorkoutEvent(type: type,
+                                         dateInterval: DateInterval(start: date, duration: 0),
+                                         metadata: nil))
+        }
+        return events
+    }
+
+    /// 健康 App 的「體能訓練詳細資訊」會讀這些欄位
+    static func metadata(for snapshot: WorkoutSnapshot, isIndoor: Bool) -> [String: Any] {
+        var metadata: [String: Any] = [
+            HKMetadataKeyIndoorWorkout: isIndoor
+        ]
+        if let gain = snapshot.elevationGain, gain > 0 {
+            metadata[HKMetadataKeyElevationAscended] = HKQuantity(unit: .meter(), doubleValue: gain)
+        }
+        if let loss = snapshot.elevationLoss, loss > 0 {
+            metadata[HKMetadataKeyElevationDescended] = HKQuantity(unit: .meter(), doubleValue: loss)
+        }
+        if let speed = snapshot.averageSpeed, speed > 0 {
+            metadata[HKMetadataKeyAverageSpeed] = HKQuantity(unit: .meter().unitDivided(by: .second()),
+                                                             doubleValue: speed)
+        }
+        if let peak = snapshot.maxSpeed, peak > 0 {
+            metadata[HKMetadataKeyMaximumSpeed] = HKQuantity(unit: .meter().unitDivided(by: .second()),
+                                                             doubleValue: peak)
+        }
+        if let temperature = snapshot.temperature {
+            metadata[HKMetadataKeyWeatherTemperature] = HKQuantity(unit: .degreeCelsius(),
+                                                                   doubleValue: temperature)
+        }
+        if snapshot.met > 0 {
+            metadata[HKMetadataKeyAverageMETs] = HKQuantity(unit: HKUnit(from: "kcal/(kg*hr)"),
+                                                            doubleValue: snapshot.met)
+        }
+        return metadata
+    }
+
+    // MARK: 寫入結果檢查
+
+    struct StoredField: Identifiable {
+        let id = UUID()
+        let name: String
+        let value: String
+        let ok: Bool
+    }
+
+    /// 把已經寫進健康 App 的那一筆讀回來，逐項列出實際存了什麼。
+    /// 用來確認距離、時間、爬升、速度這些欄位有沒有真的進去。
+    func inspect(uuid: String) async -> [StoredField] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready,
+              let id = UUID(uuidString: uuid) else {
+            return [StoredField(name: "健康 App", value: "無法讀取", ok: false)]
+        }
+
+        let predicate = HKQuery.predicateForObject(with: id)
+        let workouts: [HKWorkout] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
+                                      predicate: predicate,
+                                      limit: 1,
+                                      sortDescriptors: nil) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKWorkout]) ?? [])
+            }
+            store.execute(query)
+        }
+
+        guard let workout = workouts.first else {
+            return [StoredField(name: "紀錄", value: "在健康 App 裡找不到這筆", ok: false)]
+        }
+
+        var fields: [StoredField] = []
+        fields.append(StoredField(name: "運動型態",
+                                  value: "\(workout.workoutActivityType.rawValue)",
+                                  ok: true))
+        fields.append(StoredField(name: "訓練時間",
+                                  value: Fmt.duration(workout.duration),
+                                  ok: workout.duration > 0))
+        fields.append(StoredField(name: "開始時間",
+                                  value: Fmt.dateTime(workout.startDate),
+                                  ok: true))
+
+        let distanceType = Self.distanceType(for: workout.workoutActivityType)
+        let distance = workout.statistics(for: distanceType)?.sumQuantity()?.doubleValue(for: .meter())
+        fields.append(StoredField(name: "距離",
+                                  value: distance.map { Fmt.distance($0, unit: .metric) } ?? "沒寫入",
+                                  ok: (distance ?? 0) > 0))
+
+        let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?
+            .sumQuantity()?.doubleValue(for: .kilocalorie())
+        fields.append(StoredField(name: "熱量",
+                                  value: energy.map { String(format: "%.0f 大卡", $0) } ?? "沒寫入",
+                                  ok: (energy ?? 0) > 0))
+
+        let metadata = workout.metadata ?? [:]
+        func quantityText(_ key: String, unit: HKUnit, suffix: String) -> String? {
+            guard let quantity = metadata[key] as? HKQuantity else { return nil }
+            return String(format: "%.1f %@", quantity.doubleValue(for: unit), suffix)
+        }
+
+        let gain = quantityText(HKMetadataKeyElevationAscended, unit: .meter(), suffix: "m")
+        fields.append(StoredField(name: "累積爬升", value: gain ?? "沒寫入", ok: gain != nil))
+
+        let speedUnit = HKUnit.meter().unitDivided(by: .second())
+        if let quantity = metadata[HKMetadataKeyAverageSpeed] as? HKQuantity {
+            let kmh = quantity.doubleValue(for: speedUnit) * 3.6
+            fields.append(StoredField(name: "平均速度",
+                                      value: String(format: "%.1f km/h", kmh),
+                                      ok: kmh > 0))
+        } else {
+            fields.append(StoredField(name: "平均速度", value: "沒寫入", ok: false))
+        }
+
+        if let indoor = metadata[HKMetadataKeyIndoorWorkout] as? Bool {
+            fields.append(StoredField(name: "室內／室外",
+                                      value: indoor ? "室內" : "室外",
+                                      ok: true))
+        }
+
+        let indoorWorkout = (metadata[HKMetadataKeyIndoorWorkout] as? Bool) ?? false
+        let routeCount = await route(of: workout).count
+        fields.append(StoredField(name: "GPS 軌跡點",
+                                  value: routeCount > 0 ? "\(routeCount) 點" : "沒有軌跡",
+                                  ok: routeCount > 0 || indoorWorkout))
+
+        return fields
     }
 
     // MARK: 讀取
