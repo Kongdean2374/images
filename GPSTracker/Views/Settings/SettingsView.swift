@@ -720,6 +720,11 @@ struct SettingsView: View {
                     UserGuideView()
                 }
                 rowDivider
+                documentRow(icon: "character.book.closed.fill", title: "名詞解釋",
+                            subtitle: "CTL、ATL、TSB、ACWR⋯⋯白話版", tint: Theme.violet) {
+                    GlossaryListView()
+                }
+                rowDivider
                 documentRow(icon: "hand.raised.fill", title: "隱私政策",
                             subtitle: "中文 / English・含權限一覽", tint: Theme.mint) {
                     LegalView(document: .privacy)

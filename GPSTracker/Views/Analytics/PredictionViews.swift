@@ -9,9 +9,9 @@ struct RacePredictionCard: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("比賽成績預測", systemImage: "flag.checkered.2.crossed")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
+                    GlossaryHeader(title: "比賽成績預測",
+                                   termID: "racePrediction",
+                                   icon: "flag.checkered.2.crossed")
                     Spacer()
                 }
 
@@ -89,9 +89,9 @@ struct IntensityBalanceCard: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Label("強度分佈", systemImage: "scalemass")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
+                    GlossaryHeader(title: "強度分佈",
+                                   termID: "intensityBalance",
+                                   icon: "scalemass")
                     Spacer()
                     Text(balance.verdict)
                         .font(.caption.weight(.semibold))

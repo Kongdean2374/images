@@ -240,10 +240,11 @@ struct WorkoutSummaryView: View {
                     }
                 }
                 if let source = session.distanceSource {
-                    HStack {
+                    HStack(spacing: 5) {
                         Text("距離來源")
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
+                        GlossaryButton(termID: "distanceSource", size: 13)
                         Spacer()
                         Text(source.displayName)
                             .font(.caption.weight(.semibold))
@@ -307,7 +308,7 @@ struct WorkoutSummaryView: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("自覺強度 RPE")
+                    GlossaryHeader(title: "自覺強度 RPE", termID: "rpe")
                         .font(.headline)
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
@@ -359,9 +360,9 @@ struct WorkoutSummaryView: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("恢復心率", systemImage: "heart.circle")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
+                    GlossaryHeader(title: "恢復心率",
+                                   termID: "heartRateRecovery",
+                                   icon: "heart.circle")
                     Spacer()
                     if let recovery = session.heartRateRecovery {
                         Text("下降 \(recovery) bpm")

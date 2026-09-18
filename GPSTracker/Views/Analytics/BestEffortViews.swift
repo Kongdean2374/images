@@ -11,9 +11,9 @@ struct BestEffortsCard: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("最佳分段", systemImage: "bolt.badge.clock")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
+                    GlossaryHeader(title: "最佳分段",
+                                   termID: "bestEfforts",
+                                   icon: "bolt.badge.clock")
                     Spacer()
                 }
                 if efforts.isEmpty {

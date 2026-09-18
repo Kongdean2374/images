@@ -74,7 +74,10 @@ struct StrideCalibrationView: View {
                             .monospacedDigit()
                             .contentTransition(.numericText())
                             .foregroundStyle(Theme.textPrimary)
-                        Text("精準度")
+                        HStack(spacing: 4) {
+                            Text("精準度")
+                            GlossaryButton(termID: "strideConfidence", size: 12)
+                        }
                             .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -171,7 +174,7 @@ struct StrideCalibrationView: View {
     private func breakdownCard(_ result: CalibrationResult) -> some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("精準度組成")
+                GlossaryHeader(title: "精準度組成", termID: "strideConfidence")
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
 

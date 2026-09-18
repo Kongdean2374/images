@@ -47,6 +47,8 @@ struct StatPill: View {
     let title: String
     let value: String
     var tint: Color = Theme.accent
+    /// 專有名詞的話填名詞 id，標題旁會出現一個問號
+    var termID: String? = nil
 
     var body: some View {
         VStack(spacing: 4) {
@@ -55,9 +57,14 @@ struct StatPill: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .foregroundStyle(tint)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(Theme.textSecondary)
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                if let termID {
+                    GlossaryButton(termID: termID, size: 11)
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)

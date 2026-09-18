@@ -140,7 +140,8 @@ struct TimedActivityView: View {
                     .foregroundStyle(Theme.textPrimary)
                 HStack {
                     StatPill(title: "估算消耗", value: String(format: "%.0f", calories), tint: Theme.accentWarm)
-                    StatPill(title: "MET", value: String(format: "%.1f", adjustedMET), tint: tint)
+                    StatPill(title: "MET", value: String(format: "%.1f", adjustedMET),
+                             tint: tint, termID: "met")
                     StatPill(title: "分類", value: sport.category.displayName, tint: Theme.textSecondary)
                 }
                 if state == .running {

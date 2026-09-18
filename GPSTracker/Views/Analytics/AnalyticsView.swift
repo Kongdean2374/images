@@ -103,9 +103,7 @@ struct AnalyticsView: View {
         return GlassCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("訓練負荷")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
+                    GlossaryHeader(title: "訓練負荷", termID: "trainingLoad")
                     Spacer()
                     Text(report.zone.displayName)
                         .font(.caption.weight(.semibold))
@@ -133,14 +131,18 @@ struct AnalyticsView: View {
                     StatPill(title: "28 天週均", value: String(format: "%.0f", report.chronic), tint: Theme.mint)
                     StatPill(title: "急慢性比",
                              value: report.hasEnoughData ? String(format: "%.2f", report.ratio) : "--",
-                             tint: zoneColor(report.zone))
+                             tint: zoneColor(report.zone),
+                             termID: "acwr")
                 }
                 HStack {
-                    StatPill(title: "體能 CTL", value: String(format: "%.0f", report.ctl), tint: Theme.accent)
-                    StatPill(title: "疲勞 ATL", value: String(format: "%.0f", report.atl), tint: Theme.accentWarm)
+                    StatPill(title: "體能 CTL", value: String(format: "%.0f", report.ctl),
+                             tint: Theme.accent, termID: "ctl")
+                    StatPill(title: "疲勞 ATL", value: String(format: "%.0f", report.atl),
+                             tint: Theme.accentWarm, termID: "atl")
                     StatPill(title: "狀態 \(report.formText)",
                              value: String(format: "%+.0f", report.tsb),
-                             tint: report.tsb >= 0 ? Theme.mint : Theme.amber)
+                             tint: report.tsb >= 0 ? Theme.mint : Theme.amber,
+                             termID: "tsb")
                 }
 
                 if report.hasEnoughData {
@@ -521,9 +523,7 @@ struct AnalyticsView: View {
     private var intensityCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("心肺負荷估算")
-                    .font(.headline)
-                    .foregroundStyle(Theme.textPrimary)
+                GlossaryHeader(title: "心肺負荷估算", termID: "intensityScore")
                 Text("以配速、海拔變化與時長推估相對強度，不需要心率裝置。")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)

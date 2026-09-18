@@ -410,7 +410,8 @@ struct FitnessTestView: View {
                 StatPill(title: "步數", value: "\(engine.pedometer.steps)", tint: Theme.mint)
                 StatPill(title: "推估 VO₂max",
                          value: engine.vo2max.map { String(format: "%.1f", $0) } ?? "--",
-                         tint: Theme.violet)
+                         tint: Theme.violet,
+                         termID: "vo2max")
             }
             .padding(.horizontal, 18)
 
