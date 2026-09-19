@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>軌跡記錄器</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用於記錄跑步、健行、單車等戶外運動的即時軌跡、距離、配速與爬升。需要「精確位置」才能畫出正確路線；關閉定位時 App 會自動切換成免定位的計步版本。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>在螢幕鎖定、切換到其他 App 或手機放進口袋時，仍能持續記錄完整運動軌跡不中斷。位置資料只留在你的裝置與健康 App，不會上傳。</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>在背景持續記錄運動軌跡，避免長距離訓練中途斷線。</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>TrackingAccuracy</key>
+		<string>需要「精確位置」才能正確計算距離、配速與路線；只給大約位置會讓軌跡嚴重偏移。</string>
+	</dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>讀取你的體重、身高、步數、距離、爬樓層、心率、靜止心率、心率變異、最大攝氧量、活動與運動能量，以及健康 App 內所有既有的運動紀錄（含其他運動 App 寫入的），用來一鍵匯入歷史訓練、校正個人步幅、並讓熱量、強度與體能分析更準確。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>把每一次運動（含軌跡、距離、步數、爬樓層與消耗熱量）寫回健康 App，讓 Apple Watch 與其他運動 App 也能讀到這次訓練，資料雙向互通。</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用於將運動戰績卡片儲存到相簿。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>用於在沒有 GPS 訊號（營區、室內、地下室、隧道）時，透過動作與健身感測器讀取步數、步頻、爬樓層、氣壓高度與原地運動次數，並自動判斷走路／跑步等活動型態。</string>
+	<key>NSSiriUsageDescription</key>
+	<string>讓你用 Siri 或捷徑直接說一句話就開始或結束記錄運動。</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>在步數或距離達標、久坐提醒與運動記錄背景更新時通知你。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+	</array>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string></string>
+	</dict>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>
