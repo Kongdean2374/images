@@ -188,6 +188,15 @@ struct WorkoutSettingsView: View {
                 Text("衛星").tag(2)
             }
 
+            Picker("軌跡上色", selection: Binding(
+                get: { settings.routeColorMode },
+                set: { settings.routeColorMode = $0 }
+            )) {
+                ForEach(RouteColorMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
             valueRow(title: "自動分圈",
                      value: settings.gpsAutoLapDistance > 0
                         ? Fmt.distance(settings.gpsAutoLapDistance, unit: settings.unit)
@@ -216,7 +225,7 @@ struct WorkoutSettingsView: View {
         } header: {
             Text("GPS 軌跡")
         } footer: {
-            Text("分圈距離與目標配速都可以自己輸入任意數值，不限於預設選項。背景持續記錄需要「永遠允許」定位。")
+            Text("分圈距離與目標配速都可以自己輸入任意數值，不限於預設選項。軌跡上色選「絕對速度」時，尺規會跟著當下最高速即時重新分級。背景持續記錄需要「永遠允許」定位。")
         }
 
         presetSection

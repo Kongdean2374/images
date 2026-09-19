@@ -60,6 +60,8 @@ final class AppSettings: ObservableObject {
     @Published var customPaces: [Double] { didSet { defaults.set(customPaces, forKey: Keys.customPaces) } }
     /// 自訂的自動分圈距離清單（公尺）
     @Published var customLapDistances: [Double] { didSet { defaults.set(customLapDistances, forKey: Keys.customLapDistances) } }
+    /// 軌跡上色依據（相對配速／絕對速度／海拔／單色）
+    @Published var routeColorModeRaw: String { didSet { defaults.set(routeColorModeRaw, forKey: Keys.routeColorMode) } }
 
     private enum Keys {
         static let unit = "unit"
@@ -102,6 +104,7 @@ final class AppSettings: ObservableObject {
         static let preferBigText = "preferBigText"
         static let customPaces = "customPaces"
         static let customLapDistances = "customLapDistances"
+        static let routeColorMode = "routeColorMode"
     }
 
     init() {
@@ -183,6 +186,12 @@ final class AppSettings: ObservableObject {
         preferBigText = defaults.bool(forKey: Keys.preferBigText)
         customPaces = (defaults.array(forKey: Keys.customPaces) as? [Double]) ?? AppSettings.defaultPaces
         customLapDistances = (defaults.array(forKey: Keys.customLapDistances) as? [Double]) ?? AppSettings.defaultLapDistances
+        routeColorModeRaw = defaults.string(forKey: Keys.routeColorMode) ?? RouteColorMode.pace.rawValue
+    }
+
+    var routeColorMode: RouteColorMode {
+        get { RouteColorMode(rawValue: routeColorModeRaw) ?? .pace }
+        set { routeColorModeRaw = newValue.rawValue }
     }
 
     // MARK: 自訂快捷清單

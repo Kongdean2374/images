@@ -111,14 +111,32 @@ struct GPSTrackingView: View {
 
     // MARK: 地圖
 
+    /// 即時軌跡：尺規每次都依「目前為止看到的資料」重建，
+    /// 所以中途忽然衝到很高的速度時，整條線會立刻重新分級，不會全部變紅。
+    private var liveSegments: [RouteSegment] {
+        let speeds = recorder.samples.map { max(0, $0.speed) }
+        let values: [Double] = settings.routeColorMode == .elevation
+            ? recorder.samples.map { $0.altitude }
+            : speeds
+        let scale = RouteColorScale.make(mode: settings.routeColorMode, values: values)
+        return RouteRenderer.segments(coordinates: recorder.coordinates,
+                                      values: values,
+                                      scale: scale)
+    }
+
     private var mapLayer: some View {
         Map(position: $camera, interactionModes: .all) {
             UserAnnotation()
-            ForEach(RouteRenderer.segments(coordinates: recorder.coordinates,
-                                           speeds: recorder.samples.map { $0.speed })) { segment in
+            // 發光底層
+            ForEach(liveSegments) { segment in
+                MapPolyline(coordinates: segment.coordinates)
+                    .stroke(segment.color.opacity(0.30),
+                            style: StrokeStyle(lineWidth: 15, lineCap: .round, lineJoin: .round))
+            }
+            ForEach(liveSegments) { segment in
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color,
-                            style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+                            style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
             }
             if let first = recorder.coordinates.first {
                 Annotation("起點", coordinate: first) {
