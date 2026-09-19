@@ -29,7 +29,6 @@ struct GPSTrackingView: View {
     @State private var showBackToStart = false
     @State private var bigTextMode = false
     @State private var showAccuracyHint = false
-    @State private var exitTaps = 0
 
 
     var body: some View {
@@ -220,8 +219,7 @@ struct GPSTrackingView: View {
                 }
                 if recorder.state != .idle {
                     Button {
-                        bigTextMode = true
-                        exitTaps = 0
+                        withAnimation(.easeIn(duration: 0.22)) { bigTextMode = true }
                         CueService.shared.impact(.medium)
                     } label: {
                         Image(systemName: "textformat.size.larger")
@@ -393,24 +391,26 @@ struct GPSTrackingView: View {
                         .foregroundStyle(Theme.amber)
                 }
                 Spacer()
-                VStack(spacing: 6) {
-                    Image(systemName: exitTaps > 0 ? "lock.open.fill" : "lock.fill")
-                        .font(.title3)
-                        .foregroundStyle(.white.opacity(0.5))
-                    Text(exitTaps > 0 ? "再點一次離開" : "連點兩下離開大字模式")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.45))
+
+                VStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                        Text("畫面已鎖定，口袋誤觸不會離開")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.white.opacity(0.4))
+
+                    SlideToConfirm(title: "滑動以離開大字模式",
+                                   icon: "chevron.right",
+                                   tint: Theme.accent) {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            bigTextMode = false
+                        }
+                    }
+                    .padding(.horizontal, 26)
                 }
-                .padding(.bottom, 30)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            exitTaps += 1
-            CueService.shared.impact(.soft)
-            if exitTaps >= 2 {
-                bigTextMode = false
-                exitTaps = 0
+                .padding(.bottom, 34)
             }
         }
         .transition(.opacity)
