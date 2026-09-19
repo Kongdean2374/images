@@ -28,7 +28,7 @@ enum MapSnapshotter {
             return nil
         }
 
-        let segments = RouteRenderer.segments(coordinates: coordinates, speeds: speeds, chunkSize: 4)
+        let segments = RouteRenderer.segments(coordinates: coordinates, speeds: speeds)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
             snapshot.image.draw(at: .zero)
