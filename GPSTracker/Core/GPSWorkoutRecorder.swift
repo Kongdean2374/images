@@ -67,6 +67,10 @@ final class GPSWorkoutRecorder: ObservableObject {
     private var lastAltitude: Double?
     private var announcedKM = 0
     private var lowSpeedSince: Date?
+    /// 判斷自動暫停時用的參考點：一段時間內位置沒有真的移動才算停下來
+    private var autoPauseAnchor: (coordinate: CLLocationCoordinate2D, date: Date)?
+    /// 最近一次拿到的有效衛星速度（CoreLocation 給 -1 代表沒有值）
+    private var lastValidSpeed: Double = 0
     private var lastLapDistance: Double = 0
     private var lastLapElapsed: TimeInterval = 0
 
@@ -103,6 +107,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         commitSegment()
         pauseLog.append(Date())
         state = .paused
+        autosave(force: true)
         updateLiveActivity(force: true)
         CueService.shared.impact(.light)
     }
@@ -120,6 +125,8 @@ final class GPSWorkoutRecorder: ObservableObject {
     func stop() {
         commitSegment()
         state = .finished
+        // 正常結束 → 自動存檔不再需要
+        ActiveWorkoutStore.shared.clear()
         timer?.invalidate()
         timer = nil
         cancellables.removeAll()
@@ -161,6 +168,8 @@ final class GPSWorkoutRecorder: ObservableObject {
         accumulated = 0
         segmentStart = nil
         pauseLog = []
+        autoPauseAnchor = nil
+        lastValidSpeed = 0
         lastAccepted = nil
         lastAltitude = nil
         announcedKM = 0
@@ -199,6 +208,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         }
         updateLiveActivity()
         checkAutoPause()
+        autosave()
     }
 
     private func commitSegment() {
@@ -209,25 +219,63 @@ final class GPSWorkoutRecorder: ObservableObject {
         elapsed = accumulated
     }
 
+    /// 自動暫停判斷。
+    ///
+    /// 以前只看 `currentSpeed`，但 CoreLocation 在訊號不佳時會回傳 speed = -1，
+    /// 被當成 0 之後就會在騎車途中誤判成停下來。現在改成必須「速度低」
+    /// **而且**「這段時間內位置幾乎沒移動」兩個條件同時成立才暫停。
     private func checkAutoPause() {
         guard settings.autoPause, state == .recording else { return }
-        if currentSpeed < 0.45 {
-            if let since = lowSpeedSince {
-                if Date().timeIntervalSince(since) > 18 {
-                    isAutoPaused = true
-                    pause()
-                }
-            } else {
-                lowSpeedSince = Date()
-            }
-        } else {
+        guard let current = lastAccepted else { return }
+        let now = Date()
+        let position = CLLocationCoordinate2D(latitude: current.latitude, longitude: current.longitude)
+
+        guard let anchor = autoPauseAnchor else {
+            autoPauseAnchor = (position, now)
+            return
+        }
+
+        let moved = GeoMath.haversine(anchor.coordinate, position)
+        let waited = now.timeIntervalSince(anchor.date)
+
+        // 只要有明顯位移就重新起算，不可能是停著
+        if moved > 12 {
+            autoPauseAnchor = (position, now)
             lowSpeedSince = nil
+            return
+        }
+
+        // 位移很小，再看速度。速度無效（-1）時只信位移。
+        if lastValidSpeed >= 0.8 {
+            autoPauseAnchor = (position, now)
+            lowSpeedSince = nil
+            return
+        }
+
+        // 原地超過 25 秒才判定停下來
+        if waited > 25 {
+            isAutoPaused = true
+            pause()
+            autoPauseAnchor = nil
         }
     }
 
     private func ingest(_ raw: CLLocation) {
         guard state == .recording || (state == .paused && isAutoPaused) else { return }
-        guard raw.horizontalAccuracy > 0, raw.horizontalAccuracy < 45 else { return }
+
+        // 精度閘門：還沒有任何點時放寬一些好盡快起步，之後收緊，
+        // 45 公尺太鬆會讓軌跡在馬路旁邊亂飄。
+        let accuracyLimit: Double = lastAccepted == nil ? 40 : 25
+        guard raw.horizontalAccuracy > 0, raw.horizontalAccuracy <= accuracyLimit else { return }
+
+        // 太舊的座標不要（背景恢復時系統可能一次丟一批過期的點）
+        guard raw.timestamp.timeIntervalSinceNow > -30 else { return }
+
+        // 速度：-1 代表系統無法判定，這時不要當成 0
+        if raw.speed >= 0 {
+            lastValidSpeed = raw.speed
+            currentSpeed = raw.speed
+        }
 
         let smoothed = kalman.process(latitude: raw.coordinate.latitude,
                                       longitude: raw.coordinate.longitude,
@@ -236,23 +284,38 @@ final class GPSWorkoutRecorder: ObservableObject {
                                       timestamp: raw.timestamp.timeIntervalSince1970)
 
         let coord = CLLocationCoordinate2D(latitude: smoothed.latitude, longitude: smoothed.longitude)
-        currentSpeed = max(0, raw.speed)
         currentAltitude = smoothed.altitude
-        location.applyPowerProfile(speed: currentSpeed)
+        location.applyPowerProfile(speed: max(currentSpeed, lastValidSpeed))
 
         // 自動暫停狀態下偵測到移動 → 自動恢復
-        if isAutoPaused, currentSpeed > 1.1 {
-            isAutoPaused = false
-            lowSpeedSince = nil
-            resume()
+        if isAutoPaused {
+            let movedEnough: Bool
+            if let last = lastAccepted {
+                movedEnough = GeoMath.haversine(last.coordinate, coord) > 10
+            } else {
+                movedEnough = false
+            }
+            if lastValidSpeed > 1.1 || movedEnough {
+                isAutoPaused = false
+                lowSpeedSince = nil
+                autoPauseAnchor = nil
+                resume()
+            }
         }
         guard state == .recording else { return }
 
         var delta = 0.0
         if let last = lastAccepted {
             delta = GeoMath.haversine(last.coordinate, coord)
-            // 過濾靜止時的 GPS 漂移
-            guard delta > 1.2 else { return }
+            let dt = raw.timestamp.timeIntervalSince(last.timestamp)
+
+            // 合理性檢查：算出來的速度超過 40 m/s（144 km/h）一定是跳點
+            if dt > 0.3, delta / dt > 40 { return }
+
+            // 位移必須明顯大於這次的定位誤差，否則只是原地漂移
+            let driftFloor = max(2.5, raw.horizontalAccuracy * 0.55)
+            guard delta > driftFloor else { return }
+
             heading = GeoMath.bearing(from: last.coordinate, to: coord)
         }
         distance += delta
@@ -275,6 +338,96 @@ final class GPSWorkoutRecorder: ObservableObject {
         lastAccepted = sample
         currentPace = GeoMath.pace(fromSpeed: sample.speed)
         announceIfNeeded()
+    }
+
+    // MARK: 自動存檔與回復
+
+    /// 目前狀態的快照，供自動存檔用
+    var snapshot: ActiveWorkoutSnapshot {
+        ActiveWorkoutSnapshot(typeRaw: workoutType.rawValue,
+                              sportID: sport?.id,
+                              startDate: startDate,
+                              savedAt: Date(),
+                              elapsed: elapsed,
+                              distance: distance,
+                              elevationGain: elevationGain,
+                              elevationLoss: elevationLoss,
+                              routeKey: routeKey,
+                              targetPace: targetPace,
+                              autoLapDistance: autoLapDistance,
+                              pauseLog: pauseLog,
+                              points: samples.map {
+                                  ActiveWorkoutSnapshot.Point(lat: $0.latitude,
+                                                              lon: $0.longitude,
+                                                              alt: $0.altitude,
+                                                              time: $0.timestamp,
+                                                              speed: $0.speed,
+                                                              distance: $0.distanceFromStart)
+                              },
+                              laps: laps.map {
+                                  ActiveWorkoutSnapshot.Lap(number: $0.number,
+                                                            duration: $0.duration,
+                                                            distance: $0.distance,
+                                                            timestamp: $0.timestamp)
+                              })
+    }
+
+    /// 把目前進度寫到磁碟。force 用在暫停、進背景這種關鍵時刻。
+    func autosave(force: Bool = false) {
+        guard state == .recording || state == .paused else { return }
+        ActiveWorkoutStore.shared.save(snapshot, force: force)
+    }
+
+    /// 從中斷的自動存檔接續記錄
+    func restore(from snapshot: ActiveWorkoutSnapshot) {
+        reset()
+        workoutType = snapshot.type
+        sport = snapshot.sport
+        startDate = snapshot.startDate
+        routeKey = snapshot.routeKey
+        targetPace = snapshot.targetPace
+        autoLapDistance = snapshot.autoLapDistance
+        pauseLog = snapshot.pauseLog
+        accumulated = snapshot.elapsed
+        elapsed = snapshot.elapsed
+        distance = snapshot.distance
+        elevationGain = snapshot.elevationGain
+        elevationLoss = snapshot.elevationLoss
+        lastLapDistance = snapshot.autoLapDistance > 0
+            ? (snapshot.distance / snapshot.autoLapDistance).rounded(.down) * snapshot.autoLapDistance
+            : 0
+        lastLapElapsed = snapshot.elapsed
+
+        samples = snapshot.points.map {
+            TrackSample(latitude: $0.lat,
+                        longitude: $0.lon,
+                        altitude: $0.alt,
+                        timestamp: $0.time,
+                        speed: $0.speed,
+                        distanceFromStart: $0.distance)
+        }
+        laps = snapshot.laps.map {
+            LapDraft(number: $0.number,
+                     duration: $0.duration,
+                     distance: $0.distance,
+                     timestamp: $0.timestamp)
+        }
+        lastAccepted = samples.last
+        lastAltitude = samples.last?.altitude
+
+        // 接著繼續錄
+        segmentStart = Date()
+        state = .recording
+        kalman.reset()
+        location.startUpdating(background: true)
+        pedometer.start(from: Date())
+        altimeter.start()
+        subscribe()
+        startTimer()
+        LiveActivityController.shared.start(mode: workoutType, usesDistance: true)
+        announcer.reset()
+        if settings.keepScreenAwake { UIApplication.shared.isIdleTimerDisabled = true }
+        CueService.shared.speak("已接續先前的運動")
     }
 
     /// 滑動窗口速度，避免 GPS 漂移造成配速亂跳

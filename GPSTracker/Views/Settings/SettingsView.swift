@@ -720,6 +720,16 @@ struct SettingsView: View {
                     UserGuideView()
                 }
                 rowDivider
+                Button {
+                    LiveActivityController.shared.endAll()
+                    CueService.shared.impact(.medium)
+                } label: {
+                    documentRowContent(icon: "bolt.slash.circle.fill",
+                                       title: "清除卡住的靈動島",
+                                       subtitle: "運動已結束但靈動島還在時按這裡",
+                                       tint: Theme.amber)
+                }
+                rowDivider
                 documentRow(icon: "character.book.closed.fill", title: "名詞解釋",
                             subtitle: "CTL、ATL、TSB、ACWR⋯⋯白話版", tint: Theme.violet) {
                     GlossaryListView()

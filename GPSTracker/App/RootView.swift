@@ -9,6 +9,8 @@ struct RootView: View {
     @State private var didAutoImport = false
     @State private var showOnboarding = false
     @State private var showDatabaseNotice = false
+    @State private var pendingRecovery: ActiveWorkoutSnapshot?
+    @State private var resumingWorkout: ActiveWorkoutSnapshot?
 
     var body: some View {
         TabView(selection: $selection) {
@@ -36,9 +38,27 @@ struct RootView: View {
         .onAppear {
             if !settings.hasSeenOnboarding { showOnboarding = true }
             if DatabaseHealth.needsAttention { showDatabaseNotice = true }
+            // App 被砍掉時 Live Activity 不會自己結束，開啟時清掉殘留的
+            LiveActivityController.shared.endStaleActivities()
+            // 上次沒有正常結束的運動
+            if let snapshot = ActiveWorkoutStore.shared.load(), snapshot.isWorthRecovering {
+                pendingRecovery = snapshot
+            } else {
+                ActiveWorkoutStore.shared.clear()
+            }
         }
         .sheet(isPresented: $showDatabaseNotice) {
             DatabaseNoticeView()
+        }
+        .sheet(item: $pendingRecovery) { snapshot in
+            WorkoutRecoveryView(snapshot: snapshot) { resume in
+                resumingWorkout = resume
+            }
+        }
+        .fullScreenCover(item: $resumingWorkout) { snapshot in
+            GPSTrackingView(type: snapshot.type,
+                            sport: snapshot.sport,
+                            restoring: snapshot)
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             NavigationStack {

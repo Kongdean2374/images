@@ -12,9 +12,12 @@ struct GPSTrackingView: View {
     var discipline: Discipline? = nil
     /// 開啟該項目的獨立設定頁
     var onSettings: (() -> Void)? = nil
+    /// 從中斷的自動存檔接續記錄
+    var restoring: ActiveWorkoutSnapshot? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var recorder = GPSWorkoutRecorder()
     @StateObject private var location = LocationManager.shared
@@ -54,6 +57,9 @@ struct GPSTrackingView: View {
             recorder.sport = sport
             bigTextMode = settings.preferBigText
             applyStoredOptions()
+            if let restoring, recorder.state == .idle {
+                recorder.restore(from: restoring)
+            }
             if location.isAuthorized {
                 location.startUpdating(background: settings.backgroundLocation)
                 location.requestOneShot()
@@ -64,10 +70,18 @@ struct GPSTrackingView: View {
             }
         }
         .onDisappear {
+            // 以前這裡直接 stop()，畫面一消失整場運動就被丟掉。
+            // 現在改成強制存檔，下次開啟 App 會問要不要接續或儲存。
             if recorder.state == .recording || recorder.state == .paused {
-                recorder.stop()
+                recorder.autosave(force: true)
             }
             location.stopUpdating()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // 進背景／被系統終止前的最後機會，一定要把進度寫下來
+            if phase != .active {
+                recorder.autosave(force: true)
+            }
         }
         .onChange(of: recorder.samples.count) { _, _ in
             updateCamera()

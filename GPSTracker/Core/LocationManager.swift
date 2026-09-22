@@ -89,11 +89,15 @@ final class LocationManager: NSObject, ObservableObject {
             return
         }
         if background {
-            if authorizationStatus == .authorizedAlways {
-                manager.allowsBackgroundLocationUpdates = true
-                manager.showsBackgroundLocationIndicator = true
-            } else if authorizationStatus == .authorizedWhenInUse {
-                // 需要背景記錄時才升級要求「永遠允許」，避免一開始就嚇到使用者
+            // 關鍵：只要有定位權限就要打開背景更新。
+            // 只在「永遠允許」時才打開的話，使用者給「使用期間」時系統會在
+            // 切到背景幾秒後暫停 App，接著直接把它砍掉 —— 整場運動就沒了。
+            // 宣告了 location 背景模式之後，「使用期間」權限一樣能持續在背景
+            // 收座標，只是狀態列會出現藍色指示條。
+            manager.allowsBackgroundLocationUpdates = true
+            manager.showsBackgroundLocationIndicator = true
+            if authorizationStatus == .authorizedWhenInUse {
+                // 順便升級要求「永遠允許」，拿到之後連藍條都不會出現
                 manager.requestAlwaysAuthorization()
             }
         }
@@ -120,7 +124,8 @@ final class LocationManager: NSObject, ObservableObject {
         }
         if ProcessInfo.processInfo.isLowPowerModeEnabled {
             setPowerMode(.saver)
-        } else if speed > 2.2 {
+        } else if speed > 6.0 {
+            // 只有明顯高速（自行車以上）才放寬取樣間距
             setPowerMode(.balanced)
         } else {
             setPowerMode(.precise)
@@ -135,11 +140,12 @@ final class LocationManager: NSObject, ObservableObject {
             manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
             manager.distanceFilter = kCLDistanceFilterNone
         case .balanced:
-            manager.desiredAccuracy = kCLLocationAccuracyBest
-            manager.distanceFilter = 4
+            // 仍用導航等級精度，只放寬取樣間距；騎車時降精度會讓軌跡明顯飄掉
+            manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+            manager.distanceFilter = 5
         case .saver:
-            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-            manager.distanceFilter = 12
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.distanceFilter = 10
         }
     }
 
