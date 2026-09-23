@@ -98,6 +98,11 @@ final class GPSWorkoutRecorder: ObservableObject {
     /// 剛離開輔助模式，下一個座標要當成新起點而不是接續
     private var justResumedFromGap = false
 
+    /// App 目前在背景。背景時要把工作量壓到最低，否則 iOS 會因為
+    /// 「背景 CPU 用量過高」直接把整個 App 終止 —— 這正是長時間關螢幕之後
+    /// 運動會消失、重開才跳出回復畫面的原因。
+    private var isInBackground = false
+
     // MARK: 診斷計數（讓收訊問題可以被看見，不用猜）
     @Published private(set) var received = 0
     @Published private(set) var rejectedAccuracy = 0
@@ -136,6 +141,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         pedometer.start(from: startDate)
         altimeter.start()
         subscribe()
+        observeAppState()
         startTimer()
         LiveActivityController.shared.start(mode: type, usesDistance: true)
         announcer.reset()
@@ -248,11 +254,47 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     private func startTimer() {
         timer?.invalidate()
-        let t = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+        // 前景 0.2 秒更新畫面；背景沒有畫面要更新，放慢到 5 秒，
+        // 只為了維持靈動島、自動存檔與輔助模式判斷。
+        let interval: TimeInterval = isInBackground ? 5.0 : 0.2
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             DispatchQueue.main.async { self?.tick() }
         }
+        t.tolerance = interval * 0.3
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    // MARK: 前景／背景切換
+
+    private func observeAppState() {
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in self?.enterBackground() }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in self?.enterForeground() }
+            .store(in: &cancellables)
+    }
+
+    private func enterBackground() {
+        isInBackground = true
+        LiveActivityController.shared.isInBackground = true
+        ActiveWorkoutStore.shared.isInBackground = true
+        guard state == .recording || state == .paused else { return }
+        // 確保背景定位真的是開著的，這是 App 不被暫停的唯一依據
+        location.startUpdating(background: true)
+        autosave(force: true)
+        // 重建較慢的計時器
+        if timer != nil { startTimer() }
+    }
+
+    private func enterForeground() {
+        isInBackground = false
+        LiveActivityController.shared.isInBackground = false
+        ActiveWorkoutStore.shared.isInBackground = false
+        guard state == .recording || state == .paused else { return }
+        if timer != nil { startTimer() }
+        updateLiveActivity(force: true)
     }
 
     private func tick() {
@@ -655,6 +697,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         pedometer.start(from: Date())
         altimeter.start()
         subscribe()
+        observeAppState()
         startTimer()
         LiveActivityController.shared.start(mode: workoutType, usesDistance: true)
         announcer.reset()

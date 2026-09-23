@@ -72,9 +72,14 @@ final class ActiveWorkoutStore {
 
     // MARK: 寫入
 
+    /// 背景時拉長存檔間隔：組快照要走訪全部座標點，長距離運動這件事本身
+    /// 就是可觀的 CPU 開銷，而背景 CPU 用量過高會讓 iOS 直接終止 App。
+    var isInBackground = false
+
     /// 問節流器現在該不該寫。呼叫端先問過再組快照，省下無謂的走訪。
     func shouldWrite(force: Bool) -> Bool {
-        force || Date().timeIntervalSince(lastWrite) > 8
+        let interval: TimeInterval = isInBackground ? 25 : 8
+        return force || Date().timeIntervalSince(lastWrite) > interval
     }
 
     /// 節流寫入。`force` 用在暫停、進背景這種關鍵時刻，必定寫入。

@@ -8,6 +8,8 @@ final class LiveActivityController {
 
     private var activity: Activity<WorkoutActivityAttributes>?
     private var lastUpdate = Date.distantPast
+    /// 背景時大幅降低更新頻率，避免被系統以「背景用量過高」終止
+    var isInBackground = false
 
     private init() {}
 
@@ -76,7 +78,8 @@ final class LiveActivityController {
                 isPaused: Bool,
                 force: Bool = false) {
         guard let activity else { return }
-        guard force || Date().timeIntervalSince(lastUpdate) > 2 else { return }
+        let minimumInterval: TimeInterval = isInBackground ? 15 : 2
+        guard force || Date().timeIntervalSince(lastUpdate) > minimumInterval else { return }
         lastUpdate = Date()
         let state = WorkoutActivityAttributes.ContentState(elapsed: elapsed,
                                                            distance: distance,

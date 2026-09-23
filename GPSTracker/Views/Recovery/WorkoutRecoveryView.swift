@@ -31,7 +31,7 @@ struct WorkoutRecoveryView: View {
                 .padding(.bottom, 30)
             }
             .screenBackground()
-            .navigationTitle("未完成的紀錄")
+            .navigationTitle("接續上次的運動")
             .navigationBarTitleDisplayMode(.inline)
         }
         .preferredColorScheme(.dark)
@@ -50,10 +50,10 @@ struct WorkoutRecoveryView: View {
             .frame(width: 76, height: 76)
             .padding(.top, 14)
 
-            Text("上次的運動沒有正常結束")
+            Text("上次的運動還沒結束")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
-            Text("App 被系統關閉或從多工滑掉了，不過進度都有自動存檔，一筆都沒少。")
+            Text("進度都有自動存檔，一筆都沒少。按「接續」就從中斷的地方繼續跑。")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -140,7 +140,7 @@ struct WorkoutRecoveryView: View {
                 Label("為什麼會這樣", systemImage: "info.circle")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
-                Text("iOS 在記憶體吃緊時會直接關掉背景中的 App。把 App 從多工列表滑掉也會立刻中止記錄。這兩種情況系統都不會通知 App，所以無法事先存檔——改用每幾秒自動存檔就是為了應付這件事。")
+                Text("iOS 在記憶體吃緊、或判定背景用量過高時，會直接關掉背景中的 App；把 App 從多工列表滑掉也會立刻中止。這些情況系統都不會事先通知，所以只能靠每隔幾秒的自動存檔來保住進度。")
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
                 Text("運動中盡量不要把 App 從多工滑掉，鎖屏或切到其他 App 都沒問題。")
