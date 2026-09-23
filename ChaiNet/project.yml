@@ -1,0 +1,100 @@
+name: ChaiNet
+options:
+  bundleIdPrefix: app.chainet
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: zh-Hant
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    # Unsigned CI builds: signing is disabled on the xcodebuild command line.
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+packages:
+  ChaiNetKit:
+    path: Packages/ChaiNetKit
+targets:
+  ChaiNet:
+    type: application
+    platform: iOS
+    sources:
+      - path: ChaiNet
+    dependencies:
+      - package: ChaiNetKit
+        product: ChaiNetCore
+      - package: ChaiNetKit
+        product: ChaiNetEngines
+      - sdk: CoreTelephony.framework
+      - sdk: NetworkExtension.framework
+    info:
+      path: ChaiNet/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: ChaiNet
+        CFBundleDevelopmentRegion: zh-Hant
+        CFBundleLocalizations: [zh-Hant]
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIUserInterfaceStyle: Dark
+        NSLocationWhenInUseUsageDescription: "若你在設定中開啟「儲存位置」，ChaiNet 會把測試地點只存在本機，用於地圖與同區域的歷史基準比較。位置不會上傳到任何伺服器。"
+        NSLocalNetworkUsageDescription: "ChaiNet 需要存取區域網路，才能測試你自架於區域網路中的測速伺服器與路由器延遲。"
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [app.chainet.ios.refresh]
+        NSAppTransportSecurity:
+          # Users may point ChaiNet at their own self-hosted http:// test servers.
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.chainet.ios
+        PRODUCT_NAME: ChaiNet
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: ChaiNet/Resources/Info.plist
+  ChaiNetTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ChaiNetTests
+    dependencies:
+      - target: ChaiNet
+      - package: ChaiNetKit
+        product: ChaiNetCore
+      - package: ChaiNetKit
+        product: ChaiNetEngines
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.chainet.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/ChaiNet.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ChaiNet
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  ChaiNet:
+    build:
+      targets:
+        ChaiNet: all
+        ChaiNetTests: [test]
+    test:
+      config: Debug
+      targets:
+        - ChaiNetTests
+    run:
+      config: Debug
+    archive:
+      config: Release

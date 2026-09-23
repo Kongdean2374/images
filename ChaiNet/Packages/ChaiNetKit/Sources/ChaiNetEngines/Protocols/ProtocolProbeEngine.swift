@@ -1,5 +1,5 @@
 import Foundation
-import Network
+@preconcurrency import Network
 import ChaiNetCore
 
 public protocol ProtocolProbeEngineProtocol: Sendable {
@@ -105,7 +105,7 @@ public struct ProtocolProbeEngine: ProtocolProbeEngineProtocol {
         } catch { errors.append("HTTP 延遲：\(error.localizedDescription)") }
         await httpProbe.close()
 
-        func family(_ v: NWProtocolIP.Options.Version, _ name: String) async -> Availability<Double> {
+        func family(_ v: IPVersion, _ name: String) async -> Availability<Double> {
             let samples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port, ipVersion: v), count: 3, interval: 0.2, timeout: 2)
             if let median = LatencyStatistics.compute(from: samples).rtt?.median { return .available(median) }
             return .unavailable(reason: "\(name) 無法連線")

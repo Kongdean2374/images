@@ -1,6 +1,11 @@
 import Foundation
-import Network
+@preconcurrency import Network
 import ChaiNetCore
+
+/// Sendable IP version selector (Network's own enum is not Sendable).
+public enum IPVersion: Sendable, Hashable {
+    case v4, v6
+}
 
 /// Async helpers around `NWConnection`.
 public enum NWAsync {
@@ -51,7 +56,7 @@ public enum NWAsync {
         }
     }
 
-    public static func parameters(tcp: Bool, tls: Bool = false, ipVersion: NWProtocolIP.Options.Version? = nil,
+    public static func parameters(tcp: Bool, tls: Bool = false, ipVersion: IPVersion? = nil,
                                   interface: NWInterface.InterfaceType? = nil) -> NWParameters {
         let params: NWParameters
         if tcp {
@@ -63,7 +68,7 @@ public enum NWAsync {
             params = NWParameters.udp
         }
         if let ipVersion, let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ip.version = ipVersion
+            ip.version = ipVersion == .v4 ? .v4 : .v6
         }
         if let interface { params.requiredInterfaceType = interface }
         params.preferNoProxies = true
@@ -86,14 +91,14 @@ public enum NWAsync {
 public struct TCPConnectProbe: LatencyProbe {
     public let host: String
     public let port: UInt16
-    public let ipVersion: NWProtocolIP.Options.Version?
-    public let interface: NWInterface.InterfaceType?
+    public let ipVersion: IPVersion?
+    public let interface: InterfaceKind?
     public let useTLS: Bool
     public var method: EndpointProbeMethod { .tcpConnect }
     public var targetDescription: String { "\(host):\(port)\(useTLS ? " (TLS)" : "")" }
 
-    public init(host: String, port: UInt16 = 443, ipVersion: NWProtocolIP.Options.Version? = nil,
-                interface: NWInterface.InterfaceType? = nil, useTLS: Bool = false) {
+    public init(host: String, port: UInt16 = 443, ipVersion: IPVersion? = nil,
+                interface: InterfaceKind? = nil, useTLS: Bool = false) {
         self.host = host
         self.port = port
         self.ipVersion = ipVersion
@@ -107,7 +112,8 @@ public struct TCPConnectProbe: LatencyProbe {
     public func probe(sequence: Int, timeout: Double) async -> Double? {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
         let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort,
-                                      using: NWAsync.parameters(tcp: true, tls: useTLS, ipVersion: ipVersion, interface: interface))
+                                      using: NWAsync.parameters(tcp: true, tls: useTLS, ipVersion: ipVersion,
+                                                                interface: interface.flatMap(NWAsync.interfaceType)))
         if case .success(let ms) = await NWAsync.timeToReady(connection, timeout: timeout) { return ms }
         return nil
     }

@@ -1,5 +1,5 @@
 import Foundation
-import Network
+@preconcurrency import Network
 import ChaiNetCore
 
 /// UDP echo against the ChaiNet backend's echo port. The only probe that sees real packet loss
@@ -18,14 +18,14 @@ public final class UDPEchoProbe: LatencyProbe, @unchecked Sendable {
     private let pending = PendingProbes()
     private let connection = LockedValue<NWConnection?>(nil)
 
-    public init(host: String, port: UInt16, payloadSize: Int = 64, ipVersion: NWProtocolIP.Options.Version? = nil) {
+    public init(host: String, port: UInt16, payloadSize: Int = 64, ipVersion: IPVersion? = nil) {
         self.host = host
         self.port = port
         self.payloadSize = max(8, payloadSize)
         self.ipVersion = ipVersion
     }
 
-    private let ipVersion: NWProtocolIP.Options.Version?
+    private let ipVersion: IPVersion?
 
     public func prepare() async throws {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else { throw EngineError.unsupported("port") }

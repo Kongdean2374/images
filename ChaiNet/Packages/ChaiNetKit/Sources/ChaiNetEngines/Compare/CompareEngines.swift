@@ -1,5 +1,5 @@
 import Foundation
-import Network
+@preconcurrency import Network
 import ChaiNetCore
 
 /// An independent endpoint used for cross-validation.
@@ -102,8 +102,8 @@ public struct InterfaceCompareEngine: InterfaceCompareEngineProtocol {
     public func run(host: String, interfaces: [InterfaceKind] = [.wifi, .cellular], probes: Int = 15) async -> [InterfaceProbeResult] {
         var out: [InterfaceProbeResult] = []
         for kind in interfaces {
-            guard let type = NWAsync.interfaceType(kind) else { continue }
-            let samples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, interface: type), count: probes, interval: 0.2, timeout: 2)
+            guard NWAsync.interfaceType(kind) != nil else { continue }
+            let samples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, interface: kind), count: probes, interval: 0.2, timeout: 2)
             let stats = LatencyStatistics.compute(from: samples)
             out.append(InterfaceProbeResult(interface: kind, tcpConnect: stats.rtt == nil ? nil : stats,
                                             error: stats.rtt == nil ? "\(kind.displayName) 無法使用或未連線" : nil))

@@ -1,5 +1,5 @@
 import Foundation
-import Network
+@preconcurrency import Network
 import ChaiNetCore
 
 /// Creates latency probes for a server. Abstracted so tests can inject deterministic probes.
@@ -13,7 +13,7 @@ public protocol LatencyProbeFactory: Sendable {
 public struct DefaultLatencyProbeFactory: LatencyProbeFactory {
     public init() {}
 
-    static func version(_ p: IPFamilyPreference) -> NWProtocolIP.Options.Version? {
+    static func version(_ p: IPFamilyPreference) -> IPVersion? {
         switch p {
         case .automatic: nil
         case .ipv4Only: .v4
