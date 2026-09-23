@@ -101,7 +101,7 @@ public struct EvidenceExtractor: Sendable {
         // Attempted = a test for the dimension ran, whatever its outcome.
         var attempted = measured
         let results = session.tests.map(\.result)
-        if results.contains(where: { $0.crossValidation != nil }) || Set(results.compactMap { $0.server?.id }).count >= 2 {
+        if results.contains(where: { $0.crossValidation != nil || $0.serverRuns != nil }) || Set(results.compactMap { $0.server?.id }).count >= 2 {
             attempted.insert(.crossServer)
         }
         if results.contains(where: { $0.ipFamilyComparison != nil || $0.ipFamilyPreference != .automatic }) { attempted.insert(.ipFamily) }

@@ -131,6 +131,8 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
     public var serverHealth: ServerHealth?
     /// IP family the test was forced to (session tests E/F).
     public var ipFamilyPreference: IPFamilyPreference
+    /// The same server-dependent measurements repeated on additional servers (multi-server test).
+    public var serverRuns: [ServerRun]?
 
     public var scores: QualityScores
     public var findings: [DiagnosticFinding]
@@ -289,5 +291,28 @@ public struct ServerHealth: Codable, Sendable, Hashable {
         self.responseMs = responseMs
         self.activeSessions = activeSessions
         self.detail = detail
+    }
+}
+
+/// Measurements of one additional server in a multi-server test.
+public struct ServerRun: Codable, Sendable, Hashable, Identifiable {
+    public var server: ServerDescriptor
+    public var idleLatency: LatencyStatistics?
+    public var packetLoss: LatencyStatistics?
+    public var packetLossMethod: String?
+    public var download: SpeedResult?
+    public var upload: SpeedResult?
+    public var error: String?
+    public var id: String { server.id }
+
+    public init(server: ServerDescriptor, idleLatency: LatencyStatistics? = nil, packetLoss: LatencyStatistics? = nil,
+                packetLossMethod: String? = nil, download: SpeedResult? = nil, upload: SpeedResult? = nil, error: String? = nil) {
+        self.server = server
+        self.idleLatency = idleLatency
+        self.packetLoss = packetLoss
+        self.packetLossMethod = packetLossMethod
+        self.download = download
+        self.upload = upload
+        self.error = error
     }
 }

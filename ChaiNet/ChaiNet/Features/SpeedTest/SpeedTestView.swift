@@ -38,6 +38,7 @@ struct SpeedTestView: View {
         }
         .screenBackground()
         .navigationTitle("測速")
+        .featureSettings("speedTest", title: "測速")
         .toolbar {
             if let r = vm.result, !vm.isRunning {
                 ShareLink(item: ResultExporter.shareSummary(r)) { Image(systemName: "square.and.arrow.up") }
@@ -55,6 +56,7 @@ struct SpeedTestView: View {
         case .fullDiagnostics:
             items = TestProfile.fullDiagnostics.items
         }
+        vm.featureID = "speedTest"
         vm.start(kind: .fullSpeedTest, items: items, onCellular: app.onCellular)
     }
 }
@@ -66,7 +68,7 @@ private struct StartPanel: View {
     @State private var pulse = false
 
     var body: some View {
-        let s = settings.settings
+        let s = settings.settings.effective(for: "speedTest")
         VStack(spacing: 22) {
             Button(action: onStart) {
                 ZStack {
@@ -83,7 +85,7 @@ private struct StartPanel: View {
 
             VStack(spacing: 8) {
                 KeyValueRow(key: "流程", value: "Ping → 下載 → 上傳")
-                KeyValueRow(key: "伺服器", value: settings.fixedServer?.name ?? "自動選擇（最低延遲）")
+                KeyValueRow(key: "伺服器", value: s.serverSelection.displayName)
                 KeyValueRow(key: "時間 / 連線數", value: "\(s.testDuration.displayName) · \(s.parallelConnections.displayName)")
                 if app.onCellular {
                     KeyValueRow(key: "行動數據", value: s.trafficUsage == .saveOnCellular ? "節省模式（約 ≤ 150 MB）" : "可能使用數百 MB",

@@ -75,10 +75,56 @@ final class SettingsTests: XCTestCase {
         var s = AppSettings()
         s.testDuration = .s10
         s.trafficUsage = .saveOnCellular
-        XCTAssertEqual(s.effectiveMaxDuration(onCellular: true), 5)
-        XCTAssertEqual(s.effectiveMaxDuration(onCellular: false), 10)
+        XCTAssertEqual(s.effectiveMaxDuration(onCellular: true), 10, "an explicit duration is honoured exactly")
+        s.testDuration = .auto
+        XCTAssertEqual(s.effectiveMaxDuration(onCellular: true), 7.5, "auto is halved on cellular in saver mode")
+        XCTAssertEqual(s.effectiveMaxDuration(onCellular: false), 15)
         XCTAssertNotNil(s.transferByteCap(onCellular: true))
         XCTAssertNil(s.transferByteCap(onCellular: false))
+    }
+
+    func testPhaseTimingAppliesDurationToEveryItem() {
+        let t = PhaseTiming.make(.s10)
+        XCTAssertEqual(t.idleProbeCount, 100)          // 10 s / 0.1 s
+        XCTAssertEqual(t.lossProbeCount, 200)          // 10 s / 0.05 s
+        XCTAssertEqual(t.crossValidationProbes, 100)
+        XCTAssertEqual(t.ipFamilyProbes, 50)           // 10 s / 0.2 s
+        XCTAssertEqual(t.interfaceProbes, 50)
+        XCTAssertEqual(t.monitoringSeconds, 10)
+        XCTAssertEqual(t.throughputSeconds, 10)
+        XCTAssertEqual(PhaseTiming.make(.s30, lossInterval: 0.02).lossProbeCount, 1500)
+        let auto = PhaseTiming.make(.auto)
+        XCTAssertEqual(auto.idleProbeCount, 20)
+        XCTAssertNil(auto.throughputSeconds)
+    }
+
+    func testFeatureOverrides() {
+        var s = AppSettings()
+        s.testDuration = .auto
+        var o = RunOverrides()
+        o.testDuration = .s30
+        o.parallelConnections = .eight
+        s.overrides["gaming"] = o
+        XCTAssertEqual(s.effective(for: "gaming").testDuration, .s30)
+        XCTAssertEqual(s.effective(for: "gaming").parallelConnections, .eight)
+        XCTAssertEqual(s.effective(for: "dns").testDuration, .auto, "other features use the global setting")
+        XCTAssertEqual(s.effective(for: nil), s)
+    }
+
+    func testServerPlans() {
+        let servers = ["a", "b", "c", "d"].map { ServerDescriptor(id: $0, name: $0, location: "x", kind: .chainet, baseURL: URL(string: "https://\($0).x")!) }
+        var s = AppSettings()
+        XCTAssertNil(s.serverPlan(available: servers).primary)
+        s.serverSelection = .multiple
+        s.selectedServerIDs = ["c", "a", "zz"]
+        let plan = s.serverPlan(available: servers)
+        XCTAssertEqual(plan.primary?.id, "c")
+        XCTAssertEqual(plan.extras.map(\.id), ["a"])
+        s.serverSelection = .autoMultiple
+        s.autoServerCount = 3
+        XCTAssertEqual(s.serverPlan(available: servers).autoExtraCount, 2)
+        s.autoServerCount = 10
+        XCTAssertEqual(s.serverPlan(available: servers).autoExtraCount, 3)
     }
 
     func testAutoDuration() {

@@ -46,18 +46,20 @@ struct SettingsView: View {
             } header: {
                 Text("測試")
             } footer: {
-                Text("自動時間：速度穩定後提前結束（6–15 秒）。自動連線數：依頻寬在 2 / 4 / 8 / 16 之間調整。IP 協定限制套用於延遲與遺失測試。")
+                Text("測試時間套用到每一個項目（Ping、遺失、下載、上傳、交叉驗證、IPv4/IPv6、介面比較、監測）；「自動」使用建議時長並在速度穩定後結束下載 / 上傳。自動連線數依頻寬在 2 / 4 / 8 / 16 之間調整。各功能 ⚙︎ 可覆寫。")
             }
-            Section("伺服器") {
+            Section {
                 Picker("選擇方式", selection: $store.settings.serverSelection) {
                     ForEach(ServerSelectionMode.allCases) { Text($0.displayName).tag($0) }
                 }
-                if store.settings.serverSelection == .manual {
-                    Picker("伺服器", selection: $store.settings.manualServerID) {
-                        ForEach(store.allServers) { Text($0.name).tag(String?.some($0.id)) }
-                    }
-                }
+                ServerModeDetail(settings: store.settings, allServers: store.allServers, manualID: $store.settings.manualServerID,
+                                 selectedIDs: $store.settings.selectedServerIDs, autoCount: $store.settings.autoServerCount)
+                Toggle("每項測試加入多端點驗證", isOn: $store.settings.multiPointValidation)
                 NavigationLink("管理伺服器") { ServersView() }
+            } header: {
+                Text("伺服器 / 多點測試")
+            } footer: {
+                Text("多台伺服器時，Ping / 封包遺失 / 下載 / 上傳會在每台分別量測並列入根因分析的交叉比較。各功能右上角 ⚙︎ 可單獨覆寫這些設定。")
             }
             Section("預設模式") {
                 Picker("測速頁預設", selection: $store.settings.defaultTestMode) {

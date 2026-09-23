@@ -245,6 +245,10 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
             if let c = r.ipFamilyComparison {
                 out.append("[\(t.label)] ipv4 vs ipv6 (\(c.method.rawValue) → \(c.target)): v4 median=\(v(c.ipv4?.rtt?.median)) loss=\(v(c.ipv4?.loss.lossPercent, 1, "%")) err=\(c.ipv4Error ?? "-") · v6 median=\(v(c.ipv6?.rtt?.median)) loss=\(v(c.ipv6?.loss.lossPercent, 1, "%")) err=\(c.ipv6Error ?? "-")")
             }
+            for run in r.serverRuns ?? [] {
+                let lat = run.packetLoss ?? run.idleLatency
+                out.append("[\(t.label)] multi-server \(run.server.name) [\(run.server.location)]: median=\(v(lat?.rtt?.median)) ms loss=\(v(lat?.loss.lossPercent, 2, "%")) jitter=\(v(lat?.rtt?.jitter)) ms download=\(v(run.download?.summary.averageMbps, 2, "Mbps")) upload=\(v(run.upload?.summary.averageMbps, 2, "Mbps"))\(run.error.map { " error=\($0)" } ?? "")")
+            }
             for check in r.crossValidation ?? [] {
                 out.append("[\(t.label)] cross-check \(check.name) [\(check.region)] \(check.method.rawValue): median=\(v(check.statistics?.rtt?.median)) ms loss=\(v(check.statistics?.loss.lossPercent, 1, "%")) err=\(check.error ?? "-")")
             }

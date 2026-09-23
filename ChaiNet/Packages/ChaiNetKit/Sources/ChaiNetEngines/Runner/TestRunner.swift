@@ -2,7 +2,7 @@ import Foundation
 import ChaiNetCore
 
 public enum TestPhase: String, Sendable, Hashable, CaseIterable {
-    case preparing, selectingServer, idleLatency, packetLoss, download, upload, monitoring
+    case preparing, selectingServer, idleLatency, packetLoss, download, upload, multiServer, monitoring
     case dns, protocols, ipFamilies, crossValidation, interfaceCompare, mtu, traceroute, analyzing, done
 
     public var displayName: String {
@@ -13,6 +13,7 @@ public enum TestPhase: String, Sendable, Hashable, CaseIterable {
         case .packetLoss: "封包遺失 / 抖動"
         case .download: "下載"
         case .upload: "上傳"
+        case .multiServer: "多伺服器比較"
         case .monitoring: "穩定度監測"
         case .dns: "DNS"
         case .protocols: "HTTP / TLS / QUIC"
@@ -41,6 +42,13 @@ public struct TestRunConfiguration: Sendable {
     public var lossProbeCount: Int = 100
     public var lossPayloadBytes: Int = 64
     public var monitoringSeconds: Double = 60
+    public var crossValidationProbes: Int = 30
+    public var ipFamilyProbes: Int = 15
+    public var interfaceProbes: Int = 15
+    /// Extra servers measured with the same server-dependent items (multi-server test).
+    public var additionalServers: [ServerDescriptor] = []
+    /// Add this many extra servers automatically from the latency ranking.
+    public var autoAdditionalServerCount: Int = 0
     public var crossValidationEndpoints: [ValidationEndpoint] = ValidationEndpoint.defaults
     public var dnsResolvers: [DNSResolverDescriptor] = DNSResolverDescriptor.defaults
     public var tracerouteHost: String?
@@ -53,6 +61,18 @@ public struct TestRunConfiguration: Sendable {
         self.fixedServer = fixedServer
         self.settings = settings
         self.onCellular = onCellular
+    }
+
+    /// Applies the test-duration setting to every time-based phase (see `PhaseTiming`).
+    public mutating func applyTiming() {
+        let autoLoss = lossProbeCount
+        let t = PhaseTiming.make(settings.testDuration, lossInterval: lossProbeInterval, autoLossProbes: autoLoss)
+        idleProbeCount = t.idleProbeCount
+        lossProbeCount = t.lossProbeCount
+        crossValidationProbes = t.crossValidationProbes
+        ipFamilyProbes = t.ipFamilyProbes
+        interfaceProbes = t.interfaceProbes
+        monitoringSeconds = t.monitoringSeconds
     }
 
     /// Quality-test presets.
@@ -175,15 +195,25 @@ public struct TestRunner: TestRunnerProtocol {
         // Server
         emit(.phase(.selectingServer))
         var server: ServerDescriptor
-        if let fixed = c.fixedServer {
+        var extraServers = c.additionalServers
+        if let fixed = c.fixedServer, c.autoAdditionalServerCount == 0 {
             server = fixed
         } else {
             let ranking = await servers.rank(c.candidateServers)
-            guard let best = ranking.first(where: { $0.medianMs != nil })?.server ?? c.candidateServers.first else {
+            let reachable = ranking.filter { $0.medianMs != nil }.map(\.server)
+            guard let best = c.fixedServer ?? reachable.first ?? c.candidateServers.first else {
                 throw EngineError.server("沒有可用的測速伺服器")
             }
             server = best
+            if c.autoAdditionalServerCount > 0 {
+                extraServers += reachable.filter { s in s.id != best.id && !extraServers.contains { $0.id == s.id } }
+                    .prefix(c.autoAdditionalServerCount)
+                if extraServers.isEmpty {
+                    result.notes.append("自動多伺服器：目前只有 1 台可用伺服器；加入自架伺服器即可比較多台。")
+                }
+            }
         }
+        extraServers.removeAll { $0.id == server.id }
         if let info = await servers.info(for: server) {
             result.serverInfo = info
             if server.udpEchoPort == nil { server.udpEchoPort = info.udpEchoPort }
@@ -216,7 +246,7 @@ public struct TestRunner: TestRunnerProtocol {
                 let probe = pair.probe, method = pair.method
                 do {
                     try await probe.prepare()
-                    let count = items.contains(.latencySpikes) ? max(c.lossProbeCount, 200) : c.lossProbeCount
+                    let count = items.contains(.latencySpikes) && c.settings.testDuration == .auto ? max(c.lossProbeCount, 200) : c.lossProbeCount
                     let samples = await LatencySampler.collect(probe: probe, count: count, interval: c.lossProbeInterval, timeout: 1) {
                         emit(.latencySample(.packetLoss, $0))
                     }
@@ -266,6 +296,18 @@ public struct TestRunner: TestRunnerProtocol {
             result.bufferbloat = BufferbloatCalculator.evaluate(idle: idle, downloadLoaded: result.downloadLoadedLatency, uploadLoaded: result.uploadLoadedLatency)
         }
 
+        // Multi-server: repeat the server-dependent items on every extra server.
+        if !extraServers.isEmpty && !items.isDisjoint(with: [.ping, .jitter, .packetLoss, .burstLoss, .download, .upload]) {
+            emit(.phase(.multiServer))
+            var runs: [ServerRun] = []
+            for extra in extraServers {
+                try Task.checkCancellation()
+                runs.append(try await measure(extra, c, needsLatency: needsLatency, needsLoss: needsLoss, maxDuration: maxDuration, auto: auto, emit: emit))
+                result.serverRuns = runs
+                emit(.partial(result))
+            }
+        }
+
         // Monitoring (drop detection)
         if items.contains(.continuousPing) || items.contains(.dropMonitor) {
             emit(.phase(.monitoring))
@@ -299,7 +341,7 @@ public struct TestRunner: TestRunnerProtocol {
         }
         if items.contains(.ipFamilies) {
             emit(.phase(.ipFamilies))
-            result.ipFamilyComparison = await ipFamilies.run(host: server.host, port: UInt16(server.baseURL.port ?? 443), probes: 15)
+            result.ipFamilyComparison = await ipFamilies.run(host: server.host, port: UInt16(server.baseURL.port ?? 443), probes: c.ipFamilyProbes)
             emit(.partial(result))
         }
         try Task.checkCancellation()
@@ -312,7 +354,7 @@ public struct TestRunner: TestRunnerProtocol {
             if primaryAbnormal && !items.contains(.crossValidation) {
                 result.notes.append("主要伺服器出現異常，已自動對 \(c.crossValidationEndpoints.count) 個獨立端點進行交叉驗證。")
             }
-            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: 30)
+            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: c.crossValidationProbes)
             if let primaryStats {
                 checks.insert(EndpointCheck(id: server.id, name: server.name, host: server.host, region: server.location,
                                             method: result.packetLoss != nil ? (server.udpEchoPort != nil ? .udpEcho : .icmpEcho) : .httpPing,
@@ -323,7 +365,7 @@ public struct TestRunner: TestRunnerProtocol {
         }
         if items.contains(.interfaceCompare) {
             emit(.phase(.interfaceCompare))
-            result.interfaceCompare = await interfaces.run(host: server.host, interfaces: [.wifi, .cellular], probes: 15)
+            result.interfaceCompare = await interfaces.run(host: server.host, interfaces: [.wifi, .cellular], probes: c.interfaceProbes)
             emit(.partial(result))
         }
         let icmpTarget = c.tracerouteHost ?? server.icmpHost ?? server.host
@@ -351,6 +393,48 @@ public struct TestRunner: TestRunnerProtocol {
         }
         emit(.phase(.done))
         return result
+    }
+
+    /// Server-dependent measurements on one additional server.
+    func measure(_ server: ServerDescriptor, _ c: TestRunConfiguration, needsLatency: Bool, needsLoss: Bool, maxDuration: Double,
+                 auto: AutoDurationPolicy?, emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> ServerRun {
+        var run = ServerRun(server: server)
+        var target = server
+        if target.udpEchoPort == nil, let info = await servers.info(for: server) { target.udpEchoPort = info.udpEchoPort }
+        if needsLatency {
+            let probe = probes.latencyProbe(for: target, ipPreference: c.settings.ipPreference)
+            do {
+                try await probe.prepare()
+                run.idleLatency = LatencyStatistics.compute(from: await LatencySampler.collect(probe: probe, count: c.idleProbeCount, interval: 0.1, timeout: 2))
+            } catch is CancellationError { await probe.close(); throw CancellationError() }
+            catch { run.error = "延遲：\(error.localizedDescription)" }
+            await probe.close()
+        }
+        if needsLoss, let pair = probes.lossProbe(for: target, payloadSize: c.lossPayloadBytes, ipPreference: c.settings.ipPreference) {
+            do {
+                try await pair.probe.prepare()
+                run.packetLoss = LatencyStatistics.compute(from: await LatencySampler.collect(probe: pair.probe, count: c.lossProbeCount,
+                                                                                               interval: c.lossProbeInterval, timeout: 1))
+                run.packetLossMethod = pair.method
+            } catch is CancellationError { await pair.probe.close(); throw CancellationError() }
+            catch { run.error = "遺失：\(error.localizedDescription)" }
+            await pair.probe.close()
+        }
+        try Task.checkCancellation()
+        for direction in [TransferDirection.download, .upload] where c.items.contains(direction == .download ? .download : .upload) {
+            let config = SpeedTestConfiguration(server: target, direction: direction, maxDuration: maxDuration, autoDuration: auto,
+                                                fixedStreams: c.settings.parallelConnections.fixedCount,
+                                                byteCap: c.settings.transferByteCap(onCellular: c.onCellular))
+            do {
+                var speedResult: SpeedResult?
+                for try await event in speed.run(config) {
+                    if case .completed(let r) = event { speedResult = r }
+                }
+                if direction == .download { run.download = speedResult } else { run.upload = speedResult }
+            } catch is CancellationError { throw CancellationError() }
+            catch { run.error = "\(direction == .download ? "下載" : "上傳")：\(error.localizedDescription)" }
+        }
+        return run
     }
 
     /// Runs one throughput direction while measuring latency on a separate connection.

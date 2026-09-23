@@ -17,6 +17,7 @@ final class DiagnosticSessionViewModel {
         self.session = session
         self.app = app
         self.run = app.makeRunViewModel()
+        self.run.featureID = "diagnostics"
         reanalyze()
     }
 

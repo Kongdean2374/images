@@ -156,6 +156,14 @@ public struct CrossTestAnalyzer: Sendable {
                     if r.serverHealth?.healthy == false { e.unhealthy = true }
                 }
             }
+            // Additional servers of a multi-server test.
+            for run in r.serverRuns ?? [] {
+                entry(run.server.id, run.server.name, run.server.location, "multi-server") { e in
+                    if let lat = run.packetLoss ?? run.idleLatency { e.stats.append(lat) }
+                    if let dl = run.download?.summary.averageMbps { e.downloads.append(dl) }
+                    if let err = run.error { e.errors.append(err) }
+                }
+            }
             for check in r.crossValidation ?? [] where !(check.isPrimary && r.server?.id == check.id) {
                 entry(check.id, check.name, check.region, check.method.rawValue) { e in
                     if let s = check.statistics { e.stats.append(s) }

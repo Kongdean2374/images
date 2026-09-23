@@ -8,6 +8,7 @@ struct ToolRunView: View {
     let items: Set<TestItem>
     let symbol: String
     let explanation: String?
+    let featureID: String
 
     @Environment(AppContainer.self) private var app
     @State private var vm: RunViewModel?
@@ -18,6 +19,7 @@ struct ToolRunView: View {
         items = tool.items
         symbol = tool.symbol
         explanation = tool.subtitle
+        featureID = tool.rawValue
     }
 
     init(title: String, kind: TestKind = .fullSpeedTest, items: Set<TestItem>, symbol: String = "slider.horizontal.3") {
@@ -26,6 +28,7 @@ struct ToolRunView: View {
         self.items = items
         self.symbol = symbol
         self.explanation = nil
+        self.featureID = "custom"
     }
 
     var body: some View {
@@ -40,6 +43,7 @@ struct ToolRunView: View {
         .screenBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .featureSettings(featureID, title: title)
         .onAppear { if vm == nil { vm = app.makeRunViewModel() } }
         .onDisappear { vm?.stop() }
     }
@@ -74,6 +78,7 @@ struct ToolRunView: View {
     }
 
     private func start(_ vm: RunViewModel) {
+        vm.featureID = featureID
         vm.start(kind: kind, items: items, onCellular: app.onCellular)
     }
 }

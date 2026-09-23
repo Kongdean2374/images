@@ -27,6 +27,7 @@ struct DiagnosticSessionView: View {
         .screenBackground()
         .navigationTitle(vm?.session.title ?? initialSession.title)
         .navigationBarTitleDisplayMode(.inline)
+        .featureSettings("diagnostics", title: "診斷")
         .toolbar {
             if vm?.analysis != nil {
                 Button { showReport = true } label: { Label("技術報告", systemImage: "doc.text") }

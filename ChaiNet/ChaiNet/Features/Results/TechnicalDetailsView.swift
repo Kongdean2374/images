@@ -49,6 +49,11 @@ struct TechnicalDetailsView: View {
             if let ip = result.ipFamilyComparison {
                 TechnicalSection("IPv4 / IPv6", symbol: "point.3.connected.trianglepath.dotted", expanded: expanded) { IPFamilyDetail(c: ip) }
             }
+            if let runs = result.serverRuns, !runs.isEmpty {
+                TechnicalSection("多伺服器比較（\(runs.count + 1) 台）", symbol: "server.rack", expanded: true) {
+                    MultiServerDetail(result: result, runs: runs, settings: s)
+                }
+            }
             if let checks = result.crossValidation {
                 TechnicalSection("交叉驗證端點", symbol: "server.rack", expanded: expanded) { CrossValidationDetail(checks: checks) }
             }
@@ -259,6 +264,39 @@ struct IPFamilyDetail: View {
         KeyValueRow(key: "目標", value: c.target)
         KeyValueRow(key: "IPv4", value: c.ipv4Error ?? "中位數 \(Format.ms(c.ipv4?.rtt?.median, digits: 1)) · 遺失 \(Format.percent(c.ipv4?.loss.lossPercent))")
         KeyValueRow(key: "IPv6", value: c.ipv6Error ?? "中位數 \(Format.ms(c.ipv6?.rtt?.median, digits: 1)) · 遺失 \(Format.percent(c.ipv6?.loss.lossPercent))")
+    }
+}
+
+struct MultiServerDetail: View {
+    let result: TestResult
+    let runs: [ServerRun]
+    let settings: AppSettings
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+            GridRow {
+                Text("伺服器").foregroundStyle(Theme.textSecondary)
+                Text("Ping").foregroundStyle(Theme.textSecondary)
+                Text("遺失").foregroundStyle(Theme.textSecondary)
+                Text("下載").foregroundStyle(Theme.textSecondary)
+                Text("上傳").foregroundStyle(Theme.textSecondary)
+            }
+            row(result.server?.name ?? "主要", (result.packetLoss ?? result.idleLatency), result.download, result.upload, nil, primary: true)
+            ForEach(runs) { r in row(r.server.name, r.packetLoss ?? r.idleLatency, r.download, r.upload, r.error, primary: false) }
+        }
+        .font(.caption.monospacedDigit())
+        Text("每台伺服器使用相同的項目與時間設定；差異大時代表問題可能在特定伺服器或路由，而非本地網路。")
+            .font(.caption2).foregroundStyle(Theme.textSecondary)
+    }
+
+    private func row(_ name: String, _ lat: LatencyStatistics?, _ dl: SpeedResult?, _ ul: SpeedResult?, _ error: String?, primary: Bool) -> some View {
+        GridRow {
+            Text(name + (primary ? " ★" : "")).lineLimit(1)
+            Text(Format.ms(lat?.rtt?.median))
+            Text(lat.map { Format.percent($0.loss.lossPercent) } ?? Format.dash)
+            Text(dl.map { Format.speed($0.summary.averageMbps, settings: settings) } ?? Format.dash)
+            Text(ul.map { Format.speed($0.summary.averageMbps, settings: settings) } ?? (error ?? Format.dash))
+        }
     }
 }
 

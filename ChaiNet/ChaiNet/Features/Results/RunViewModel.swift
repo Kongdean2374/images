@@ -90,16 +90,30 @@ final class RunViewModel {
 
     // MARK: Control
 
-    /// Builds a configuration from the current settings.
+    /// Feature whose ⚙︎ overrides apply to this run (nil = global settings only).
+    var featureID: String?
+
+    /// Builds a configuration from the global settings plus this feature's overrides:
+    /// test duration for every phase, parallel connections, IP family, servers (single /
+    /// multiple / auto-multiple) and multi-point validation.
     func makeConfiguration(kind: TestKind, items: Set<TestItem>, onCellular: Bool) -> TestRunConfiguration {
-        let s = settings.settings
+        let s = settings.settings.effective(for: featureID)
+        let plan = s.serverPlan(available: settings.allServers)
+        var config: TestRunConfiguration
         switch kind {
         case .gaming, .voice, .streaming, .obsUpload:
-            return .quality(kind, servers: settings.allServers, fixedServer: settings.fixedServer, settings: s, onCellular: onCellular)
+            config = .quality(kind, servers: settings.allServers, fixedServer: plan.primary, settings: s, onCellular: onCellular)
         default:
-            return TestRunConfiguration(kind: kind, items: items, candidateServers: settings.allServers, fixedServer: settings.fixedServer,
-                                        settings: s, onCellular: onCellular)
+            config = TestRunConfiguration(kind: kind, items: items, candidateServers: settings.allServers, fixedServer: plan.primary,
+                                          settings: s, onCellular: onCellular)
         }
+        config.additionalServers = plan.extras
+        config.autoAdditionalServerCount = plan.autoExtraCount
+        if s.multiPointValidation, !config.items.isDisjoint(with: [.ping, .jitter, .packetLoss, .burstLoss, .download, .upload]) {
+            config.items.insert(.crossValidation)
+        }
+        config.applyTiming()
+        return config
     }
 
     func start(kind: TestKind, items: Set<TestItem>, onCellular: Bool, adjust: ((inout TestRunConfiguration) -> Void)? = nil,

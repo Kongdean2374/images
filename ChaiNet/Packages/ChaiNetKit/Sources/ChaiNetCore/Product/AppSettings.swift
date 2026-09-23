@@ -85,9 +85,74 @@ public enum TrafficUsageSetting: String, Codable, Sendable, Hashable, CaseIterab
 }
 
 public enum ServerSelectionMode: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
-    case automatic, manual
+    /// Lowest-latency server only.
+    case automatic
+    /// One chosen server.
+    case manual
+    /// Every checked server (first = primary).
+    case multiple
+    /// The N lowest-latency servers.
+    case autoMultiple
     public var id: String { rawValue }
-    public var displayName: String { self == .automatic ? "自動（最低延遲）" : "手動指定" }
+    public var displayName: String {
+        switch self {
+        case .automatic: "自動（最低延遲 1 台）"
+        case .manual: "手動指定 1 台"
+        case .multiple: "手動勾選多台"
+        case .autoMultiple: "自動選取多台"
+        }
+    }
+}
+
+/// How long each phase runs for a test-duration setting.
+///
+/// Fixed durations apply to **every** time-based item so results are comparable and more
+/// samples give steadier statistics:
+///
+///     probes = seconds / probe interval
+///     idle latency 0.1 s · loss probe (interval of the test) · cross-validation 0.1 s ·
+///     IPv4/IPv6 and interface comparison 0.2 s · monitoring = seconds (min 5 s) ·
+///     download / upload = seconds
+///
+/// Auto keeps the recommended defaults (2 s idle, 5 s loss, 3 s cross-validation, 3 s family /
+/// interface comparison, 60 s monitoring) and ends throughput tests once they are steady.
+public struct PhaseTiming: Codable, Sendable, Hashable {
+    public var idleProbeCount: Int
+    public var lossProbeCount: Int
+    public var crossValidationProbes: Int
+    public var ipFamilyProbes: Int
+    public var interfaceProbes: Int
+    public var monitoringSeconds: Double
+    /// nil = automatic (steady-state detection).
+    public var throughputSeconds: Double?
+
+    public static func make(_ duration: TestDurationSetting, lossInterval: Double = 0.05, autoLossProbes: Int = 100) -> PhaseTiming {
+        guard let seconds = duration.seconds else {
+            return PhaseTiming(idleProbeCount: 20, lossProbeCount: autoLossProbes, crossValidationProbes: 30, ipFamilyProbes: 15,
+                               interfaceProbes: 15, monitoringSeconds: 60, throughputSeconds: nil)
+        }
+        func count(_ interval: Double) -> Int { max(1, Int((seconds / interval).rounded())) }
+        return PhaseTiming(idleProbeCount: count(0.1), lossProbeCount: count(lossInterval), crossValidationProbes: count(0.1),
+                           ipFamilyProbes: count(0.2), interfaceProbes: count(0.2), monitoringSeconds: max(5, seconds),
+                           throughputSeconds: seconds)
+    }
+}
+
+/// Per-feature overrides (⚙︎ on each feature). `nil` = use the global setting.
+public struct RunOverrides: Codable, Sendable, Hashable {
+    public var testDuration: TestDurationSetting?
+    public var parallelConnections: ParallelConnectionsSetting?
+    public var ipPreference: IPFamilyPreference?
+    public var serverSelection: ServerSelectionMode?
+    public var manualServerID: String?
+    public var selectedServerIDs: [String]?
+    public var autoServerCount: Int?
+    public var multiPointValidation: Bool?
+    public var trafficUsage: TrafficUsageSetting?
+
+    public init() {}
+
+    public var isEmpty: Bool { self == RunOverrides() }
 }
 
 public enum DefaultTestMode: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
@@ -181,11 +246,52 @@ public struct AppSettings: Codable, Sendable, Hashable {
     public var detailLevel: DiagnosticDetailLevel = .standard
     public var exportFormat: ExportFormatSetting = .json
     public var savedProfiles: [TestProfile] = []
+    /// Servers checked for `.multiple`.
+    public var selectedServerIDs: [String] = []
+    /// N for `.autoMultiple`.
+    public var autoServerCount: Int = 3
+    /// Always add multi-point validation (independent endpoints) to latency / loss tests.
+    public var multiPointValidation: Bool = false
+    /// Feature ID → overrides.
+    public var overrides: [String: RunOverrides] = [:]
 
     public init() {}
 
+    /// Global settings with a feature's overrides applied.
+    public func effective(for featureID: String?) -> AppSettings {
+        guard let featureID, let o = overrides[featureID] else { return self }
+        var s = self
+        if let v = o.testDuration { s.testDuration = v }
+        if let v = o.parallelConnections { s.parallelConnections = v }
+        if let v = o.ipPreference { s.ipPreference = v }
+        if let v = o.serverSelection { s.serverSelection = v }
+        if let v = o.manualServerID { s.manualServerID = v }
+        if let v = o.selectedServerIDs { s.selectedServerIDs = v }
+        if let v = o.autoServerCount { s.autoServerCount = v }
+        if let v = o.multiPointValidation { s.multiPointValidation = v }
+        if let v = o.trafficUsage { s.trafficUsage = v }
+        return s
+    }
+
+    /// Which servers a run uses: a fixed primary (nil = pick the best), explicit extras, and how
+    /// many extra servers to add automatically from the latency ranking.
+    public func serverPlan(available: [ServerDescriptor]) -> (primary: ServerDescriptor?, extras: [ServerDescriptor], autoExtraCount: Int) {
+        switch serverSelection {
+        case .automatic:
+            return (nil, [], 0)
+        case .manual:
+            return (available.first { $0.id == manualServerID }, [], 0)
+        case .multiple:
+            let chosen = selectedServerIDs.compactMap { id in available.first { $0.id == id } }
+            return (chosen.first, Array(chosen.dropFirst()), 0)
+        case .autoMultiple:
+            return (nil, [], max(0, min(autoServerCount, available.count) - 1))
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case primarySpeedUnit, secondarySpeedUnit, chartStyle, testDuration, trafficUsage, maxMegabytesPerTest, parallelConnections, ipPreference, serverSelection, manualServerID, customServers, defaultTestMode, defaultProfileID, appearance, historyRetention, storeLocation, includeLocationInExports, autoCrossValidation, backgroundChecks, detailLevel, exportFormat, savedProfiles
+        case selectedServerIDs, autoServerCount, multiPointValidation, overrides
     }
 
     /// Tolerant decoding: unknown / missing keys fall back to defaults so settings survive app updates.
@@ -214,6 +320,10 @@ public struct AppSettings: Codable, Sendable, Hashable {
         if let v = try? c.decodeIfPresent(type(of: detailLevel), forKey: .detailLevel) { detailLevel = v }
         if let v = try? c.decodeIfPresent(type(of: exportFormat), forKey: .exportFormat) { exportFormat = v }
         if let v = try? c.decodeIfPresent(type(of: savedProfiles), forKey: .savedProfiles) { savedProfiles = v }
+        if let v = try? c.decodeIfPresent(type(of: selectedServerIDs), forKey: .selectedServerIDs) { selectedServerIDs = v }
+        if let v = try? c.decodeIfPresent(type(of: autoServerCount), forKey: .autoServerCount) { autoServerCount = v }
+        if let v = try? c.decodeIfPresent(type(of: multiPointValidation), forKey: .multiPointValidation) { multiPointValidation = v }
+        if let v = try? c.decodeIfPresent(type(of: overrides), forKey: .overrides) { overrides = v }
     }
 
     /// Optionals are encoded as explicit `null` so "none" survives a round trip.
@@ -241,6 +351,10 @@ public struct AppSettings: Codable, Sendable, Hashable {
         try c.encode(detailLevel, forKey: .detailLevel)
         try c.encode(exportFormat, forKey: .exportFormat)
         try c.encode(savedProfiles, forKey: .savedProfiles)
+        try c.encode(selectedServerIDs, forKey: .selectedServerIDs)
+        try c.encode(autoServerCount, forKey: .autoServerCount)
+        try c.encode(multiPointValidation, forKey: .multiPointValidation)
+        try c.encode(overrides, forKey: .overrides)
     }
 
     /// Duration for one throughput direction, after traffic rules.
@@ -249,6 +363,8 @@ public struct AppSettings: Codable, Sendable, Hashable {
     ///     saveOnCellular on cellular → base / 2 (min 5 s)
     public func effectiveMaxDuration(onCellular: Bool) -> Double {
         let base = testDuration.seconds ?? AutoDurationPolicy().maximumSeconds
+        // A fixed duration chosen by the user is honoured exactly (it is an explicit choice).
+        if testDuration.seconds != nil && trafficUsage != .capped { return base }
         if trafficUsage == .saveOnCellular && onCellular { return max(5, base / 2) }
         return base
     }
