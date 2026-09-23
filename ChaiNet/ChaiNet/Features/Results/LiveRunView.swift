@@ -94,8 +94,10 @@ private struct ThroughputLivePanel: View {
     var body: some View {
         let s = settings.settings
         let samples = vm.samples(direction)
-        let summary = vm.liveSummary(direction)
-        let current = Format.speedParts(vm.currentMbps(direction), settings: s)
+        let summary = vm.displaySummary[direction]
+        let currentMbps = vm.displayMbps[direction]
+        let current = Format.speedParts(currentMbps, settings: s)
+        let elapsed = samples.last?.offset ?? 0
         let color = direction == .download ? Theme.download : Theme.upload
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -107,23 +109,28 @@ private struct ThroughputLivePanel: View {
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // Plain monospaced digits, updated twice per second: no rolling / blur transition.
                 Text(current.value)
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+                    .font(.system(size: 56, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
-                Text(current.unit).font(.title3).foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .transaction { $0.animation = nil }
+                Text(current.unit).font(.title3.weight(.semibold)).foregroundStyle(Theme.textSecondary)
             }
-            .animation(.snappy, value: current.value)
-            if let secondary = Format.secondarySpeed(vm.currentMbps(direction), settings: s) {
+            if let secondary = Format.secondarySpeed(currentMbps, settings: s) {
                 Text(secondary).font(.footnote).foregroundStyle(Theme.textSecondary)
             }
             HStack(spacing: 20) {
                 LiveStat(title: "平均", value: Format.speed(summary?.averageMbps, settings: s))
                 LiveStat(title: "峰值", value: Format.speed(summary?.peakMbps, settings: s))
-                LiveStat(title: "穩定度", value: Format.number(summary?.stability.score, digits: 0))
+                // CV needs a few seconds of steady-state data to mean anything.
+                LiveStat(title: "穩定度", value: elapsed >= 2 ? Format.number(summary?.stability.score, digits: 0) : "計算中")
             }
-            ThroughputChart(samples: samples, style: s.chartStyle, unit: s.primarySpeedUnit, color: color, height: 170)
+            ThroughputChart(samples: SpeedSmoothing.movingAverage(samples, window: 5), style: s.chartStyle,
+                            unit: s.primarySpeedUnit, color: color, height: 170)
+            Text("圖表為 0.5 秒移動平均；原始 0.1 秒資料保留於技術細節與匯出。")
+                .font(.caption2).foregroundStyle(Theme.textSecondary)
         }
         .cardStyle()
     }
@@ -135,7 +142,8 @@ private struct LiveStat: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption2).foregroundStyle(Theme.textSecondary)
-            Text(value).font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(Theme.textPrimary)
+            Text(value).font(.headline.monospacedDigit()).foregroundStyle(Theme.textPrimary)
+                .transaction { $0.animation = nil }
         }
     }
 }

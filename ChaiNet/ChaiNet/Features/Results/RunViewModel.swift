@@ -27,6 +27,10 @@ final class RunViewModel {
     private(set) var latencySamples: [TestPhase: [LatencySample]] = [:]
     private(set) var streams: [TransferDirection: Int] = [:]
     private(set) var traceHops: [TracerouteHop] = []
+    /// Readable live values, refreshed every 0.5 s (not every 100 ms sample) so the big number
+    /// doesn't flicker.
+    private(set) var displayMbps: [TransferDirection: Double] = [:]
+    private(set) var displaySummary: [TransferDirection: SpeedSummary] = [:]
     /// Partial while running, final afterwards.
     private(set) var result: TestResult?
     private(set) var configuration: TestRunConfiguration?
@@ -50,6 +54,9 @@ final class RunViewModel {
     var isRunning: Bool { status == .running }
 
     // MARK: Live derived values
+
+    /// Display refresh cadence in samples (5 × 100 ms = 0.5 s).
+    static let displayEvery = 5
 
     var activeDirection: TransferDirection? {
         switch phase {
@@ -156,6 +163,8 @@ final class RunViewModel {
         latencySamples = [:]
         streams = [:]
         traceHops = []
+        displayMbps = [:]
+        displaySummary = [:]
         result = nil
     }
 
@@ -188,6 +197,11 @@ final class RunViewModel {
             latencySamples[p, default: []].append(s)
         case .speedSample(let d, let s):
             if d == .download { downloadSamples.append(s) } else { uploadSamples.append(s) }
+            let count = samples(d).count
+            if count == 1 || count % Self.displayEvery == 0 {
+                displayMbps[d] = currentMbps(d)
+                displaySummary[d] = liveSummary(d)
+            }
         case .streams(let d, let n):
             streams[d] = n
         case .traceHop(let hop):

@@ -106,3 +106,27 @@ final class AppTests: XCTestCase {
         XCTAssertNil(DiagnosticSessionViewModel.items(for: .contactProvider))
     }
 }
+
+final class SpeedSmoothingTests: XCTestCase {
+    func testMovingAverageFlattensBursts() {
+        // Alternating 0 / 200 Mbps bursts (100 ms each) → 0.5 s average ≈ 80–120 Mbps, never 0 or 200.
+        var cumulative: Int64 = 0
+        let raw = (0..<20).map { i -> SpeedSample in
+            let bytes: Int64 = i % 2 == 0 ? 0 : 2_500_000
+            cumulative += bytes
+            return SpeedSample(offset: Double(i + 1) * 0.1, intervalDuration: 0.1, intervalBytes: bytes, cumulativeBytes: cumulative, activeStreams: 4)
+        }
+        let smooth = SpeedSmoothing.movingAverage(raw, window: 5)
+        XCTAssertEqual(smooth.count, raw.count)
+        for s in smooth.dropFirst(5) {
+            XCTAssertGreaterThan(s.mbps, 70)
+            XCTAssertLessThan(s.mbps, 130)
+        }
+        XCTAssertEqual(smooth.last?.cumulativeBytes, raw.last?.cumulativeBytes, "totals are untouched")
+    }
+
+    func testWindowOneIsIdentity() {
+        let raw = [SpeedSample(offset: 0.1, intervalDuration: 0.1, intervalBytes: 100, cumulativeBytes: 100, activeStreams: 1)]
+        XCTAssertEqual(SpeedSmoothing.movingAverage(raw, window: 1), raw)
+    }
+}

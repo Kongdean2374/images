@@ -32,7 +32,6 @@ struct MetricTile: View {
                     .font(.system(size: 28, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Theme.textPrimary)
-                    .contentTransition(.numericText())
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 if !unit.isEmpty {

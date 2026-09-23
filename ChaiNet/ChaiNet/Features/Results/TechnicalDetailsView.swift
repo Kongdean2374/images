@@ -104,10 +104,17 @@ struct SpeedDetail: View {
     let result: SpeedResult
     let color: Color
     let settings: AppSettings
+    @State private var raw = false
 
     var body: some View {
         let s = result.summary
-        ThroughputChart(samples: result.samples, style: settings.chartStyle, unit: settings.primarySpeedUnit, color: color,
+        Picker("圖表資料", selection: $raw) {
+            Text("0.5 秒平滑").tag(false)
+            Text("原始 0.1 秒").tag(true)
+        }
+        .pickerStyle(.segmented)
+        ThroughputChart(samples: raw ? result.samples : SpeedSmoothing.movingAverage(result.samples, window: 5),
+                        style: settings.chartStyle, unit: settings.primarySpeedUnit, color: color,
                         height: 150, averageMbps: s.averageMbps)
         KeyValueRow(key: "平均（時間加權）", value: Format.speed(s.averageMbps, settings: settings, secondary: true))
         KeyValueRow(key: "峰值（3 樣本移動平均）", value: Format.speed(s.peakMbps, settings: settings))
