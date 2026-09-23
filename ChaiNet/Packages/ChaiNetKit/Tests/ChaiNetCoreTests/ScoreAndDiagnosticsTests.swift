@@ -47,6 +47,14 @@ final class ScoreEngineTests: XCTestCase {
         XCTAssertGreaterThan(s.streaming!, s.gaming!)
     }
 
+    func testGamingLatencyCap() {
+        var m = excellent()
+        m.idleLatencyMs = 100
+        XCTAssertLessThanOrEqual(engine.scores(for: m).gaming!, 55, "≥ 100 ms ping caps gaming at 55")
+        m.idleLatencyMs = 99
+        XCTAssertGreaterThan(engine.scores(for: m).gaming!, 55)
+    }
+
     func testWeightedAverageMath() {
         // Upload profile: upload .45, uploadStability .25, uploadBloat .15, loss .15
         var m = MetricSnapshot()

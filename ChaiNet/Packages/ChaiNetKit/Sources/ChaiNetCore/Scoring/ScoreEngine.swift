@@ -57,7 +57,8 @@ public struct ScoreProfile: Sendable, Hashable, Codable {
     public static let gaming = ScoreProfile(
         weights: [.latency: 0.30, .jitter: 0.20, .loss: 0.25, .downloadBloat: 0.075, .uploadBloat: 0.075, .download: 0.05, .upload: 0.05],
         caps: [ScoreCap(metric: .loss, threshold: 2, maximumScore: 50), ScoreCap(metric: .loss, threshold: 5, maximumScore: 25),
-               ScoreCap(metric: .jitter, threshold: 50, maximumScore: 40), ScoreCap(metric: .latency, threshold: 150, maximumScore: 35)])
+               ScoreCap(metric: .jitter, threshold: 50, maximumScore: 40), ScoreCap(metric: .latency, threshold: 100, maximumScore: 55),
+               ScoreCap(metric: .latency, threshold: 150, maximumScore: 35)])
 
     /// Streaming: sustained download and its stability dominate; buffers hide latency.
     public static let streaming = ScoreProfile(
