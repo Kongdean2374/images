@@ -25,7 +25,8 @@ final class AppTests: XCTestCase {
         let vm = app.speedTest
         vm.start(kind: .fullSpeedTest, items: SpeedTestView.speedTestItems, onCellular: false)
         XCTAssertTrue(vm.isRunning)
-        await waitUntil { vm.status == .finished }
+        // testDuration 5 s applies to every timed phase, so a full mock run takes ~12–15 s.
+        await waitUntil(timeout: 90) { vm.status == .finished }
         XCTAssertEqual(vm.status, .finished)
         XCTAssertFalse(vm.downloadSamples.isEmpty, "live timeline is exposed")
         XCTAssertNotNil(vm.result?.download)
@@ -58,7 +59,7 @@ final class AppTests: XCTestCase {
         let app = try makeContainer()
         let vm = DiagnosticSessionViewModel(session: DiagnosticSession(title: "t"), app: app)
         vm.addTest(items: [.ping, .packetLoss, .download, .upload])
-        await waitUntil { vm.session.tests.count == 1 && !vm.isRunning }
+        await waitUntil(timeout: 90) { vm.session.tests.count == 1 && !vm.isRunning }
         XCTAssertEqual(vm.session.tests.count, 1)
         XCTAssertNotNil(vm.analysis)
         XCTAssertEqual(vm.analysis?.hypotheses.count, RootCause.allCases.count)
