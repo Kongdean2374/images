@@ -184,7 +184,9 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
         m.uploadBloatMs = bufferbloat?.uploadIncreaseMs
 
         if let dns {
-            m.systemDNSMs = dns.resolvers.first { $0.resolver.transport == .system }?.statistics.rtt?.median
+            let system = dns.resolvers.first { $0.resolver.transport == .system }?.statistics.rtt
+            m.systemDNSMs = system?.median
+            m.systemDNSP95Ms = system?.p95
             if let best = dns.ranked.first(where: { $0.resolver.transport != .system && $0.statistics.rtt != nil }) {
                 m.bestDNSMs = best.statistics.rtt?.median
                 m.bestDNSName = best.resolver.name
@@ -200,7 +202,8 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
         m.vpnDetected = network.vpn.state == .unknown ? nil : network.vpn.state == .detected
         if let probe = protocolProbe {
             m.negotiatedHTTP = probe.http?.negotiatedProtocol
-            m.http3Supported = probe.http3Supported
+            m.http3Supported = probe.http3Negotiated
+            m.quicReachable = probe.quicReachable
             m.tlsHandshakeMs = probe.http?.tlsMs
             m.ttfbMs = probe.http?.ttfbMs
         }

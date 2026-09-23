@@ -251,9 +251,16 @@ public struct ProtocolProbeResult: Codable, Sendable, Hashable {
         self.errors = errors
     }
 
-    public var http3Supported: Bool {
-        http3Attempt?.negotiatedProtocol == .http3 || quicHandshakeMs.value != nil || quicAssessment == .working
-    }
+    /// HTTP/3 was actually negotiated for an HTTP request (ALPN h3 on a real response).
+    public var http3Negotiated: Bool { http3Attempt?.negotiatedProtocol == .http3 }
+
+    /// A QUIC handshake completed to at least one endpoint, i.e. UDP 443 is reachable.
+    /// This does NOT mean HTTP/3 was used — see `http3Negotiated`.
+    public var quicReachable: Bool { quicHandshakeMs.value != nil || quicAssessment == .working }
+    public var udp443Reachable: Bool { quicReachable }
+
+    /// Kept for older call sites: now strictly "HTTP/3 negotiated".
+    public var http3Supported: Bool { http3Negotiated }
 }
 
 // MARK: - Route

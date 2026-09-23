@@ -19,6 +19,7 @@ public struct MetricSnapshot: Codable, Sendable, Hashable {
     public var downloadBloatMs: Double?
     public var uploadBloatMs: Double?
     public var systemDNSMs: Double?
+    public var systemDNSP95Ms: Double?
     public var bestDNSMs: Double?
     public var bestDNSName: String?
     public var supportsIPv4: Bool?
@@ -28,7 +29,10 @@ public struct MetricSnapshot: Codable, Sendable, Hashable {
     public var isConstrained: Bool?
     public var interface: InterfaceKind?
     public var negotiatedHTTP: HTTPProtocolVersion?
+    /// HTTP/3 actually negotiated (not merely a QUIC handshake).
     public var http3Supported: Bool?
+    /// QUIC handshake / UDP 443 reachable.
+    public var quicReachable: Bool?
     public var tlsHandshakeMs: Double?
     public var ttfbMs: Double?
     public var pathMTU: Int?

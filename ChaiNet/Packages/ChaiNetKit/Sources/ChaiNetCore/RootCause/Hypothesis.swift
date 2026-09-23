@@ -4,7 +4,7 @@ import Foundation
 public enum RootCause: String, Codable, Sendable, Hashable, CaseIterable {
     case wifiRadioQuality
     case localNetworkCongestion
-    case routerBufferbloat
+    case loadedLatencyInflation
     case fixedLineUplinkCongestion
     case asymmetricPlanLimit
     case cellularUplinkCongestion

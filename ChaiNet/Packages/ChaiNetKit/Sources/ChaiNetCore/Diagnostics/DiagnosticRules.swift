@@ -167,8 +167,11 @@ public enum DiagnosticRules {
 
     public static let http3Unavailable = ClosureRule(.http3Unavailable) { m in
         guard m.http3Supported == false else { return nil }
+        let detail = m.quicReachable == true
+            ? "QUIC 交握成功（quicReachable / UDP 443 可達），但 HTTP 請求未協商出 HTTP/3（http3Negotiated = false）。通常是伺服器或系統選擇 HTTP/2，並非網路封鎖。"
+            : "未觀察到可用的 HTTP/3 (QUIC)。可能是伺服器不支援、個別端點問題，或 UDP 443 被阻擋；需多端點結果才能區分。"
         return DiagnosticFinding(code: .http3Unavailable, severity: .info, title: "未使用 HTTP/3",
-            detail: "未觀察到可用的 HTTP/3 (QUIC)。可能是伺服器不支援、個別端點問題，或 UDP 443 被阻擋；需多端點結果才能區分。",
+            detail: detail,
             recommendation: "HTTP/3 無法使用時會自動退回 TCP 上的 HTTP，一般不影響使用。")
     }
 
@@ -188,10 +191,18 @@ public enum DiagnosticRules {
             recommendation: "常見於 VPN、PPPoE 或行動網路通道；若有連線異常可調整 MSS clamping。")
     }
 
+    /// Healthy median but P95 ≥ 200 ms and ≥ 3 × median → info (highTailLatencyObserved).
+    public static let dnsHighTailLatency = ClosureRule(.dnsHighTailLatency) { m in
+        guard let median = m.systemDNSMs, let p95 = m.systemDNSP95Ms, DNSTail.isHigh(median: median, p95: p95) else { return nil }
+        return DiagnosticFinding(code: .dnsHighTailLatency, severity: .info, title: "DNS 尾端延遲偏高",
+            detail: "系統 DNS 中位數 \(fmt(median, 0)) ms，但 P95 達 \(fmt(p95, 0)) ms（highTailLatencyObserved）：偶爾有查詢特別慢，中位數正常不代表每次都快。",
+            recommendation: "偶發慢查詢常見於解析器快取未命中、上游逾時重試或無線重傳；可比較其他 DNS 的 P95。")
+    }
+
     public static let all: [any DiagnosticRule] = [
         uplinkCongestion, asymmetricLink, lowLatencyHighJitter, highJitter, severePacketLoss, moderatePacketLoss,
         burstLoss, downloadBufferbloat, uploadBufferbloat, highLatency, unstableDownload, unstableUpload, lowDownload,
-        slowSystemDNS, ipv6Unavailable, vpnActive, lowDataMode, expensiveNetwork, latencySpikes, networkDrops,
+        slowSystemDNS, dnsHighTailLatency, ipv6Unavailable, vpnActive, lowDataMode, expensiveNetwork, latencySpikes, networkDrops,
         http3Unavailable, slowTLS, reducedMTU,
     ]
 }

@@ -154,13 +154,13 @@ final class RootCauseRuleTests: XCTestCase {
         let a = analyze([.onWiFi, .downloadHigh, .uploadLow, .asymmetricRatio, .uploadStable, .lossNone, .noBufferbloat, .matchesBaseline,
                          .allServersNormal], interface: .wifi)
         XCTAssertEqual(hyp(a, .asymmetricPlanLimit).likelihood, .likely)
-        XCTAssertEqual(hyp(a, .routerBufferbloat).likelihood, .ruledOut)
+        XCTAssertEqual(hyp(a, .loadedLatencyInflation).likelihood, .ruledOut)
         XCTAssertNotEqual(hyp(a, .fixedLineUplinkCongestion).likelihood, .likely)
     }
 
     func testBufferbloat() {
         let a = analyze([.onWiFi, .uploadBufferbloat, .idleLatencyLow], interface: .wifi)
-        XCTAssertEqual(hyp(a, .routerBufferbloat).likelihood, .likely)
+        XCTAssertEqual(hyp(a, .loadedLatencyInflation).likelihood, .likely)
     }
 
     func testDNS() {
@@ -236,8 +236,8 @@ final class RootCauseRuleTests: XCTestCase {
 
     func testBufferbloatLayerIsPathQueueingNotLocalNetwork() {
         let a = analyze([.onCellular, .onLTE, .uploadBufferbloat, .idleLatencyLow])
-        XCTAssertEqual(hyp(a, .routerBufferbloat).layer, .pathQueueing)
-        XCTAssertFalse(hyp(a, .routerBufferbloat).title.contains("Wi-Fi"))
+        XCTAssertEqual(hyp(a, .loadedLatencyInflation).layer, .pathQueueing)
+        XCTAssertFalse(hyp(a, .loadedLatencyInflation).title.contains("Wi-Fi"))
     }
 
     func testHeuristicOrUntestedEvidenceNeverRulesOut() {

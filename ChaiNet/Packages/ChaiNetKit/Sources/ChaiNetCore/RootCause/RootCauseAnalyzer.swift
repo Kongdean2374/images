@@ -168,6 +168,7 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
             case .stabilityMonitoring: tests.append(.runContinuousMonitor)
             case .bufferbloat: tests.append(.runBufferbloatTest)
             case .baseline: tests.append(.repeatAtDifferentTime)
+            case .route: tests.append(.runTraceroute)
             case .throughput, .latency, .loss, .environment: break
             }
         }

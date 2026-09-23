@@ -13,12 +13,28 @@ struct RawDataCard: View {
     @State private var jsonURL: URL?
     @State private var copied = false
     @State private var showAll = false
+    /// AI-safe (IPs redacted) is the default; the engineer export can opt in to full IPs.
+    @State private var engineer = false
+    @State private var includeIPs = false
+    private var privacy: ExportPrivacy { engineer ? .engineer(includeIPs: includeIPs) : .aiSafe }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("完整原始資料（工程師 / AI 分析用）", systemImage: "doc.plaintext").font(.headline)
             Text("英文 + 數字格式，保留每一筆 100 ms 速度樣本、每個延遲探測、所有統計、端點、路由、根因分析代碼。可直接貼給 ChatGPT、Claude 或工程師。")
                 .font(.caption).foregroundStyle(Theme.textSecondary)
+            Picker("匯出類型", selection: $engineer) {
+                Text("匯出 AI 分析").tag(false)
+                Text("Raw Engineer Data").tag(true)
+            }
+            .pickerStyle(.segmented)
+            if engineer {
+                Toggle("包含完整 IP 位址", isOn: $includeIPs).font(.footnote)
+            }
+            Text(privacy.redactsIPs
+                 ? "公網 / 區網 / VPN 通道 IPv4 與 IPv6 位址已遮蔽為 [REDACTED]（1.1.1.1、8.8.8.8 等公共服務位址保留）。"
+                 : "包含完整 IP 位址，分享前請確認對象可信。")
+                .font(.caption2).foregroundStyle(privacy.redactsIPs ? Theme.textSecondary : Color.orange)
             if let text {
                 HStack {
                     Button {
@@ -44,7 +60,7 @@ struct RawDataCard: View {
             }
         }
         .cardStyle()
-        .task(id: result.id) { await build() }
+        .task(id: "\(result.id)-\(engineer)-\(includeIPs)") { await build() }
     }
 
     private func build() async {
@@ -52,9 +68,11 @@ struct RawDataCard: View {
         let includeLocation = settings.settings.includeLocationInExports
         let baselines = app.baselines(excluding: [r.id])
         let analysis = RawDataExporter.analysis(for: r, baselines: baselines)
+        let privacy = privacy
+        copied = false
         text = RawDataExporter.text(r, analysis: analysis, appVersion: ExportService.appVersion, platform: ExportService.platform,
-                                    includeLocation: includeLocation)
-        txtURL = try? ExportService.exportRawData(r, analysis: analysis, asJSON: false, includeLocation: includeLocation)
-        jsonURL = try? ExportService.exportRawData(r, analysis: analysis, asJSON: true, includeLocation: includeLocation)
+                                    includeLocation: includeLocation, privacy: privacy)
+        txtURL = try? ExportService.exportRawData(r, analysis: analysis, asJSON: false, includeLocation: includeLocation, privacy: privacy)
+        jsonURL = try? ExportService.exportRawData(r, analysis: analysis, asJSON: true, includeLocation: includeLocation, privacy: privacy)
     }
 }

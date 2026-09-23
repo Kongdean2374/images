@@ -81,11 +81,17 @@ public struct SpeedSummary: Codable, Sendable, Hashable {
     public var analysisWindowMbps: [Double]?
     /// Warm-up used for this summary (so it can be reproduced exactly).
     public var warmupDuration: Double?
+    /// True when the raw counter showed callback / buffer batching (see `SpeedCalculator.batching`).
+    public var samplingArtifactDetected: Bool?
+    /// Share of steady 100 ms intervals that reported zero bytes.
+    public var zeroIntervalFraction: Double?
 
     /// Human-readable statement of how the statistics were computed.
     public var methodDescription: String {
         let w = windowSamples ?? 1
-        return "統計基於穩態 \(analysisWindowCount ?? 0) 個時間加權視窗（每視窗 \(w) 個 100 ms 樣本）；"
+        let artifact = samplingArtifactDetected == true
+            ? "偵測到回報批次化（\(Int(((zeroIntervalFraction ?? 0) * 100).rounded()))% 的 100 ms 區間為 0），視窗已放大；" : ""
+        return artifact + "統計基於穩態 \(analysisWindowCount ?? 0) 個時間加權視窗（每視窗 \(w) 個 100 ms 樣本）；"
             + "已排除暖機與平行連線數變更期間 \(warmupSampleCount) 個樣本（其中連線變更 \(transitionExcludedSampleCount ?? 0) 個）。"
     }
 }
@@ -124,6 +130,37 @@ public enum SpeedCalculator {
 
     /// Default analysis window: 5 × 100 ms = 0.5 s.
     public static let defaultWindowSamples = 5
+    /// Upper bound of the adaptive window: 20 × 100 ms = 2 s.
+    public static let maximumWindowSamples = 20
+
+    /// Detects progress-reporting batching.
+    ///
+    /// URLSession reports upload progress when data is copied into the socket buffer, so on
+    /// fast / buffered links the 100 ms counter alternates between 0 and a burst (e.g.
+    /// 0, 0, 0, 1361 Mbps). Those zeros are not the radio stopping. If more than 20 % of steady
+    /// intervals are zero (in at least 3 separate runs), the window is widened to cover the typical batching period:
+    ///
+    ///     gap    = median length of runs of zero intervals
+    ///     window = clamp(2 × (gap + 1), 5, 20) samples           (0.5 s … 2 s)
+    ///
+    /// The median (not the maximum) is used so a genuine multi-second outage does not widen the
+    /// window — outages longer than the window still appear as low windows.
+    public static func batching(_ steady: [SpeedSample]) -> (windowSamples: Int, detected: Bool, zeroFraction: Double) {
+        guard !steady.isEmpty else { return (defaultWindowSamples, false, 0) }
+        let zeroFraction = Double(steady.filter { $0.intervalBytes == 0 }.count) / Double(steady.count)
+        guard zeroFraction > 0.2 else { return (defaultWindowSamples, false, zeroFraction) }
+        var runs: [Double] = []
+        var run = 0
+        for s in steady {
+            if s.intervalBytes == 0 { run += 1 } else if run > 0 { runs.append(Double(run)); run = 0 }
+        }
+        if run > 0 { runs.append(Double(run)) }
+        // Batching is a repeating pattern; one long zero run is a real outage and must stay visible.
+        guard runs.count >= 3 else { return (defaultWindowSamples, false, zeroFraction) }
+        let gap = Descriptive.median(runs) ?? 0
+        let window = Int(min(Double(maximumWindowSamples), max(Double(defaultWindowSamples), 2 * (gap + 1))).rounded(.up))
+        return (window, true, zeroFraction)
+    }
     /// Seconds after a stream-count change during which samples are excluded.
     public static let defaultTransitionGuard = 1.0
 
@@ -197,19 +234,23 @@ public enum SpeedCalculator {
     /// Statistics use 0.5 s windows rather than raw 100 ms samples because transfer progress is
     /// reported in bursts (upload socket-buffer flushes), which makes single 100 ms intervals
     /// swing between 0 and the burst rate and would make the median 0 on a working link.
+    ///
+    /// `windowSamples` nil (default) = adaptive (`batching`); pass a value to force a window.
     public static func summarize(samples: [SpeedSample], streamChanges: [StreamChange] = [], warmupDuration: Double = 1.0,
                                  transitionGuard: Double = defaultTransitionGuard,
-                                 windowSamples: Int = defaultWindowSamples) -> SpeedSummary {
+                                 windowSamples requestedWindow: Int? = nil) -> SpeedSummary {
         let totalBytes = samples.last?.cumulativeBytes ?? samples.reduce(0) { $0 + $1.intervalBytes }
         let duration = samples.last?.offset ?? 0
         guard !samples.isEmpty else {
             return SpeedSummary(averageMbps: 0, peakMbps: 0, minimumMbps: 0, medianMbps: 0, p95Mbps: 0, p10Mbps: 0,
                                 stability: .undefined, totalBytes: totalBytes, duration: duration, warmupSampleCount: 0,
-                                transitionExcludedSampleCount: 0, windowSamples: windowSamples, analysisWindowCount: 0, analysisWindowMbps: [],
-                                warmupDuration: warmupDuration)
+                                transitionExcludedSampleCount: 0, windowSamples: requestedWindow ?? defaultWindowSamples,
+                                analysisWindowCount: 0, analysisWindowMbps: [], warmupDuration: warmupDuration)
         }
         let (steady, warm, trans) = steadyState(samples, streamChanges: streamChanges, warmupDuration: warmupDuration,
                                                 transitionGuard: transitionGuard)
+        let detection = batching(steady)
+        let windowSamples = requestedWindow ?? detection.windowSamples
         var windows = windowRates(steady, windowSamples: windowSamples)
         if windows.isEmpty { windows = windowRates(steady, windowSamples: 1) }
 
@@ -232,6 +273,8 @@ public enum SpeedCalculator {
             windowSamples: windowSamples,
             analysisWindowCount: windows.count,
             analysisWindowMbps: windows,
-            warmupDuration: warmupDuration)
+            warmupDuration: warmupDuration,
+            samplingArtifactDetected: requestedWindow == nil ? detection.detected : nil,
+            zeroIntervalFraction: detection.zeroFraction)
     }
 }

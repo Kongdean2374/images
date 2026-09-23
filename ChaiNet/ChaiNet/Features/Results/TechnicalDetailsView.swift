@@ -118,7 +118,7 @@ struct SpeedDetail: View {
             Text("原始 0.1 秒").tag(true)
         }
         .pickerStyle(.segmented)
-        ThroughputChart(samples: raw ? result.samples : SpeedSmoothing.movingAverage(result.samples, window: 5),
+        ThroughputChart(samples: raw ? result.samples : SpeedSmoothing.movingAverage(result.samples, window: result.summary.windowSamples ?? SpeedCalculator.defaultWindowSamples),
                         style: settings.chartStyle, unit: settings.primarySpeedUnit, color: color,
                         height: 150, averageMbps: s.averageMbps)
         KeyValueRow(key: "平均（時間加權）", value: Format.speed(s.averageMbps, settings: settings, secondary: true))
@@ -398,6 +398,14 @@ struct QualityVerdictsSection: View {
                 }
                 KeyValueRow(key: "封包速率", value: "\(Int(g.packetsPerSecond)) pps")
                 KeyValueRow(key: "延遲突波", value: "\(g.spikes.count) 次")
+                if let path = g.referencePath { KeyValueRow(key: "判定依據路徑", value: path) }
+                if let paths = g.pathCandidates {
+                    ForEach(paths, id: \.self) { c in
+                        KeyValueRow(key: c.name + (c.isPrimary ? "（主要）" : ""),
+                                    value: "P95 \(Format.ms(c.p95Ms)) · 遺失 \(Format.number(c.lossPercent, digits: 1))% · \(c.isHealthy ? "健康" : "不採用")")
+                    }
+                    Text("遊戲會連到最近且健康的伺服器，因此判定採用健康路徑中 P95 最低者，並加上主要路徑測得的負載延遲增加。").font(.caption2).foregroundStyle(Theme.textSecondary)
+                }
             }
         }
         if let v = result.voice {

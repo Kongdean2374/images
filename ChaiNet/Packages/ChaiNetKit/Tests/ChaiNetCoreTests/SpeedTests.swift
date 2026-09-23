@@ -68,6 +68,29 @@ final class SpeedCalculationTests: XCTestCase {
         XCTAssertGreaterThan(s.stability.score!, 90, "bursts inside a window are not instability")
     }
 
+    func testAdaptiveWindowAbsorbsUploadBatching() {
+        // Same 0,0,0,250 pattern without forcing a window: detector widens to 2 × (3 + 1) = 8 samples.
+        let rates: [Double] = (0..<80).map { $0 % 4 == 3 ? 250 : 0 }
+        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0)
+        XCTAssertEqual(s.samplingArtifactDetected, true)
+        XCTAssertEqual(s.windowSamples, 8)
+        XCTAssertEqual(s.zeroIntervalFraction!, 0.75, accuracy: 1e-9)
+        XCTAssertEqual(s.medianMbps, 62.5, accuracy: 0.5)
+        XCTAssertEqual(s.minimumMbps, 62.5, accuracy: 0.5, "no false 0 Mbps window")
+        XCTAssertLessThan(s.peakMbps, 70, "no false 1000+ Mbps peak")
+        XCTAssertGreaterThan(s.stability.score!, 90)
+    }
+
+    func testRealOutageIsNotSmoothedAway() {
+        // 3 s at 100 Mbps, a 2 s genuine stall, 3 s at 100 Mbps → one zero run is an outage, not batching.
+        let rates = Array(repeating: 100.0, count: 30) + Array(repeating: 0.0, count: 20) + Array(repeating: 100.0, count: 30)
+        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0)
+        XCTAssertEqual(s.samplingArtifactDetected, false)
+        XCTAssertEqual(s.windowSamples, SpeedCalculator.defaultWindowSamples)
+        XCTAssertEqual(s.minimumMbps, 0, accuracy: 0.01, "the real dip must remain in the statistics")
+        XCTAssertLessThan(s.stability.score!, 80)
+    }
+
     func testStreamTransitionsExcluded() {
         // Ramp dip right after streams go 2 → 8 at t = 2 s must not count as instability.
         var rates = Array(repeating: 100.0, count: 60)

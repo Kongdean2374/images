@@ -127,7 +127,7 @@ private struct ThroughputLivePanel: View {
                 // CV needs a few seconds of steady-state data to mean anything.
                 LiveStat(title: "穩定度", value: elapsed >= 2 ? Format.number(summary?.stability.score, digits: 0) : "計算中")
             }
-            ThroughputChart(samples: SpeedSmoothing.movingAverage(samples, window: 5), style: s.chartStyle,
+            ThroughputChart(samples: SpeedSmoothing.movingAverage(samples, window: SpeedCalculator.batching(samples).windowSamples), style: s.chartStyle,
                             unit: s.primarySpeedUnit, color: color, height: 170)
             Text("圖表為 0.5 秒移動平均；原始 0.1 秒資料保留於技術細節與匯出。")
                 .font(.caption2).foregroundStyle(Theme.textSecondary)

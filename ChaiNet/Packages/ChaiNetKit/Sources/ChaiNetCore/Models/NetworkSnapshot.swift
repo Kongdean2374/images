@@ -123,6 +123,13 @@ public struct InterfaceAddress: Codable, Sendable, Hashable {
 
 /// Everything known about the current network path at a point in time.
 public struct NetworkSnapshot: Codable, Sendable, Hashable {
+    /// `NWPath.availableInterfaces` lists one entry per interface (pdp_ip0, pdp_ip1, utun0…),
+    /// so the same kind appears several times. Keeps first-seen order, one entry per kind.
+    public static func deduplicated(_ kinds: [InterfaceKind]) -> [InterfaceKind] {
+        var seen = Set<InterfaceKind>()
+        return kinds.filter { seen.insert($0).inserted }
+    }
+
     public var capturedAt: Date
     public var status: PathStatus
     public var primaryInterface: InterfaceKind
@@ -148,7 +155,7 @@ public struct NetworkSnapshot: Codable, Sendable, Hashable {
         self.capturedAt = capturedAt
         self.status = status
         self.primaryInterface = primaryInterface
-        self.availableInterfaces = availableInterfaces
+        self.availableInterfaces = Self.deduplicated(availableInterfaces)
         self.isExpensive = isExpensive
         self.isConstrained = isConstrained
         self.supportsIPv4 = supportsIPv4

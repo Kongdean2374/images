@@ -31,6 +31,7 @@ public enum DiagnosticCode: String, Codable, Sendable, Hashable, CaseIterable {
     case unstableUpload
     case lowDownload
     case slowSystemDNS
+    case dnsHighTailLatency
     case ipv6Unavailable
     case vpnActive
     case lowDataMode

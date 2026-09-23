@@ -69,7 +69,9 @@ final class RunViewModel {
 
     /// Current rate: mean of the last 5 samples (0.5 s) for a readable, still responsive number.
     func currentMbps(_ direction: TransferDirection) -> Double? {
-        let s = samples(direction).suffix(5)
+        // Same adaptive window as the statistics: upload progress batching must not show 0 / spikes.
+        let all = samples(direction)
+        let s = all.suffix(SpeedCalculator.batching(all).windowSamples)
         guard !s.isEmpty else { return nil }
         return SpeedMath.mbps(bytes: s.reduce(0) { $0 + $1.intervalBytes }, seconds: s.reduce(0) { $0 + $1.intervalDuration })
     }

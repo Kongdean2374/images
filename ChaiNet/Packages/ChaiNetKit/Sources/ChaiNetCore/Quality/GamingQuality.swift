@@ -64,6 +64,38 @@ public struct GamingQualityResult: Codable, Sendable, Hashable {
     public var packetsPerSecond: Double
     public var verdicts: [GenreVerdict]
     public var score: Int?
+    /// Path the verdicts are based on (best healthy regional path; nil in older results).
+    public var referencePath: String?
+    /// Every candidate path that was considered.
+    public var pathCandidates: [GamingPathCandidate]?
+}
+
+/// One measured path to a latency endpoint (primary server or a cross-validation endpoint).
+public struct GamingPathCandidate: Codable, Sendable, Hashable {
+    public var name: String
+    public var host: String
+    public var method: String
+    public var medianMs: Double?
+    public var p95Ms: Double?
+    public var jitterMs: Double?
+    public var lossPercent: Double
+    public var replies: Int
+    public var isPrimary: Bool
+
+    public init(name: String, host: String, method: String, statistics: LatencyStatistics, isPrimary: Bool) {
+        self.name = name
+        self.host = host
+        self.method = method
+        self.medianMs = statistics.rtt?.median
+        self.p95Ms = statistics.rtt?.p95
+        self.jitterMs = statistics.rtt?.jitter
+        self.lossPercent = statistics.loss.lossPercent
+        self.replies = statistics.loss.received
+        self.isPrimary = isPrimary
+    }
+
+    /// Healthy = ≥ 10 replies and < 2 % loss. Unhealthy endpoints are shown but never chosen.
+    public var isHealthy: Bool { replies >= 10 && lossPercent < 2 && p95Ms != nil }
 }
 
 /// Per-genre verdict.
@@ -109,15 +141,46 @@ public enum GamingQualityCalculator {
         return GenreVerdict(genre: genre, verdict: worst, limitingFactors: factors)
     }
 
+    /// Picks the best healthy regional path: a game connects to its nearest healthy server, so a
+    /// single slow or ICMP-rate-limited endpoint (e.g. one Anycast ICMP target) must not decide
+    /// the verdict. Lowest P95 among healthy candidates; nil when none is healthy.
+    public static func bestPath(_ candidates: [GamingPathCandidate]) -> GamingPathCandidate? {
+        candidates.filter(\.isHealthy).min { ($0.p95Ms ?? .infinity) < ($1.p95Ms ?? .infinity) }
+    }
+
+    /// Verdicts use the best healthy path. Load impact is carried over from the primary path:
+    ///
+    ///     p95    = best.p95 + max(0, loaded.p95 − primaryIdle.p95)
+    ///     jitter = max(best.jitter, loaded.jitter)
+    ///     loss   = max(best.loss, loaded.loss)
+    ///
+    /// With no alternative candidates this reduces to the primary path (previous behaviour).
     public static func evaluate(idle: LatencyStatistics, loaded: LatencyStatistics?, spikes: [LatencySpikeEvent],
-                                packetsPerSecond: Double, downloadMbps: Double?, score: Int?) -> GamingQualityResult {
-        let reference = (loaded?.rtt != nil ? loaded : nil) ?? idle
-        let p95 = reference.rtt?.p95 ?? 1000
-        let jitter = reference.rtt?.jitter ?? 1000
-        let loss = max(idle.loss.lossPercent, loaded?.loss.lossPercent ?? 0)
+                                packetsPerSecond: Double, downloadMbps: Double?, score: Int?,
+                                alternatives: [GamingPathCandidate] = [], primaryName: String = "主要伺服器") -> GamingQualityResult {
+        let primary = GamingPathCandidate(name: primaryName, host: "", method: "primary", statistics: idle, isPrimary: true)
+        let candidates = [primary] + alternatives
+        let best = alternatives.isEmpty ? nil : bestPath(candidates)
+        let loadedStats = loaded?.rtt != nil ? loaded : nil
+        let p95: Double
+        let jitter: Double
+        let loss: Double
+        if let best, let bestP95 = best.p95Ms {
+            let inflation = max(0, (loadedStats?.rtt?.p95 ?? 0) - (idle.rtt?.p95 ?? loadedStats?.rtt?.p95 ?? 0))
+            p95 = bestP95 + inflation
+            jitter = max(best.jitterMs ?? 1000, loadedStats?.rtt?.jitter ?? 0)
+            loss = max(best.lossPercent, loadedStats?.loss.lossPercent ?? 0)
+        } else {
+            let reference = loadedStats ?? idle
+            p95 = reference.rtt?.p95 ?? 1000
+            jitter = reference.rtt?.jitter ?? 1000
+            loss = max(idle.loss.lossPercent, loaded?.loss.lossPercent ?? 0)
+        }
         let verdicts = GameGenre.allCases.map {
             verdict(for: $0, latencyP95: p95, jitter: jitter, lossPercent: loss, downloadMbps: downloadMbps)
         }
-        return GamingQualityResult(idle: idle, loaded: loaded, spikes: spikes, packetsPerSecond: packetsPerSecond, verdicts: verdicts, score: score)
+        return GamingQualityResult(idle: idle, loaded: loaded, spikes: spikes, packetsPerSecond: packetsPerSecond, verdicts: verdicts, score: score,
+                                   referencePath: best.map { "\($0.name)\($0.host.isEmpty ? "" : " (\($0.host))")" } ?? primaryName,
+                                   pathCandidates: alternatives.isEmpty ? nil : candidates)
     }
 }

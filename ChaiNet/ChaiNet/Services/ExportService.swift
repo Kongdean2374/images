@@ -55,17 +55,19 @@ enum ExportService {
     }
 
     /// Complete English raw-data export of one result (TXT or JSON).
-    static func exportRawData(_ result: TestResult, analysis: RootCauseAnalysis?, asJSON: Bool, includeLocation: Bool) throws -> URL {
+    static func exportRawData(_ result: TestResult, analysis: RootCauseAnalysis?, asJSON: Bool, includeLocation: Bool,
+                              privacy: ExportPrivacy = .aiSafe) throws -> URL {
         let dir = try directory()
+        let tag = privacy.profile == .aiSafe ? "ai-safe" : "engineer"
         if asJSON {
-            let url = dir.appending(path: "ChaiNet-raw-\(stamp()).json")
+            let url = dir.appending(path: "ChaiNet-\(tag)-\(stamp()).json")
             try RawDataExporter.json(result, analysis: analysis, appVersion: appVersion, platform: platform,
-                                     includeLocation: includeLocation).write(to: url, options: .atomic)
+                                     includeLocation: includeLocation, privacy: privacy).write(to: url, options: .atomic)
             return url
         }
-        let url = dir.appending(path: "ChaiNet-raw-\(stamp()).txt")
+        let url = dir.appending(path: "ChaiNet-\(tag)-\(stamp()).txt")
         try Data(RawDataExporter.text(result, analysis: analysis, appVersion: appVersion, platform: platform,
-                                      includeLocation: includeLocation).utf8).write(to: url, options: .atomic)
+                                      includeLocation: includeLocation, privacy: privacy).utf8).write(to: url, options: .atomic)
         return url
     }
 

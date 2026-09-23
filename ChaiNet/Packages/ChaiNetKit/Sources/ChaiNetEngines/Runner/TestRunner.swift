@@ -105,7 +105,8 @@ public struct TestRunConfiguration: Sendable {
         var c: TestRunConfiguration
         switch kind {
         case .gaming:
-            c = TestRunConfiguration(kind: kind, items: [.ping, .jitter, .packetLoss, .burstLoss, .latencySpikes, .bufferbloat],
+            // .crossValidation: verdicts use the best healthy regional path, not a single ICMP target.
+            c = TestRunConfiguration(kind: kind, items: [.ping, .jitter, .packetLoss, .burstLoss, .latencySpikes, .bufferbloat, .crossValidation],
                                      candidateServers: servers, fixedServer: fixedServer, settings: settings, onCellular: onCellular)
             c.lossProbeInterval = 0.02; c.lossProbeCount = 750; c.lossPayloadBytes = 64          // 50 pps × 15 s
         case .voice:
@@ -539,9 +540,13 @@ public struct TestRunner: TestRunnerProtocol {
         switch c.kind {
         case .gaming:
             if let idle = r.packetLoss ?? r.idleLatency {
+                let alternatives = (r.crossValidation ?? []).filter { !$0.isPrimary }.compactMap { e in
+                    e.statistics.map { GamingPathCandidate(name: e.name, host: e.host, method: e.method.rawValue, statistics: $0, isPrimary: false) }
+                }
                 r.gaming = GamingQualityCalculator.evaluate(idle: idle, loaded: r.downloadLoadedLatency, spikes: r.monitoring?.spikes ?? [],
                                                             packetsPerSecond: 1 / c.lossProbeInterval, downloadMbps: r.download?.summary.averageMbps,
-                                                            score: r.scores.gaming)
+                                                            score: r.scores.gaming, alternatives: alternatives,
+                                                            primaryName: r.server?.name ?? "主要伺服器")
             }
         case .voice:
             if let stats = r.packetLoss ?? r.idleLatency {

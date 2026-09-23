@@ -43,6 +43,7 @@ public enum EvidenceDimension: String, Codable, Sendable, Hashable, CaseIterable
     case baseline
     case stabilityMonitoring
     case environment
+    case route
 
     public var displayName: String {
         switch self {
@@ -60,6 +61,7 @@ public enum EvidenceDimension: String, Codable, Sendable, Hashable, CaseIterable
         case .baseline: "歷史基準"
         case .stabilityMonitoring: "連續監測"
         case .environment: "網路環境"
+        case .route: "路由追蹤"
         }
     }
 }
@@ -76,13 +78,21 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case idleLatencyLow, idleLatencyHigh
     case jitterHigh, jitterLow
     case lossNone, lossHigh, lossSevere, lossBursty, lossRandom
+    /// High-rate ICMP stress probe lost packets while low-rate / other probes did not.
+    case possibleICMPRateLimiting
     case latencySpikesFrequent
     // Bufferbloat
     case downloadBufferbloat, uploadBufferbloat, noBufferbloat
+    /// Latency stayed elevated after the load stopped.
+    case slowPostLoadRecovery
     // Application / protocol
     case dnsSlow, dnsFailures, dnsHealthy
+    /// Median fine but P95 ≥ 200 ms and ≥ 3 × median (occasional very slow lookups).
+    case dnsHighTailLatency
     case tcpConnectSlow, tlsSlow, ttfbSlow
     case http3Negotiated, quicBlocked, quicEndpointFailure, quicImplementationFailure
+    /// A QUIC handshake succeeded (UDP 443 reachable) — says nothing about HTTP/3 negotiation.
+    case quicReachable
     case mtuReduced, mtuNormal
     // Environment
     case onWiFi, onCellular, on5G, onLTE, noCellularTests, no5GTests
@@ -95,6 +105,11 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case singleServerAnomalous, multipleServersAnomalous, allServersAnomalous, allServersNormal
     case regionSpecificAnomaly
     case serverThroughputOutlierLow, crossServerConsistentThroughput, higherLatencyRelativeToPeers
+    case largeCrossProviderThroughputVariance, crossProviderThroughputConsistent
+    // Route
+    case routeLatencyStep, intermediateHopICMPDeprioritized
+    // Sustained load
+    case throughputDegradationUnderLoad
     // IP family
     case ipv6DegradedOnly, ipv4DegradedOnly, ipFamiliesEquivalent, ipv6Unavailable
     // Interfaces / radio
@@ -109,18 +124,21 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     public var dimension: EvidenceDimension {
         switch self {
         case .downloadHigh, .downloadNormal, .downloadLow, .uploadVeryLow, .uploadLow, .uploadNormal, .asymmetricRatio,
-             .downloadUnstable, .downloadStable, .uploadUnstable, .uploadStable:
+             .downloadUnstable, .downloadStable, .uploadUnstable, .uploadStable, .throughputDegradationUnderLoad:
             .throughput
         case .idleLatencyLow, .idleLatencyHigh, .jitterHigh, .jitterLow, .latencySpikesFrequent:
             .latency
-        case .lossNone, .lossHigh, .lossSevere, .lossBursty, .lossRandom:
+        case .lossNone, .lossHigh, .lossSevere, .lossBursty, .lossRandom, .possibleICMPRateLimiting:
             .loss
-        case .downloadBufferbloat, .uploadBufferbloat, .noBufferbloat:
+        case .downloadBufferbloat, .uploadBufferbloat, .noBufferbloat, .slowPostLoadRecovery:
             .bufferbloat
-        case .dnsSlow, .dnsFailures, .dnsHealthy:
+        case .dnsSlow, .dnsFailures, .dnsHealthy, .dnsHighTailLatency:
             .dns
-        case .tcpConnectSlow, .tlsSlow, .ttfbSlow, .http3Negotiated, .quicBlocked, .quicEndpointFailure, .quicImplementationFailure:
+        case .tcpConnectSlow, .tlsSlow, .ttfbSlow, .http3Negotiated, .quicBlocked, .quicEndpointFailure, .quicImplementationFailure,
+             .quicReachable:
             .protocols
+        case .routeLatencyStep, .intermediateHopICMPDeprioritized:
+            .route
         case .mtuReduced, .mtuNormal:
             .mtu
         case .onWiFi, .onCellular, .on5G, .onLTE, .noCellularTests, .no5GTests, .vpnActive, .vpnInactive, .lowDataMode,
@@ -129,7 +147,8 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
         case .pathChanged, .connectionDrops, .noDropsObserved:
             .stabilityMonitoring
         case .singleServerAnomalous, .multipleServersAnomalous, .allServersAnomalous, .allServersNormal, .regionSpecificAnomaly,
-             .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers:
+             .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers,
+             .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent:
             .crossServer
         case .ipv6DegradedOnly, .ipv4DegradedOnly, .ipFamiliesEquivalent, .ipv6Unavailable:
             .ipFamily
@@ -168,7 +187,7 @@ public enum EvidenceKind: String, Codable, Sendable, Hashable {
 extension EvidenceCode {
     public var kind: EvidenceKind {
         switch self {
-        case .vpnActive, .vpnInactive: .heuristic
+        case .vpnActive, .vpnInactive, .possibleICMPRateLimiting, .intermediateHopICMPDeprioritized: .heuristic
         case .noCellularTests, .no5GTests, .cellularRadioMetricsUnavailable, .noBaseline, .interfaceProbeUnavailable: .notTested
         default:
             switch dimension {

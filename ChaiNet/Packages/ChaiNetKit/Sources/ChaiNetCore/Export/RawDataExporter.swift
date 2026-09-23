@@ -10,6 +10,8 @@ public struct RawDataExport: Codable, Sendable {
     public var platform: String
     public var result: TestResult
     public var analysis: RootCauseAnalysis?
+    /// "aiSafe; ip_addresses=[REDACTED] …" or "engineer; ip_addresses=full …".
+    public var privacy: String?
 }
 
 public enum RawDataExporter {
@@ -22,22 +24,25 @@ public enum RawDataExporter {
         return RootCauseAnalyzer().analyze(session: session, baselines: baselines)
     }
 
+    /// `privacy` defaults to AI-safe: every IP literal is `[REDACTED]` (see `IPRedactor`).
     public static func json(_ result: TestResult, analysis: RootCauseAnalysis?, appVersion: String, platform: String,
-                            includeLocation: Bool = false) throws -> Data {
+                            includeLocation: Bool = false, privacy: ExportPrivacy = .aiSafe) throws -> Data {
         var r = result
         if !includeLocation { r.location = nil }
         let export = RawDataExport(schema: schema, version: version, generatedAt: Date(), appVersion: appVersion, platform: platform,
-                                   result: r, analysis: analysis)
+                                   result: r, analysis: analysis, privacy: privacy.summary)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(export)
+        let data = try encoder.encode(export)
+        guard privacy.redactsIPs else { return data }
+        return Data(IPRedactor.redact(String(decoding: data, as: UTF8.self)).utf8)
     }
 
     // MARK: Text
 
     public static func text(_ r: TestResult, analysis: RootCauseAnalysis?, appVersion: String, platform: String,
-                            includeLocation: Bool = false) -> String {
+                            includeLocation: Bool = false, privacy: ExportPrivacy = .aiSafe) -> String {
         var o: [String] = []
         let iso = ISO8601DateFormatter()
         func sec(_ title: String) { o.append(""); o.append("[\(title)]") }
@@ -104,6 +109,7 @@ public enum RawDataExporter {
         kv("schema", schema); kv("generated_at", iso.string(from: Date())); kv("app_version", appVersion); kv("platform", platform)
         kv("test_id", r.id.uuidString); kv("test_date", iso.string(from: r.date)); kv("test_kind", r.kind.rawValue); kv("cancelled", b(r.wasCancelled))
         kv("ip_family_preference", r.ipFamilyPreference.rawValue)
+        kv("export_privacy", privacy.summary)
         if includeLocation, let loc = r.location { kv("location", "\(Fmt.d(loc.latitude, 5)),\(Fmt.d(loc.longitude, 5)) acc=\(Fmt.d(loc.horizontalAccuracy, 0))m") }
 
         if let p = r.fullTestPlan {
@@ -118,7 +124,7 @@ public enum RawDataExporter {
         let net = r.network
         sec("environment")
         kv("status", net.status.rawValue); kv("interface", net.primaryInterface.rawValue); kv("network_class", NetworkClass(snapshot: net).rawValue)
-        kv("available_interfaces", net.availableInterfaces.map(\.rawValue).joined(separator: ","))
+        kv("available_interfaces", NetworkSnapshot.deduplicated(net.availableInterfaces).map(\.rawValue).joined(separator: ","))
         kv("is_expensive", b(net.isExpensive)); kv("is_constrained_low_data_mode", b(net.isConstrained))
         kv("supports_ipv4", b(net.supportsIPv4)); kv("supports_ipv6", b(net.supportsIPv6)); kv("supports_dns", b(net.supportsDNS))
         kv("vpn_state_heuristic", net.vpn.state.rawValue); kv("vpn_interfaces", net.vpn.interfaces.joined(separator: ","))
@@ -162,7 +168,9 @@ public enum RawDataExporter {
             kv("grade", bb.grade.rawValue); kv("idle_median_ms", n(bb.idleMedianMs))
             kv("download_loaded_median_ms", n(bb.downloadLoadedMedianMs)); kv("download_increase_ms", n(bb.downloadIncreaseMs)); kv("download_grade", bb.downloadGrade?.rawValue ?? "null")
             kv("upload_loaded_median_ms", n(bb.uploadLoadedMedianMs)); kv("upload_increase_ms", n(bb.uploadIncreaseMs)); kv("upload_grade", bb.uploadGrade?.rawValue ?? "null")
-            kv("queue_location", "unknown (access / network path)")
+            kv("interpretation", "loadedLatencyInflation / networkPathQueueing")
+            kv("queue_location", "unknown")
+            kv("possible_queue_locations", "device_or_modem_queue,radio_scheduler,access_network,carrier_or_core_network,router,remote_path")
         }
 
         if let g = r.gaming {
@@ -293,6 +301,7 @@ public enum RawDataExporter {
         }
         o.append("")
         o.append("# end of ChaiNet Raw Data Export v\(version)")
-        return o.joined(separator: "\n")
+        let text = o.joined(separator: "\n")
+        return privacy.redactsIPs ? IPRedactor.redact(text) : text
     }
 }

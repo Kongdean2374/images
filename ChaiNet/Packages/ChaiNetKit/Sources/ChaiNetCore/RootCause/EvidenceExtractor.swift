@@ -40,7 +40,10 @@ public struct EvidenceSet: Codable, Sendable, Hashable {
 /// | latencySpikesFrequent  | ≥ 3 spikes                                                  |
 /// | *Bufferbloat           | loaded − idle median > 100 ms; noBufferbloat: all < 30 ms   |
 /// | dnsSlow / Failures     | system median > 100 ms or > best + 30 ms / ≥ 20 % failures  |
+/// | dnsHighTailLatency     | system P95 ≥ 200 ms and ≥ 3 × median (dnsHealthy suppressed) |
 /// | tcpConnectSlow / tlsSlow / ttfbSlow | > 150 / > 250 / TTFB − TCP − TLS > 300 ms      |
+/// | http3Negotiated        | an HTTP response actually used h3                           |
+/// | quicReachable          | a QUIC handshake completed (says nothing about HTTP/3)      |
 /// | quicBlocked            | QUIC failed while HTTP worked, server known to support h3   |
 /// | mtuReduced / Normal    | path MTU < 1400 / ≥ 1400                                    |
 public struct EvidenceExtractor: Sendable {
@@ -114,6 +117,7 @@ public struct EvidenceExtractor: Sendable {
         if results.contains(where: { $0.protocolProbe != nil }) { attempted.insert(.protocols) }
         if results.contains(where: { $0.mtu != nil }) { attempted.insert(.mtu) }
         if results.contains(where: { $0.monitoring != nil }) { attempted.insert(.stabilityMonitoring) }
+        if results.contains(where: { $0.traceroute != nil }) { attempted.insert(.route) }
         return EvidenceSet(evidence: evidence, measuredDimensions: measured, attemptedDimensions: attempted,
                            crossTest: cross, baselineComparisons: comparisons)
     }
@@ -235,11 +239,17 @@ public struct EvidenceExtractor: Sendable {
             if failureRate >= 20 {
                 add(.dnsFailures, "系統 DNS 失敗率 \(Fmt.d(failureRate, 0))%", failureRate, "%")
             }
-            if let sys = system.statistics.rtt?.median {
+            if let rtt = system.statistics.rtt {
+                let sys = rtt.median
+                let tail = DNSTail.isHigh(median: sys, p95: rtt.p95)
+                if tail {
+                    add(.dnsHighTailLatency, "系統 DNS P95 \(Fmt.d(rtt.p95, 0)) ms（中位數 \(Fmt.d(sys, 0)) ms）：highTailLatencyObserved，偶有查詢特別慢",
+                        rtt.p95, "ms")
+                }
                 if sys > 100 || (m.bestDNSMs.map { sys - $0 > 30 } ?? false) {
                     add(.dnsSlow, "系統 DNS 中位數 \(Fmt.d(sys, 0)) ms（最佳 \(m.bestDNSName ?? "—") \(m.bestDNSMs.map { Fmt.d($0, 0) } ?? "—") ms）", sys, "ms")
-                } else if failureRate < 20 {
-                    add(.dnsHealthy, "系統 DNS 中位數 \(Fmt.d(sys, 0)) ms，無明顯失敗", sys, "ms")
+                } else if failureRate < 20 && !tail {
+                    add(.dnsHealthy, "系統 DNS 中位數 \(Fmt.d(sys, 0)) ms、P95 \(Fmt.d(rtt.p95, 0)) ms，無明顯失敗", sys, "ms")
                 }
             }
         }
@@ -258,9 +268,16 @@ public struct EvidenceExtractor: Sendable {
             // Statements quote the protocol that was actually negotiated (never assume HTTP/2).
             let httpProto = probe.http?.negotiatedProtocol.displayName ?? "HTTP"
             let assessment = probe.quicAssessment ?? (probe.quicHandshakeMs.value != nil ? .working : nil)
-            if probe.http3Attempt?.negotiatedProtocol == .http3 || assessment == .working {
-                add(.http3Negotiated, "HTTP/3（QUIC）可用：至少一個端點完成 QUIC 交握")
-            } else if let assessment {
+            // quicReachable (UDP 443 + QUIC handshake) and http3Negotiated (an HTTP response over h3)
+            // are separate facts: a handshake alone never claims HTTP/3.
+            if probe.http3Negotiated {
+                add(.http3Negotiated, "HTTP 請求實際協商為 HTTP/3（http3Negotiated）")
+            }
+            if probe.quicReachable {
+                let ok = (probe.quicProbes ?? []).filter { $0.handshakeMs != nil }.map(\.host)
+                add(.quicReachable, "QUIC 交握成功（quicReachable / udp443Reachable）\(ok.isEmpty ? "" : "：\(ok.joined(separator: "、"))")"
+                    + (probe.http3Negotiated ? "" : "；HTTP 請求未協商 HTTP/3（\(httpProto)）"))
+            } else if !probe.http3Negotiated, let assessment {
                 let hosts = (probe.quicProbes ?? []).map { "\($0.host)（\($0.failure?.rawValue ?? "ok")，TCP \($0.tcpReachable == true ? "可連" : "不可連")）" }
                     .joined(separator: "、")
                 switch assessment {
@@ -282,6 +299,22 @@ public struct EvidenceExtractor: Sendable {
             let target = r.mtu?.target ?? "目標"
             if mtu < 1400 { add(.mtuReduced, "IPv4 → \(target) 路徑 MTU \(mtu) bytes", Double(mtu), "bytes") }
             else { add(.mtuNormal, "IPv4 → \(target) 路徑 MTU \(mtu) bytes：受測路徑未觀察到 MTU 問題（noIssueObservedOnTestedPath，不代表其他路徑）", Double(mtu), "bytes") }
+        }
+
+        // Route — an isolated slow hop is ICMP deprioritisation, only a persistent step is a path fact.
+        if let tr = r.traceroute {
+            let a = TracerouteAnalyzer.analyze(tr.hops)
+            if a.sufficient {
+                measured.insert(.route)
+                if let step = a.largestStep {
+                    add(.routeLatencyStep, "路由第 \(step.fromTTL) → \(step.toTTL) 跳延遲持續增加 \(Fmt.d(step.increaseMs, 0)) ms（之後各跳皆維持），為路徑本身的延遲",
+                        step.increaseMs, "ms")
+                }
+                if !a.isolatedHighHops.isEmpty {
+                    let list = a.isolatedHighHops.map { "#\($0.ttl) +\(Fmt.d($0.excessMs, 0)) ms" }.joined(separator: "、")
+                    add(.intermediateHopICMPDeprioritized, "個別節點延遲偏高但後續節點較快（\(list)）：路由器對 ICMP 降低優先權，不代表壅塞")
+                }
+            }
         }
 
         // Monitoring
