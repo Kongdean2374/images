@@ -17,6 +17,7 @@ struct LapCounterView: View {
 
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
+    @State private var saveErrorMessage: String?
     @State private var showDistanceSheet = false
 
     var body: some View {
@@ -39,6 +40,7 @@ struct LapCounterView: View {
             .padding(.bottom, 16)
         }
         .preferredColorScheme(.dark)
+        .saveErrorAlert($saveErrorMessage)
         .onDisappear {
             pedometer.stop()
         }
@@ -318,8 +320,11 @@ struct LapCounterView: View {
         pedometer.stop()
         let session = engine.buildSession(steps: pedometer.isAvailable ? pedometer.steps : nil,
                                           cadence: pedometer.isAvailable ? pedometer.cadence : nil)
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

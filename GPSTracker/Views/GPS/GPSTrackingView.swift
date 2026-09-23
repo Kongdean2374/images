@@ -26,6 +26,7 @@ struct GPSTrackingView: View {
     @State private var followCamera = true
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
+    @State private var saveErrorMessage: String?
     @State private var expandedMetrics = true
     @State private var showPaceEditor = false
     @State private var showLapEditor = false
@@ -108,6 +109,7 @@ struct GPSTrackingView: View {
                 if value > 0 { settings.addCustomLapDistance(value) }
             }
         }
+        .saveErrorAlert($saveErrorMessage)
         .alert("結束這次運動？", isPresented: $showStopConfirm) {
             Button("繼續記錄", role: .cancel) {}
             Button("結束並儲存", role: .destructive) { finish() }
@@ -678,8 +680,11 @@ struct GPSTrackingView: View {
     private func finish() {
         recorder.stop()
         let session = recorder.buildSession(weatherNote: nil, temperature: nil)
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

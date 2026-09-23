@@ -14,6 +14,7 @@ struct IntervalTimerView: View {
     @StateObject private var store = IntervalPlanStore.shared
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
+    @State private var saveErrorMessage: String?
     @State private var useQuickSetup = true
     @State private var editingPlan: IntervalPlan?
     @State private var selectedPlanID: UUID?
@@ -66,6 +67,7 @@ struct IntervalTimerView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .saveErrorAlert($saveErrorMessage)
         .sheet(item: $editingPlan) { plan in
             IntervalPlanEditor(plan: plan) { updated in
                 store.save(updated)
@@ -399,8 +401,11 @@ struct IntervalTimerView: View {
     private func finish() {
         engine.stop()
         let session = engine.buildSession()
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

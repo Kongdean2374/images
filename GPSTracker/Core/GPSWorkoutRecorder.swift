@@ -125,8 +125,9 @@ final class GPSWorkoutRecorder: ObservableObject {
     func stop() {
         commitSegment()
         state = .finished
-        // 正常結束 → 自動存檔不再需要
-        ActiveWorkoutStore.shared.clear()
+        // 注意：這裡「不」清除自動存檔。
+        // 必須等 SessionSaver 確認寫進資料庫成功之後才清，
+        // 否則資料庫儲存失敗時兩份都沒了。
         timer?.invalidate()
         timer = nil
         cancellables.removeAll()
@@ -373,9 +374,13 @@ final class GPSWorkoutRecorder: ObservableObject {
     }
 
     /// 把目前進度寫到磁碟。force 用在暫停、進背景這種關鍵時刻。
+    ///
+    /// 先問節流器要不要寫，確定要寫才組快照——組快照要走訪全部軌跡點，
+    /// 每 0.2 秒都組一次的話，長距離運動會把 CPU 吃光。
     func autosave(force: Bool = false) {
         guard state == .recording || state == .paused else { return }
-        ActiveWorkoutStore.shared.save(snapshot, force: force)
+        guard ActiveWorkoutStore.shared.shouldWrite(force: force) else { return }
+        ActiveWorkoutStore.shared.save(snapshot, force: true)
     }
 
     /// 從中斷的自動存檔接續記錄
@@ -432,9 +437,18 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     /// 滑動窗口速度，避免 GPS 漂移造成配速亂跳
     private func windowSpeed(newCoordinate: CLLocationCoordinate2D, at time: Date) -> Double {
+        // 從尾端往回走到超出時間窗就停。原本用 filter 掃整個陣列，
+        // 長距離運動累積到上萬點時，每收到一個座標就要掃一次。
         let cutoff = time.addingTimeInterval(-paceWindow)
-        let window = samples.filter { $0.timestamp >= cutoff }
-        guard let first = window.first else { return currentSpeed }
+        var index = samples.count - 1
+        var first: TrackSample?
+        while index >= 0 {
+            let sample = samples[index]
+            if sample.timestamp < cutoff { break }
+            first = sample
+            index -= 1
+        }
+        guard let first else { return currentSpeed }
         let dt = time.timeIntervalSince(first.timestamp)
         guard dt > 3 else { return currentSpeed }
         let dd = distance - first.distanceFromStart

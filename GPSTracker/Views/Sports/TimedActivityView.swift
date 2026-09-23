@@ -25,6 +25,7 @@ struct TimedActivityView: View {
     @State private var intensity: Double = 1.0
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
+    @State private var saveErrorMessage: String?
 
     private enum RunState { case idle, running, paused }
 
@@ -84,6 +85,7 @@ struct TimedActivityView: View {
             }
             .onDisappear { dismiss() }
         }
+        .saveErrorAlert($saveErrorMessage)
         .alert("結束這次\(sport.name)？", isPresented: $showStopConfirm) {
             Button("繼續", role: .cancel) {}
             Button("結束並儲存", role: .destructive) { finish() }
@@ -356,8 +358,11 @@ struct TimedActivityView: View {
                                                            distance: manualDistance,
                                                            averagePace: nil,
                                                            elevationGain: nil)
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

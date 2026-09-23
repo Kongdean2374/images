@@ -18,6 +18,7 @@ struct IndoorRepsView: View {
     @State private var exercise: ExerciseItem = ExerciseItem.builtIn[0]
     @State private var circuit = CircuitConfig()
     @State private var startDate = Date()
+    @State private var saveErrorMessage: String?
     @State private var elapsed: TimeInterval = 0
     @State private var isRunning = false
     @State private var timer: Timer?
@@ -67,6 +68,7 @@ struct IndoorRepsView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .saveErrorAlert($saveErrorMessage)
         .onAppear {
             if let first = library.items.first, !library.items.contains(exercise) {
                 exercise = first
@@ -528,8 +530,11 @@ struct IndoorRepsView: View {
         session.notes = circuit.enabled
             ? "\(exercise.name)　\(completedSets)/\(circuit.sets) 組　共 \(totalReps) 下"
             : "\(exercise.name) \(totalReps) 下"
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

@@ -171,3 +171,29 @@ struct RingProgress: View {
         .accessibilityValue(String(format: "%.0f%%", min(1, max(0, progress)) * 100))
     }
 }
+
+/// 儲存失敗時的統一提示。運動好不容易做完，存不進去一定要讓使用者知道。
+struct SaveErrorAlert: ViewModifier {
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content.alert("這筆紀錄沒有存成功",
+                      isPresented: Binding(get: { message != nil },
+                                           set: { if !$0 { message = nil } })) {
+            Button("知道了") { message = nil }
+        } message: {
+            Text("""
+            \(message ?? "")
+
+            這次的進度已經保留在自動存檔裡，重新開啟 App 會出現回復畫面。\
+            若裝置儲存空間已滿，請先清出一些空間再試。
+            """)
+        }
+    }
+}
+
+extension View {
+    func saveErrorAlert(_ message: Binding<String?>) -> some View {
+        modifier(SaveErrorAlert(message: message))
+    }
+}

@@ -9,6 +9,7 @@ struct FitnessTestView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
 
     @StateObject private var engine = FitnessTestEngine()
+    @State private var saveErrorMessage: String?
     @State private var standards = FitnessStandardsStore.load()
     @State private var selected: FitnessTestItem = .sitUps
     @State private var showStandardsEditor = false
@@ -55,6 +56,7 @@ struct FitnessTestView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .saveErrorAlert($saveErrorMessage)
         .onDisappear { engine.reset() }
         .sheet(isPresented: $showStandardsEditor) {
             FitnessStandardsEditor(standards: $standards)
@@ -615,8 +617,11 @@ struct FitnessTestView: View {
 
     private func save() {
         let session = engine.buildSession(standards: standards)
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

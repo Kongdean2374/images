@@ -54,6 +54,9 @@ final class ActiveWorkoutStore {
 
     private let fileName = "active-workout.json"
     private var lastWrite = Date.distantPast
+    /// 寫檔專用佇列：JSON 編碼上萬個座標點不能卡在主執行緒上
+    private let queue = DispatchQueue(label: "com.gpstracker.activeworkout",
+                                      qos: .utility)
 
     private var url: URL? {
         guard let directory = try? FileManager.default.url(for: .applicationSupportDirectory,
@@ -67,15 +70,23 @@ final class ActiveWorkoutStore {
 
     // MARK: 寫入
 
+    /// 問節流器現在該不該寫。呼叫端先問過再組快照，省下無謂的走訪。
+    func shouldWrite(force: Bool) -> Bool {
+        force || Date().timeIntervalSince(lastWrite) > 8
+    }
+
     /// 節流寫入。`force` 用在暫停、進背景這種關鍵時刻，必定寫入。
     func save(_ snapshot: ActiveWorkoutSnapshot, force: Bool = false) {
-        guard force || Date().timeIntervalSince(lastWrite) > 8 else { return }
+        guard shouldWrite(force: force) else { return }
         guard let url else { return }
         lastWrite = Date()
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(snapshot) else { return }
-        try? data.write(to: url, options: .atomic)
+        // 編碼與寫檔都丟到背景佇列，主執行緒不會因此掉幀
+        queue.async {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            guard let data = try? encoder.encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     // MARK: 讀取與清除

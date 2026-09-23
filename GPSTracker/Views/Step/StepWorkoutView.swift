@@ -19,6 +19,7 @@ struct StepWorkoutView: View {
     @State private var targetValue = ""
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
+    @State private var saveErrorMessage: String?
     @State private var showTreadmillSheet = false
     @State private var actualDistanceText = ""
 
@@ -81,6 +82,7 @@ struct StepWorkoutView: View {
             }
             .onDisappear { dismiss() }
         }
+        .saveErrorAlert($saveErrorMessage)
         .alert("結束這次\(engine.mode.displayName)？", isPresented: $showStopConfirm) {
             Button("繼續", role: .cancel) {}
             Button("結束並儲存", role: .destructive) { finishFlow() }
@@ -635,8 +637,11 @@ struct StepWorkoutView: View {
 
     private func save() {
         let session = engine.buildSession()
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

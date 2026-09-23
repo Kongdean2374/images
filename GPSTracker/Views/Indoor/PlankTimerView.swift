@@ -14,6 +14,7 @@ struct PlankTimerView: View {
     @StateObject private var engine = PlankEngine()
     @State private var exercise = "標準棒式"
     @State private var finishedSession: WorkoutSession?
+    @State private var saveErrorMessage: String?
 
     private let exercises = ["標準棒式", "側棒式（左）", "側棒式（右）", "靠牆深蹲", "橋式"]
     private let targets = [30, 45, 60, 90, 120, 180]
@@ -62,6 +63,7 @@ struct PlankTimerView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .saveErrorAlert($saveErrorMessage)
         .onDisappear { engine.reset() }
         .fullScreenCover(item: $finishedSession) { session in
             NavigationStack {
@@ -317,8 +319,11 @@ struct PlankTimerView: View {
 
     private func save() {
         let session = engine.buildSession(exerciseName: exercise)
-        context.insert(session)
-        try? context.save()
+        // 統一走 SessionSaver：儲存失敗會回報，也不會提早刪掉自動存檔
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         finishedSession = session
     }

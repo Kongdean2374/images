@@ -12,6 +12,7 @@ struct WorkoutRecoveryView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @State private var saved = false
+    @State private var saveErrorMessage: String?
 
     private var title: String {
         snapshot.sport?.name ?? snapshot.type.displayName
@@ -34,6 +35,7 @@ struct WorkoutRecoveryView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .preferredColorScheme(.dark)
+        .saveErrorAlert($saveErrorMessage)
         .interactiveDismissDisabled()
     }
 
@@ -150,10 +152,12 @@ struct WorkoutRecoveryView: View {
 
     private func saveNow() {
         let session = ActiveWorkoutStore.shared.buildSession(from: snapshot)
-        context.insert(session)
-        try? context.save()
+        // 失敗的話自動存檔會留著，下次開啟還會再問一次
+        if case .failed(let message) = SessionSaver.save(session, context: context) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
-        ActiveWorkoutStore.shared.clear()
         saved = true
         CueService.shared.impact(.heavy)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }

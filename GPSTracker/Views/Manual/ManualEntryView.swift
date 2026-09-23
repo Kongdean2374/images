@@ -7,6 +7,7 @@ struct ManualEntryView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var settings: AppSettings
 
+    @State private var saveErrorMessage: String?
     @State private var type: WorkoutType = .manualEntry
     @State private var date = Date()
     @State private var distanceText = ""
@@ -143,6 +144,7 @@ struct ManualEntryView: View {
                 .padding(.bottom, 30)
             }
             .screenBackground()
+        .saveErrorAlert($saveErrorMessage)
             .navigationTitle("手動輸入")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -193,8 +195,11 @@ struct ManualEntryView: View {
                                                            elevationGain: nil)
         session.weatherNote = weather.isEmpty ? nil : weather
         session.temperature = Double(temperature)
-        context.insert(session)
-        try? context.save()
+        if case .failed(let message) = SessionSaver.save(session, context: context,
+                                                        clearsAutosave: false) {
+            saveErrorMessage = message
+            return
+        }
         Task { await HealthKitSync.syncIfEnabled(session) }
         CueService.shared.notify(.success)
         finishedSession = session
