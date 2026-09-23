@@ -49,6 +49,10 @@ jobs:
           set -o pipefail
           swift test --package-path ChaiNet/Packages/ChaiNetKit 2>&1 | tee swift-test.log
 
+      - name: Show compiler errors / test failures
+        if: failure()
+        run: grep -E "error:|fatal error|failed|Fatal" swift-test.log | grep -v "warning:" | sort -u | head -200 || true
+
       - name: Upload swift test log
         if: always()
         uses: actions/upload-artifact@v4

@@ -51,7 +51,12 @@ public enum SocketSupport {
     public static func numericHost(_ addr: UnsafePointer<sockaddr>, length: socklen_t) -> String? {
         var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         guard getnameinfo(addr, length, &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 else { return nil }
-        return String(cString: buffer)
+        return cString(buffer)
+    }
+
+    /// Converts a NUL-terminated C buffer to a String.
+    static func cString(_ buffer: [CChar]) -> String {
+        String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     /// Reverse DNS (PTR) lookup; nil when there is no name. Blocking — call off the main thread.
@@ -66,7 +71,7 @@ public enum SocketSupport {
                 getnameinfo($0, socklen_t(MemoryLayout<sockaddr_in>.size), &buffer, socklen_t(buffer.count), nil, 0, NI_NAMEREQD)
             }
         }
-        return ok == 0 ? String(cString: buffer) : nil
+        return ok == 0 ? cString(buffer) : nil
     }
 
     public static func isIPv4Literal(_ s: String) -> Bool {
