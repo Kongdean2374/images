@@ -13,7 +13,7 @@ final class AppTests: XCTestCase {
                             networkInfo: MockNetworkInfo(), serverDirectory: MockServerDirectory())
     }
 
-    func waitUntil(_ condition: @MainActor () -> Bool, timeout: Double = 10) async {
+    func waitUntil(timeout: Double = 10, _ condition: @escaping @MainActor () -> Bool) async {
         let start = Date()
         while !condition() && Date().timeIntervalSince(start) < timeout {
             try? await Task.sleep(for: .milliseconds(20))
