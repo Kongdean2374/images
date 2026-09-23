@@ -62,16 +62,25 @@ public enum DiagnosticRules {
             recommendation: "連續遺失通常來自佇列溢出、Wi-Fi 漫遊或基地台切換，而非單純訊號雜訊。")
     }
 
-    static func bloat(_ code: DiagnosticCode, _ label: String, _ value: Double?) -> DiagnosticFinding? {
+    static func bloat(_ code: DiagnosticCode, _ label: String, _ value: Double?, _ interface: InterfaceKind?) -> DiagnosticFinding? {
         guard let v = value, v > 100 else { return nil }
-        return DiagnosticFinding(code: code, severity: v > 300 ? .critical : .warning, title: "\(label) Bufferbloat",
-            detail: "\(label)滿載時延遲增加 \(fmt(v, 0)) ms（等級 \(BufferbloatGrade.from(increaseMs: v).rawValue)）。",
-            recommendation: "在路由器啟用 SQM（fq_codel / CAKE）並將頻寬限制設為實測值的 90–95%。")
+        let where_: String
+        switch interface {
+        case .cellular?:
+            where_ = "行動網路下，佇列多半位於基地台排程或電信商網路（使用者端無法設定 SQM）；可改時段或改用 Wi-Fi 比較。"
+        case .wifi?, .wiredEthernet?:
+            where_ = "若佇列在家用路由器 / 數據機，可啟用 SQM（fq_codel / CAKE）並把頻寬限制設為實測值的 90–95%；也可能在 ISP 端。"
+        default:
+            where_ = "佇列位置無法由裝置端確認。"
+        }
+        return DiagnosticFinding(code: code, severity: v > 300 ? .critical : .warning, title: "\(label)時路徑佇列延遲（Bufferbloat）",
+            detail: "\(label)滿載時延遲增加 \(fmt(v, 0)) ms（等級 \(BufferbloatGrade.from(increaseMs: v).rawValue)）。佇列位於存取 / 網路路徑某處，實際位置未知。",
+            recommendation: where_)
     }
 
     /// Loaded latency increase > 100 ms → warning, > 300 ms → critical.
-    public static let downloadBufferbloat = ClosureRule(.downloadBufferbloat) { bloat(.downloadBufferbloat, "下載", $0.downloadBloatMs) }
-    public static let uploadBufferbloat = ClosureRule(.uploadBufferbloat) { bloat(.uploadBufferbloat, "上傳", $0.uploadBloatMs) }
+    public static let downloadBufferbloat = ClosureRule(.downloadBufferbloat) { bloat(.downloadBufferbloat, "下載", $0.downloadBloatMs, $0.interface) }
+    public static let uploadBufferbloat = ClosureRule(.uploadBufferbloat) { bloat(.uploadBufferbloat, "上傳", $0.uploadBloatMs, $0.interface) }
 
     /// idle latency > 100 ms → warning.
     public static let highLatency = ClosureRule(.highLatency) { m in
@@ -159,8 +168,8 @@ public enum DiagnosticRules {
     public static let http3Unavailable = ClosureRule(.http3Unavailable) { m in
         guard m.http3Supported == false else { return nil }
         return DiagnosticFinding(code: .http3Unavailable, severity: .info, title: "未使用 HTTP/3",
-            detail: "與伺服器的連線未協商出 HTTP/3 (QUIC)，可能是伺服器不支援或 UDP 443 被阻擋。",
-            recommendation: "若網路封鎖 UDP，QUIC 會自動退回 HTTP/2，一般不影響使用。")
+            detail: "未觀察到可用的 HTTP/3 (QUIC)。可能是伺服器不支援、個別端點問題，或 UDP 443 被阻擋；需多端點結果才能區分。",
+            recommendation: "HTTP/3 無法使用時會自動退回 TCP 上的 HTTP，一般不影響使用。")
     }
 
     /// TLS handshake > 150 ms → info.
@@ -175,7 +184,7 @@ public enum DiagnosticRules {
     public static let reducedMTU = ClosureRule(.reducedMTU) { m in
         guard let mtu = m.pathMTU, mtu < 1400 else { return nil }
         return DiagnosticFinding(code: .reducedMTU, severity: .info, title: "路徑 MTU 偏小",
-            detail: "路徑 MTU 為 \(mtu) bytes（標準乙太網路為 1500）。",
+            detail: "受測 IPv4 路徑 MTU 為 \(mtu) bytes（標準乙太網路為 1500）。",
             recommendation: "常見於 VPN、PPPoE 或行動網路通道；若有連線異常可調整 MSS clamping。")
     }
 

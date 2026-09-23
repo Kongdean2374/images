@@ -84,7 +84,7 @@ final class StreamingAndOBSTests: XCTestCase {
 
     func testOBSDowngradeWhenUnstable() {
         var rates: [Double] = []
-        for i in 0..<20 { rates.append(i % 2 == 0 ? 20 : 2) }
+        for i in 0..<20 { rates.append((i / 5) % 2 == 0 ? 20 : 2) }   // alternates per 0.5 s window
         let r = OBSSuitabilityCalculator.evaluate(upload: speed(.upload, rates: rates), idleLatency: nil, uploadLoadedLatency: nil, score: nil)
         XCTAssertFalse(r.warnings.isEmpty)
         XCTAssertFalse(r.presets.contains { $0.verdict == .great })

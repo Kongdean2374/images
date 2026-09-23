@@ -57,8 +57,9 @@ final class RootCauseRuleTests: XCTestCase {
         XCTAssertEqual(a.mostLikely?.layer, .accessLink)
         // Server-specific issue is excluded because every server behaves the same.
         XCTAssertEqual(hyp(a, .serverOrRouteSpecific).likelihood, .ruledOut)
-        // Wi-Fi hypotheses don't apply to a cellular-only session.
-        XCTAssertEqual(hyp(a, .wifiRadioQuality).likelihood, .ruledOut)
+        // No Wi-Fi test in this session → Wi-Fi causes are *not tested*, never ruled out.
+        XCTAssertEqual(hyp(a, .wifiRadioQuality).likelihood, .notTested)
+        XCTAssertEqual(hyp(a, .nrSpecificIssue).likelihood, .unlikely, "on 5G but no LTE comparison yet → no support")
         // No cross-interface comparison → device problem can't be "likely".
         XCTAssertNotEqual(hyp(a, .deviceOrOSEnvironment).likelihood, .likely)
         // Radio quality stays at most "possible" because iOS exposes no RSRP / SINR.
@@ -127,12 +128,20 @@ final class RootCauseRuleTests: XCTestCase {
     }
 
     func testMissingDimensionGivesInsufficientEvidence() {
-        // No interface comparison was run → device hypothesis can't be judged.
+        // No interface comparison was run → device hypothesis is *not tested*.
         let a = analyze([.onWiFi, .lossHigh], interface: .wifi, measured: [.loss, .latency, .environment])
-        XCTAssertEqual(hyp(a, .deviceOrOSEnvironment).likelihood, .insufficientEvidence)
+        XCTAssertEqual(hyp(a, .deviceOrOSEnvironment).likelihood, .notTested)
         XCTAssertTrue(hyp(a, .deviceOrOSEnvironment).missingDimensions.contains(.interfaceCompare))
-        XCTAssertEqual(hyp(a, .ipv6RoutingIssue).likelihood, .insufficientEvidence)
+        XCTAssertEqual(hyp(a, .ipv6RoutingIssue).likelihood, .notTested)
         XCTAssertTrue(hyp(a, .ipv6RoutingIssue).recommendedNextTests.contains(.compareIPFamilies))
+    }
+
+    func testAttemptedButInconclusiveIsInsufficientEvidence() {
+        // A cross-server check ran but only one endpoint answered → insufficient, not "not tested".
+        let set = EvidenceSet(evidence: ev([.onWiFi, .lossHigh], interface: .wifi), measuredDimensions: [.loss, .latency, .environment],
+                              attemptedDimensions: [.crossServer])
+        let a = analyzer.analyze(evidence: set)
+        XCTAssertEqual(hyp(a, .serverOrRouteSpecific).likelihood, .insufficientEvidence)
     }
 
     func testSingleMetricIsNotEnoughForLikely() {
@@ -160,8 +169,9 @@ final class RootCauseRuleTests: XCTestCase {
     }
 
     func testVPNApplicability() {
-        XCTAssertEqual(hyp(analyze([.onWiFi, .vpnInactive], interface: .wifi), .vpnOverhead).likelihood, .ruledOut)
-        XCTAssertEqual(hyp(analyze([.onWiFi], interface: .wifi), .vpnOverhead).likelihood, .insufficientEvidence)
+        // VPN detection is heuristic → "not detected" makes it unlikely, never ruled out.
+        XCTAssertEqual(hyp(analyze([.onWiFi, .vpnInactive], interface: .wifi), .vpnOverhead).likelihood, .unlikely)
+        XCTAssertEqual(hyp(analyze([.onWiFi], interface: .wifi), .vpnOverhead).likelihood, .notTested)
         XCTAssertTrue([Likelihood.likely, .possible].contains(hyp(analyze([.onWiFi, .vpnActive, .idleLatencyHigh, .mtuReduced], interface: .wifi), .vpnOverhead).likelihood))
     }
 
@@ -176,7 +186,8 @@ final class RootCauseRuleTests: XCTestCase {
     }
 
     func testMTU() {
-        XCTAssertEqual(hyp(analyze([.onWiFi, .mtuNormal], interface: .wifi), .mtuTunnelIssue).likelihood, .ruledOut)
+        // One normal IPv4 path = "no issue observed on the tested path", not a global exclusion.
+        XCTAssertEqual(hyp(analyze([.onWiFi, .mtuNormal], interface: .wifi), .mtuTunnelIssue).likelihood, .unlikely)
         XCTAssertNotEqual(hyp(analyze([.onWiFi, .mtuReduced], interface: .wifi), .mtuTunnelIssue).likelihood, .ruledOut)
     }
 
@@ -208,6 +219,32 @@ final class RootCauseRuleTests: XCTestCase {
         evidence += [EvidenceCode.jitterHigh, .lossRandom, .latencySpikesFrequent].map { DiagnosticEvidence(code: $0, statement: "", interface: .cellular) }
         let a = analyzer.analyze(evidence: EvidenceSet(evidence: evidence, measuredDimensions: Set(EvidenceDimension.allCases)))
         XCTAssertTrue(hyp(a, .wifiRadioQuality).supportingEvidence.isEmpty)
+    }
+
+    func testNo5GTestIsNotTestedNotRuledOut() {
+        let a = analyze([.onCellular, .onLTE, .no5GTests, .uploadVeryLow])
+        XCTAssertEqual(hyp(a, .nrSpecificIssue).likelihood, .notTested)
+        XCTAssertNotNil(hyp(a, .nrSpecificIssue).statusReason)
+    }
+
+    func testNormalUploadDoesNotRuleOutCellularUplinkQueueing() {
+        let a = analyze([.onCellular, .uploadNormal, .uploadBufferbloat, .jitterHigh, .allServersAnomalous])
+        XCTAssertNotEqual(hyp(a, .cellularUplinkCongestion).likelihood, .ruledOut)
+        XCTAssertTrue(hyp(a, .cellularUplinkCongestion).contradictingEvidence.contains { $0.code == .uploadNormal })
+        XCTAssertNotEqual(hyp(analyze([.onWiFi, .uploadNormal], interface: .wifi), .fixedLineUplinkCongestion).likelihood, .ruledOut)
+    }
+
+    func testBufferbloatLayerIsPathQueueingNotLocalNetwork() {
+        let a = analyze([.onCellular, .onLTE, .uploadBufferbloat, .idleLatencyLow])
+        XCTAssertEqual(hyp(a, .routerBufferbloat).layer, .pathQueueing)
+        XCTAssertFalse(hyp(a, .routerBufferbloat).title.contains("Wi-Fi"))
+    }
+
+    func testHeuristicOrUntestedEvidenceNeverRulesOut() {
+        for h in analyze([.onCellular, .vpnInactive, .no5GTests, .noCellularTests, .cellularRadioMetricsUnavailable, .noBaseline,
+                          .interfaceProbeUnavailable]).ruledOut {
+            XCTAssertTrue(h.rulingOutEvidence.allSatisfy { $0.kind == .measured || $0.kind == .derived }, "\(h.cause)")
+        }
     }
 
     func testRepeatedEvidenceCountsOnce() {
@@ -246,12 +283,32 @@ final class CrossTestAnalyzerTests: XCTestCase {
         XCTAssertEqual(analyzer.compareServers(Fixture.session([r])).verdict, .allServersAnomalous)
     }
 
-    func testLatencyOutlierRule() {
-        // best 20 → limit max(40, 70) = 70
+    func testPeerLatencyIsInformationalNotAnomalous() {
+        // Different anycast providers: 71 ms vs a 20 ms peer is "higher relative to peers", not an anomaly.
         var r = Fixture.result(.wifi, latency: 20, server: "a")
         r.crossValidation = [Fixture.check("b", median: 69), Fixture.check("c", median: 71)]
         let c = analyzer.compareServers(Fixture.session([r]))
-        XCTAssertEqual(c.entries.filter(\.isAnomalous).map(\.id), ["c"])
+        XCTAssertTrue(c.entries.filter(\.isAnomalous).isEmpty)
+        XCTAssertEqual(c.entries.filter(\.higherLatencyRelativeToPeers).map(\.id), ["c"])
+        XCTAssertEqual(c.verdict, .allNormal)
+    }
+
+    func testEndpointBaselineDeviationIsAnomalous() {
+        var r = Fixture.result(.wifi, latency: 20, server: "a")
+        r.crossValidation = [Fixture.check("b", median: 90), Fixture.check("c", median: 18)]
+        let baseline = EndpointBaseline(endpointID: "b", network: .wifi,
+                                        latency: MetricBaseline(metric: .latencyMs, count: 20, median: 25, mad: 1, p10: 23, p90: 27))
+        let c = analyzer.compareServers(Fixture.session([r]), endpointBaselines: [baseline])
+        XCTAssertEqual(c.entries.filter(\.isAnomalous).map(\.id), ["b"])
+    }
+
+    func testUnavailableEndpointIsExcluded() {
+        var r = Fixture.result(.wifi, latency: 20, server: "a")
+        r.crossValidation = [Fixture.check("b", median: 22),
+                             EndpointCheck(id: "x", name: "x", host: "x", region: "r", method: .icmpEcho, statistics: nil, error: "no route", isPrimary: false)]
+        let c = analyzer.compareServers(Fixture.session([r]))
+        XCTAssertEqual(c.entries.first { $0.id == "x" }?.status, .notMeasured)
+        XCTAssertEqual(c.verdict, .allNormal)
     }
 
     func testRegionSpecific() {
@@ -318,6 +375,20 @@ final class CrossTestAnalyzerTests: XCTestCase {
         XCTAssertEqual(analyzer.compareInterfaces(Fixture.session([lteOK, nrBad])).radioVerdict, .lteNormalNRDegraded)
         XCTAssertEqual(analyzer.compareInterfaces(Fixture.session([lteBad, nrOK])).radioVerdict, .nrNormalLTEDegraded)
         XCTAssertEqual(analyzer.compareInterfaces(Fixture.session([wifiOK])).verdict, .insufficientData)
+    }
+
+    func testUnavailableInterfaceProbeIsNotDegraded() {
+        var wifi = Fixture.result(.wifi, download: 300, upload: 50)
+        wifi.interfaceCompare = [InterfaceProbeResult(interface: .cellular, tcpConnect: nil, error: "行動網路 無法使用或未連線")]
+        let i = analyzer.compareInterfaces(Fixture.session([wifi]))
+        XCTAssertEqual(i.verdict, .insufficientData, "only Wi-Fi was measured")
+        XCTAssertEqual(i.unavailable.count, 1)
+        XCTAssertFalse(i.groups.contains { $0.networkClass == .cellularOther })
+
+        // Bad Wi-Fi + unavailable cellular must not become "all interfaces degraded".
+        var badWifi = Fixture.result(.wifi, download: 5, upload: 1, loss: 10)
+        badWifi.interfaceCompare = wifi.interfaceCompare
+        XCTAssertNotEqual(analyzer.compareInterfaces(Fixture.session([badWifi])).verdict, .allDegraded)
     }
 
     func testHealthThresholds() {

@@ -38,7 +38,7 @@ enum Fixture {
     static func speed(_ direction: TransferDirection, mbps: Double, jitterFraction: Double = 0) -> SpeedResult {
         var cumulative: Int64 = 0
         let samples = (0..<50).map { i -> SpeedSample in
-            let rate = mbps * (1 + (i % 2 == 0 ? jitterFraction : -jitterFraction))
+            let rate = mbps * (1 + ((i / 5) % 2 == 0 ? jitterFraction : -jitterFraction))  // alternates per 0.5 s+ block
             let b = Int64(rate * 1_000_000 / 8 * 0.2); cumulative += b
             return SpeedSample(offset: Double(i + 1) * 0.2, intervalDuration: 0.2, intervalBytes: b, cumulativeBytes: cumulative, activeStreams: 4)
         }

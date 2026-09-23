@@ -124,6 +124,7 @@ private struct HypothesisGroups: View {
             group("可能性高", analysis.likely, expanded: true)
             group("有可能", analysis.possible, expanded: false)
             group("證據不足", analysis.insufficient, expanded: false)
+            group("未測試（不代表已排除）", analysis.notTested, expanded: false)
             group("可能性低", analysis.unlikely, expanded: false)
             group("已排除", analysis.ruledOut, expanded: false)
         }
@@ -165,6 +166,9 @@ struct HypothesisCard: View {
             .buttonStyle(.plain)
             ProgressView(value: hypothesis.confidence).tint(hypothesis.likelihood.color)
             if expanded {
+                if let reason = hypothesis.statusReason {
+                    Text("狀態依據：\(reason)").font(.caption.weight(.medium)).foregroundStyle(hypothesis.likelihood.color)
+                }
                 Text(hypothesis.explanation).font(.caption).foregroundStyle(Theme.textSecondary)
                 evidenceList("支持證據", hypothesis.supportingEvidence, "plus.circle.fill", Theme.critical)
                 evidenceList("反向證據", hypothesis.contradictingEvidence, "minus.circle.fill", Theme.good)
@@ -230,16 +234,28 @@ private struct CrossTestCard: View {
             TechnicalSection("交叉比較", symbol: "square.grid.3x3", expanded: false) {
                 KeyValueRow(key: "多伺服器", value: serverText(c.servers.verdict))
                 ForEach(c.servers.entries) { e in
-                    KeyValueRow(key: "  \(e.name)", value: e.isAnomalous ? "異常：\(e.reasons.joined(separator: "、"))" : "正常 · \(Format.ms(e.latencyMedianMs))",
-                                valueColor: e.isAnomalous ? Theme.critical : Theme.textPrimary)
+                    KeyValueRow(key: "  \(e.name)", value: entryText(e),
+                                valueColor: e.isAnomalous ? Theme.critical : (e.status == .notMeasured ? Theme.textSecondary : Theme.textPrimary))
                 }
                 KeyValueRow(key: "IPv4 / IPv6", value: ipText(c.ipFamilies.verdict))
                 KeyValueRow(key: "網路類型", value: ifaceText(c.interfaces.verdict))
                 ForEach(c.interfaces.groups) { g in
                     KeyValueRow(key: "  \(g.networkClass.displayName)", value: g.degraded ? "異常" : "正常", valueColor: g.degraded ? Theme.critical : Theme.good)
                 }
+                ForEach(Array(c.interfaces.unavailable.enumerated()), id: \.offset) { _, u in
+                    KeyValueRow(key: "  \(u.networkClass.displayName)", value: "未測試（\(u.reason)）", valueColor: Theme.textSecondary)
+                }
                 KeyValueRow(key: "LTE / 5G", value: radioText(c.interfaces.radioVerdict))
             }
+        }
+    }
+
+    func entryText(_ e: ServerComparisonEntry) -> String {
+        switch e.status {
+        case .notMeasured: return "未測試（\(e.unavailableReason ?? "無法連線")）"
+        case .degraded: return "異常：\(e.reasons.joined(separator: "、"))"
+        case .healthy:
+            return "正常 · \(Format.ms(e.latencyMedianMs))" + (e.higherLatencyRelativeToPeers ? "（延遲高於其他端點，僅供參考）" : "")
         }
     }
 

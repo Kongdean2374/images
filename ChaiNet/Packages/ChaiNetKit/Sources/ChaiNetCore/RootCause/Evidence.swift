@@ -9,6 +9,7 @@ public enum NetworkLayer: String, Codable, Sendable, Hashable, CaseIterable {
     case routing       // transit and peering between ISP and destination
     case server        // test server / endpoint
     case application   // DNS, TLS, HTTP, QUIC
+    case pathQueueing  // queueing somewhere on the access / network path; exact hop unknown
 
     public var displayName: String {
         switch self {
@@ -19,6 +20,7 @@ public enum NetworkLayer: String, Codable, Sendable, Hashable, CaseIterable {
         case .routing: "路由 / 國際互連"
         case .server: "伺服器"
         case .application: "應用協定（DNS / TLS / HTTP）"
+        case .pathQueueing: "存取 / 網路路徑佇列（實際位置未知）"
         }
     }
 }
@@ -80,7 +82,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     // Application / protocol
     case dnsSlow, dnsFailures, dnsHealthy
     case tcpConnectSlow, tlsSlow, ttfbSlow
-    case http3Negotiated, quicBlocked
+    case http3Negotiated, quicBlocked, quicEndpointFailure, quicImplementationFailure
     case mtuReduced, mtuNormal
     // Environment
     case onWiFi, onCellular, on5G, onLTE, noCellularTests, no5GTests
@@ -92,7 +94,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     // Cross-server
     case singleServerAnomalous, multipleServersAnomalous, allServersAnomalous, allServersNormal
     case regionSpecificAnomaly
-    case serverThroughputOutlierLow, crossServerConsistentThroughput
+    case serverThroughputOutlierLow, crossServerConsistentThroughput, higherLatencyRelativeToPeers
     // IP family
     case ipv6DegradedOnly, ipv4DegradedOnly, ipFamiliesEquivalent, ipv6Unavailable
     // Interfaces / radio
@@ -100,6 +102,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case lteNormalNRDegraded, nrNormalLTEDegraded
     case allCellularDegradedWifiNormal
     case allInterfacesDegraded, allInterfacesNormal
+    case interfaceProbeUnavailable
     // Baseline
     case deviatesFromBaseline, matchesBaseline, noBaseline
 
@@ -116,7 +119,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
             .bufferbloat
         case .dnsSlow, .dnsFailures, .dnsHealthy:
             .dns
-        case .tcpConnectSlow, .tlsSlow, .ttfbSlow, .http3Negotiated, .quicBlocked:
+        case .tcpConnectSlow, .tlsSlow, .ttfbSlow, .http3Negotiated, .quicBlocked, .quicEndpointFailure, .quicImplementationFailure:
             .protocols
         case .mtuReduced, .mtuNormal:
             .mtu
@@ -126,17 +129,52 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
         case .pathChanged, .connectionDrops, .noDropsObserved:
             .stabilityMonitoring
         case .singleServerAnomalous, .multipleServersAnomalous, .allServersAnomalous, .allServersNormal, .regionSpecificAnomaly,
-             .serverThroughputOutlierLow, .crossServerConsistentThroughput:
+             .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers:
             .crossServer
         case .ipv6DegradedOnly, .ipv4DegradedOnly, .ipFamiliesEquivalent, .ipv6Unavailable:
             .ipFamily
         case .wifiNormalCellularDegraded, .cellularNormalWifiDegraded, .allCellularDegradedWifiNormal, .allInterfacesDegraded,
-             .allInterfacesNormal:
+             .allInterfacesNormal, .interfaceProbeUnavailable:
             .interfaceCompare
         case .lteNormalNRDegraded, .nrNormalLTEDegraded:
             .radioCompare
         case .deviatesFromBaseline, .matchesBaseline, .noBaseline:
             .baseline
+        }
+    }
+}
+
+/// How an evidence item was obtained.
+public enum EvidenceKind: String, Codable, Sendable, Hashable {
+    /// Directly measured in a test (confirmed observation).
+    case measured
+    /// Derived by comparing several measurements (cross-test, baseline).
+    case derived
+    /// Heuristic inference (e.g. VPN detection has no public iOS API).
+    case heuristic
+    /// A test that was *not* run / a value the platform does not expose.
+    case notTested
+
+    public var displayName: String {
+        switch self {
+        case .measured: "實測"
+        case .derived: "比較推導"
+        case .heuristic: "啟發式"
+        case .notTested: "未測試 / 無法取得"
+        }
+    }
+}
+
+extension EvidenceCode {
+    public var kind: EvidenceKind {
+        switch self {
+        case .vpnActive, .vpnInactive: .heuristic
+        case .noCellularTests, .no5GTests, .cellularRadioMetricsUnavailable, .noBaseline, .interfaceProbeUnavailable: .notTested
+        default:
+            switch dimension {
+            case .crossServer, .ipFamily, .interfaceCompare, .radioCompare, .baseline: .derived
+            default: .measured
+            }
         }
     }
 }
@@ -156,6 +194,7 @@ public struct DiagnosticEvidence: Codable, Sendable, Hashable, Identifiable {
 
     public var id: String { "\(code.rawValue)|\(testIDs.map(\.uuidString).joined(separator: ","))|\(statement)" }
     public var dimension: EvidenceDimension { code.dimension }
+    public var kind: EvidenceKind { code.kind }
 
     public init(code: EvidenceCode, statement: String, value: Double? = nil, unit: String? = nil,
                 testIDs: [UUID] = [], interface: InterfaceKind? = nil) {

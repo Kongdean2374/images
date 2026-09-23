@@ -26,12 +26,21 @@ public enum RootCause: String, Codable, Sendable, Hashable, CaseIterable {
     case deviceOrOSEnvironment
 }
 
-/// Verbal likelihood, always shown together with a numeric confidence.
+/// Status of a hypothesis. Strictly separated so a report never presents an untested cause as
+/// excluded:
+///
+/// - `likely` / `possible`: supported by measured evidence (confidence ≥ 0.70 / ≥ 0.40)
+/// - `insufficientEvidence`: relevant tests ran but the data needed to judge is missing
+/// - `notTested`: the condition this cause needs was never exercised in the session
+///   (e.g. no 5G test → a 5G-specific cause is *not tested*, never *ruled out*)
+/// - `unlikely`: measured evidence points away from it, but nothing decisive
+/// - `ruledOut`: a decisive, directly measured fact contradicts it
 public enum Likelihood: String, Codable, Sendable, Hashable, CaseIterable, Comparable {
     case likely
     case possible
-    case unlikely
     case insufficientEvidence
+    case notTested
+    case unlikely
     case ruledOut
 
     private var rank: Int { Self.allCases.firstIndex(of: self)! }
@@ -41,8 +50,9 @@ public enum Likelihood: String, Codable, Sendable, Hashable, CaseIterable, Compa
         switch self {
         case .likely: "可能性高（Likely）"
         case .possible: "有可能（Possible）"
-        case .unlikely: "可能性低（Unlikely）"
         case .insufficientEvidence: "證據不足（Insufficient evidence）"
+        case .notTested: "未測試（Not tested）"
+        case .unlikely: "可能性低（Unlikely）"
         case .ruledOut: "已排除（Ruled out）"
         }
     }
@@ -132,6 +142,8 @@ public struct DiagnosticHypothesis: Codable, Sendable, Hashable, Identifiable {
     public var contradictingEvidence: [DiagnosticEvidence]
     /// Evidence that decisively excludes this cause (non-empty ⇒ `.ruledOut`).
     public var rulingOutEvidence: [DiagnosticEvidence]
+    /// Why the status was chosen (e.g. "本工作階段沒有 5G 測試").
+    public var statusReason: String?
     /// Dimensions this hypothesis needs but that were not measured.
     public var missingDimensions: [EvidenceDimension]
     /// 0…1.

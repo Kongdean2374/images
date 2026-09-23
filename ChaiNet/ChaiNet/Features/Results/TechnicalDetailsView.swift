@@ -117,7 +117,7 @@ struct SpeedDetail: View {
                         style: settings.chartStyle, unit: settings.primarySpeedUnit, color: color,
                         height: 150, averageMbps: s.averageMbps)
         KeyValueRow(key: "平均（時間加權）", value: Format.speed(s.averageMbps, settings: settings, secondary: true))
-        KeyValueRow(key: "峰值（3 樣本移動平均）", value: Format.speed(s.peakMbps, settings: settings))
+        KeyValueRow(key: "峰值（最高 0.5 秒視窗）", value: Format.speed(s.peakMbps, settings: settings))
         KeyValueRow(key: "最低", value: Format.speed(s.minimumMbps, settings: settings))
         KeyValueRow(key: "中位數", value: Format.speed(s.medianMbps, settings: settings))
         KeyValueRow(key: "P95", value: Format.speed(s.p95Mbps, settings: settings))
@@ -125,7 +125,8 @@ struct SpeedDetail: View {
         KeyValueRow(key: "穩定度", value: "\(Format.number(s.stability.score, digits: 0)) / 100 · CV \(Format.number(s.stability.coefficientOfVariation, digits: 3))")
         KeyValueRow(key: "驟降次數（< 50% 中位數）", value: "\(s.stability.dropCount)")
         KeyValueRow(key: "傳輸量 / 時間", value: "\(Format.bytes(s.totalBytes)) / \(Format.number(s.duration, digits: 1)) 秒")
-        KeyValueRow(key: "暖機樣本（排除）", value: "\(s.warmupSampleCount)")
+        KeyValueRow(key: "排除樣本（暖機 + 連線數變更）", value: "\(s.warmupSampleCount)（其中連線變更 \(s.transitionExcludedSampleCount ?? 0)）")
+        Text(s.methodDescription).font(.caption2).foregroundStyle(Theme.textSecondary)
         KeyValueRow(key: "平行連線", value: result.streamChanges.map { "\(Format.number($0.offset, digits: 1))s→\($0.streams)" }.joined(separator: "  "))
     }
 }
@@ -235,7 +236,14 @@ struct ProtocolDetail: View {
             KeyValueRow(key: "遠端位址", value: h.remoteAddress ?? "—")
         }
         KeyValueRow(key: "HTTP/3 嘗試", value: p.http3Attempt?.negotiatedProtocol.displayName ?? "—")
-        AvailabilityRow(key: "QUIC 交握", availability: p.quicHandshakeMs) { Format.ms($0, digits: 1) }
+        AvailabilityRow(key: "QUIC 交握（目標）", availability: p.quicHandshakeMs) { Format.ms($0, digits: 1) }
+        if let assessment = p.quicAssessment {
+            KeyValueRow(key: "QUIC 多端點判定", value: assessment.displayName)
+            ForEach(p.quicProbes ?? []) { q in
+                KeyValueRow(key: "  \(q.host)", value: (q.handshakeMs.map { Format.ms($0, digits: 0) } ?? "失敗（\(q.failure?.rawValue ?? "?")）")
+                            + " · TCP 443 \(q.tcpReachable == true ? "可連" : "不可連")")
+            }
+        }
         KeyValueRow(key: "TCP 連線（5 次中位數）", value: Format.ms(p.tcpConnect?.rtt?.median, digits: 1))
         KeyValueRow(key: "TCP+TLS 就緒（中位數）", value: Format.ms(p.tlsConnect?.rtt?.median, digits: 1))
         KeyValueRow(key: "HTTP 延遲（熱連線）", value: Format.ms(p.httpLatency?.rtt?.median, digits: 1))

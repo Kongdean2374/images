@@ -162,7 +162,7 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
         }
 
         if cancelled || Task.isCancelled { throw CancellationError() }
-        let summary = SpeedCalculator.summarize(samples: samples, warmupDuration: c.warmupDuration)
+        let summary = SpeedCalculator.summarize(samples: samples, streamChanges: changes, warmupDuration: c.warmupDuration)
         return SpeedResult(direction: c.direction, samples: samples, summary: summary, streamChanges: changes, wasCancelled: false)
     }
 }

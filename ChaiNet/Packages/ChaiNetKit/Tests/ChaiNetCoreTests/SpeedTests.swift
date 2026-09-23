@@ -31,21 +31,54 @@ final class SpeedCalculationTests: XCTestCase {
         XCTAssertEqual(s.totalBytes, samples.last!.cumulativeBytes)
     }
 
-    func testAveragePeakMinimumP95() {
+    func testAveragePeakMinimumP95PerSample() {
         let rates: [Double] = [50, 60, 70, 80, 90, 100, 110, 120, 130, 140]
-        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0, peakWindow: 3)
+        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0, windowSamples: 1)
         XCTAssertEqual(s.averageMbps, 95, accuracy: 0.01, "time-weighted average of equal intervals = mean")
         XCTAssertEqual(s.minimumMbps, 50, accuracy: 0.01)
-        XCTAssertEqual(s.peakMbps, 130, accuracy: 0.01, "max 3-sample moving average = (120+130+140)/3")
+        XCTAssertEqual(s.peakMbps, 140, accuracy: 0.01)
         XCTAssertEqual(s.p95Mbps, Percentile.value(0.95, in: rates)!, accuracy: 0.01)
         XCTAssertEqual(s.p10Mbps, Percentile.value(0.10, in: rates)!, accuracy: 0.01)
     }
 
+    func testWindowedStatistics() {
+        // 10 samples → two 0.5 s windows: mean(50…90) = 70, mean(100…140) = 120
+        let rates: [Double] = [50, 60, 70, 80, 90, 100, 110, 120, 130, 140]
+        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0)
+        XCTAssertEqual(s.analysisWindowMbps!.count, 2)
+        XCTAssertEqual(s.minimumMbps, 70, accuracy: 0.01)
+        XCTAssertEqual(s.peakMbps, 120, accuracy: 0.01)
+        XCTAssertEqual(s.medianMbps, 95, accuracy: 0.01)
+        XCTAssertEqual(s.medianMbps, Percentile.value(0.5, in: s.analysisWindowMbps!)!, accuracy: 1e-9,
+                       "reported median must be reproducible from the reported windows")
+    }
+
     func testPeakRejectsSingleSpike() {
         let rates: [Double] = [100, 100, 900, 100, 100]
-        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0, peakWindow: 3)
+        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0, windowSamples: 3)
         XCTAssertEqual(s.peakMbps, 1100.0 / 3, accuracy: 0.01)
         XCTAssertLessThan(s.peakMbps, 900)
+    }
+
+    func testBurstyUploadMedianIsNotZero() {
+        // Upload progress arrives in bursts: 0, 0, 0, 250 Mbps … per 100 ms. The link carries ~62 Mbps.
+        let rates: [Double] = (0..<40).map { $0 % 4 == 3 ? 250 : 0 }
+        let s = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 0, windowSamples: 4)
+        XCTAssertEqual(s.medianMbps, 62.5, accuracy: 0.5)
+        XCTAssertGreaterThan(s.stability.score!, 90, "bursts inside a window are not instability")
+    }
+
+    func testStreamTransitionsExcluded() {
+        // Ramp dip right after streams go 2 → 8 at t = 2 s must not count as instability.
+        var rates = Array(repeating: 100.0, count: 60)
+        for i in 20..<30 { rates[i] = 20 }   // 2.0–3.0 s: new streams ramping
+        let changes = [StreamChange(offset: 0, streams: 2), StreamChange(offset: 2.0, streams: 8)]
+        let s = SpeedCalculator.summarize(samples: timeline(rates), streamChanges: changes, warmupDuration: 1)
+        XCTAssertEqual(s.transitionExcludedSampleCount, 10)
+        XCTAssertEqual(s.minimumMbps, 100, accuracy: 0.01)
+        XCTAssertEqual(s.stability.score!, 100, accuracy: 0.01)
+        let naive = SpeedCalculator.summarize(samples: timeline(rates), warmupDuration: 1)
+        XCTAssertLessThan(naive.stability.score!, 90)
     }
 
     func testTimeWeightedAverageWithUnevenIntervals() {

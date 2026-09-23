@@ -87,11 +87,16 @@ public struct ProtocolProbeEngine: ProtocolProbeEngineProtocol {
         do { h3 = try await Self.timedRequest(url: url, http3: true) } catch { errors.append("HTTP/3：\(error.localizedDescription)") }
         try Task.checkCancellation()
 
-        let quic: Availability<Double>
-        switch await QUICProbe.handshake(host: host, port: port) {
-        case .success(let ms): quic = .available(ms)
-        case .failure(let e): quic = .unavailable(reason: "QUIC 交握失敗：\(e.localizedDescription)")
+        // QUIC to the target *and* independent endpoints: one failed handshake is never enough to
+        // conclude that UDP is blocked.
+        let quicHosts = [host] + Self.quicReferenceHosts.filter { $0 != host }
+        var quicProbes: [QUICProbeOutcome] = []
+        for h in quicHosts {
+            try Task.checkCancellation()
+            quicProbes.append(await Self.quicOutcome(host: h, port: h == host ? port : 443))
         }
+        let quic: Availability<Double> = quicProbes.first.flatMap { $0.handshakeMs }.map { .available($0) }
+            ?? .unavailable(reason: "目標 QUIC 交握失敗：\(quicProbes.first?.detail ?? "—")")
 
         let tcpSamples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port), count: 5, interval: 0.2, timeout: 2)
         let tlsSamples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port, useTLS: true), count: 5, interval: 0.3, timeout: 3)
@@ -113,8 +118,41 @@ public struct ProtocolProbeEngine: ProtocolProbeEngineProtocol {
         let v4 = await family(.v4, "IPv4")
         let v6 = await family(.v6, "IPv6")
 
-        return ProtocolProbeResult(date: Date(), host: host, http: http, http3Attempt: h3, quicHandshakeMs: quic,
-                                   tcpConnect: LatencyStatistics.compute(from: tcpSamples), tlsConnect: LatencyStatistics.compute(from: tlsSamples),
-                                   httpLatency: httpLatency, ipv4Reachable: v4, ipv6Reachable: v6, errors: errors)
+        var result = ProtocolProbeResult(date: Date(), host: host, http: http, http3Attempt: h3, quicHandshakeMs: quic,
+                                         tcpConnect: LatencyStatistics.compute(from: tcpSamples), tlsConnect: LatencyStatistics.compute(from: tlsSamples),
+                                         httpLatency: httpLatency, ipv4Reachable: v4, ipv6Reachable: v6, errors: errors)
+        result.quicProbes = quicProbes
+        result.quicAssessment = QUICClassifier.classify(quicProbes)
+        return result
+    }
+
+    /// Independent, known QUIC-capable endpoints (different operators).
+    public static let quicReferenceHosts = ["cloudflare.com", "www.google.com"]
+
+    static func quicOutcome(host: String, port: UInt16) async -> QUICProbeOutcome {
+        let tcp = await TCPConnectProbe(host: host, port: port).probe(sequence: 0, timeout: 3) != nil
+        switch await QUICProbe.handshake(host: host, port: port, timeout: 4) {
+        case .success(let ms):
+            return QUICProbeOutcome(host: host, handshakeMs: ms, failure: nil, detail: nil, tcpReachable: tcp)
+        case .failure(let error):
+            return QUICProbeOutcome(host: host, handshakeMs: nil, failure: classify(error), detail: error.localizedDescription, tcpReachable: tcp)
+        }
+    }
+
+    static func classify(_ error: Error) -> QUICFailureKind {
+        if let e = error as? EngineError, e == .timeout { return .timeout }
+        if let nw = error as? NWError {
+            switch nw {
+            case .posix(let code):
+                switch code {
+                case .ETIMEDOUT: return .timeout
+                case .ECONNREFUSED, .ECONNRESET, .EHOSTUNREACH, .ENETUNREACH: return .refused
+                default: return .other
+                }
+            case .tls: return .protocolError
+            default: return .other
+            }
+        }
+        return .other
     }
 }

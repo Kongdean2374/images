@@ -106,12 +106,22 @@ public struct Baseline: Codable, Sendable, Hashable {
     public func metric(_ m: BaselineMetric) -> MetricBaseline? { metrics.first { $0.metric == m } }
 }
 
+/// Historical latency of one cross-validation endpoint on one network type. Endpoints of
+/// different anycast providers are only ever compared with *their own* history.
+public struct EndpointBaseline: Codable, Sendable, Hashable {
+    public var endpointID: String
+    public var network: NetworkClass
+    public var latency: MetricBaseline
+}
+
 /// All baselines built from history, with hierarchical lookup.
 public struct BaselineStore: Codable, Sendable, Hashable {
     public var baselines: [Baseline]
+    public var endpoints: [EndpointBaseline]
 
-    public init(baselines: [Baseline]) {
+    public init(baselines: [Baseline], endpoints: [EndpointBaseline] = []) {
         self.baselines = baselines
+        self.endpoints = endpoints
     }
 
     /// Most specific baseline available for a result:
@@ -184,6 +194,27 @@ public struct BaselineEngine: Sendable {
             if !metrics.isEmpty { baselines.append(Baseline(key: key, sampleCount: snapshots.count, metrics: metrics)) }
         }
         baselines.sort { $0.key.network.rawValue + ($0.key.timeBucket?.rawValue ?? "") < $1.key.network.rawValue + ($1.key.timeBucket?.rawValue ?? "") }
-        return BaselineStore(baselines: baselines)
+        return BaselineStore(baselines: baselines, endpoints: endpointBaselines(history, cutoff: cutoff))
+    }
+
+    /// Per-endpoint latency baselines from past cross-validation checks.
+    func endpointBaselines(_ history: [TestResult], cutoff: Date) -> [EndpointBaseline] {
+        var buckets: [String: (id: String, network: NetworkClass, values: [Double])] = [:]
+        for result in history where result.date >= cutoff {
+            let network = NetworkClass(snapshot: result.network)
+            for check in result.crossValidation ?? [] {
+                guard let median = check.statistics?.rtt?.median else { continue }
+                let key = "\(check.id)|\(network.rawValue)"
+                buckets[key, default: (check.id, network, [])].values.append(median)
+            }
+        }
+        return buckets.values.compactMap { b -> EndpointBaseline? in
+            guard b.values.count >= minimumSamples else { return nil }
+            let sorted = b.values.sorted()
+            return EndpointBaseline(endpointID: b.id, network: b.network,
+                                    latency: MetricBaseline(metric: .latencyMs, count: sorted.count, median: Percentile.value(0.5, sorted: sorted)!,
+                                                            mad: Descriptive.medianAbsoluteDeviation(sorted)!,
+                                                            p10: Percentile.value(0.1, sorted: sorted)!, p90: Percentile.value(0.9, sorted: sorted)!))
+        }.sorted { $0.endpointID < $1.endpointID }
     }
 }

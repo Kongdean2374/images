@@ -185,6 +185,7 @@ extension Likelihood {
         case .possible: Theme.warning
         case .unlikely: Theme.info
         case .insufficientEvidence: Theme.textSecondary
+        case .notTested: Theme.textSecondary.opacity(0.8)
         case .ruledOut: Theme.good
         }
     }
@@ -194,6 +195,7 @@ extension Likelihood {
         case .possible: "有可能"
         case .unlikely: "可能性低"
         case .insufficientEvidence: "證據不足"
+        case .notTested: "未測試"
         case .ruledOut: "已排除"
         }
     }

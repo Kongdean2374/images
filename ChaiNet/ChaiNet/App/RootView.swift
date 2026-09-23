@@ -8,7 +8,9 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var app = app
-        ZStack(alignment: .bottom) {
+        // The tab bar is a real layout region (not an overlay), so scroll views / Lists / Forms
+        // end above it and their last row is never hidden.
+        VStack(spacing: 0) {
             Group {
                 switch app.selectedTab {
                 case .home: NavigationStack { HomeView() }
@@ -19,7 +21,7 @@ struct RootView: View {
                 case .settings: NavigationStack { SettingsView() }
                 }
             }
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 64) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             TabBar(selection: $app.selectedTab, speedTestRunning: app.speedTest.isRunning)
         }
@@ -60,7 +62,7 @@ private struct TabBar: View {
         }
         .padding(.horizontal, 6)
         .padding(.top, 4)
-        .background(.ultraThinMaterial)
+        .background(Theme.surface.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Divider().opacity(0.6) }
     }
 }

@@ -139,6 +139,80 @@ public struct HTTPTimingBreakdown: Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - QUIC
+
+public enum QUICFailureKind: String, Codable, Sendable, Hashable {
+    /// No answer before the timeout (typical of UDP being dropped).
+    case timeout
+    /// Actively refused / reset / ICMP unreachable.
+    case refused
+    /// TLS / ALPN / QUIC protocol error — the path works but the handshake failed.
+    case protocolError
+    case other
+}
+
+/// One QUIC handshake attempt to one endpoint.
+public struct QUICProbeOutcome: Codable, Sendable, Hashable, Identifiable {
+    public var host: String
+    public var handshakeMs: Double?
+    public var failure: QUICFailureKind?
+    public var detail: String?
+    /// Whether TCP 443 to the same host worked (distinguishes UDP-only blocking).
+    public var tcpReachable: Bool?
+    public var id: String { host }
+
+    public init(host: String, handshakeMs: Double?, failure: QUICFailureKind?, detail: String?, tcpReachable: Bool?) {
+        self.host = host
+        self.handshakeMs = handshakeMs
+        self.failure = failure
+        self.detail = detail
+        self.tcpReachable = tcpReachable
+    }
+}
+
+public enum QUICAssessment: String, Codable, Sendable, Hashable {
+    /// At least one endpoint completed a QUIC handshake — UDP 443 is usable.
+    case working
+    /// Failures limited to specific endpoints, or too few endpoints to generalise.
+    case endpointFailure
+    /// Same non-timeout protocol error everywhere — more likely a local stack / implementation issue.
+    case implementationFailure
+    /// ≥ 2 independent endpoints time out on QUIC while TCP 443 to them works.
+    case probableUDPBlocking
+    /// No QUIC attempt was made.
+    case notTested
+
+    public var displayName: String {
+        switch self {
+        case .working: "QUIC 可用"
+        case .endpointFailure: "個別端點 QUIC 失敗（無法推論為封鎖）"
+        case .implementationFailure: "QUIC 協定 / 實作層錯誤"
+        case .probableUDPBlocking: "可能封鎖 UDP 443"
+        case .notTested: "未測試"
+        }
+    }
+}
+
+/// Classifies multi-endpoint QUIC results. A single failed handshake never implies blocking:
+///
+///     any success                                            → working
+///     no attempts                                            → notTested
+///     < 2 endpoints attempted                                → endpointFailure
+///     all timeouts, ≥ 2 endpoints with TCP 443 reachable     → probableUDPBlocking
+///     all the same non-timeout failure kind (≥ 2 endpoints)  → implementationFailure
+///     otherwise                                              → endpointFailure
+public enum QUICClassifier {
+    public static func classify(_ outcomes: [QUICProbeOutcome]) -> QUICAssessment {
+        guard !outcomes.isEmpty else { return .notTested }
+        if outcomes.contains(where: { $0.handshakeMs != nil }) { return .working }
+        guard outcomes.count >= 2 else { return .endpointFailure }
+        let kinds = Set(outcomes.compactMap(\.failure))
+        if kinds == [.timeout], outcomes.filter({ $0.tcpReachable == true }).count >= 2 { return .probableUDPBlocking }
+        if kinds.count == 1, let only = kinds.first, only != .timeout { return .implementationFailure }
+        return .endpointFailure
+    }
+}
+
 public struct ProtocolProbeResult: Codable, Sendable, Hashable {
     public var date: Date
     public var host: String
@@ -157,6 +231,9 @@ public struct ProtocolProbeResult: Codable, Sendable, Hashable {
     public var ipv4Reachable: Availability<Double>
     public var ipv6Reachable: Availability<Double>
     public var errors: [String]
+    /// QUIC handshakes to several independent endpoints (nil in older results).
+    public var quicProbes: [QUICProbeOutcome]?
+    public var quicAssessment: QUICAssessment?
 
     public init(date: Date, host: String, http: HTTPTimingBreakdown?, http3Attempt: HTTPTimingBreakdown?,
                 quicHandshakeMs: Availability<Double>, tcpConnect: LatencyStatistics?, tlsConnect: LatencyStatistics?,
@@ -174,7 +251,9 @@ public struct ProtocolProbeResult: Codable, Sendable, Hashable {
         self.errors = errors
     }
 
-    public var http3Supported: Bool { http3Attempt?.negotiatedProtocol == .http3 || quicHandshakeMs.value != nil }
+    public var http3Supported: Bool {
+        http3Attempt?.negotiatedProtocol == .http3 || quicHandshakeMs.value != nil || quicAssessment == .working
+    }
 }
 
 // MARK: - Route

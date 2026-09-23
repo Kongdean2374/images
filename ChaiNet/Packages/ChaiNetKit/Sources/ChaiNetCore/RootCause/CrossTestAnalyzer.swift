@@ -9,9 +9,17 @@ public struct ServerComparisonEntry: Codable, Sendable, Hashable, Identifiable {
     public var method: String
     public var latencyMedianMs: Double?
     public var lossPercent: Double?
+    public var jitterMs: Double?
     public var downloadMbps: Double?
-    public var isAnomalous: Bool
+    public var status: HealthStatus
+    public var isAnomalous: Bool { status == .degraded }
     public var reasons: [String]
+    /// Informational only: slower than the fastest peer. Different anycast providers have
+    /// different nearest PoPs, so this is **not** an anomaly by itself.
+    public var higherLatencyRelativeToPeers: Bool
+    /// Compared against this endpoint's own history (nil = no endpoint baseline yet).
+    public var baselineMedianMs: Double?
+    public var unavailableReason: String?
 }
 
 public enum ServerComparisonVerdict: String, Codable, Sendable, Hashable {
@@ -44,9 +52,18 @@ public struct IPFamilyComparison: Codable, Sendable, Hashable {
 public struct NetworkGroupSummary: Codable, Sendable, Hashable, Identifiable {
     public var networkClass: NetworkClass
     public var testIDs: [UUID]
+    /// Only measured tests count; unavailable / not-tested probes never make a group degraded.
     public var degraded: Bool
     public var reasons: [String]
+    public var measuredCount: Int
     public var id: NetworkClass { networkClass }
+}
+
+/// Interface probe that could not run (interface down, not connected) — reported, never scored.
+public struct UnavailableProbe: Codable, Sendable, Hashable {
+    public var networkClass: NetworkClass
+    public var testID: UUID
+    public var reason: String
 }
 
 public enum InterfaceVerdict: String, Codable, Sendable, Hashable {
@@ -59,6 +76,7 @@ public enum RadioVerdict: String, Codable, Sendable, Hashable {
 
 public struct InterfaceComparison: Codable, Sendable, Hashable {
     public var groups: [NetworkGroupSummary]
+    public var unavailable: [UnavailableProbe] = []
     public var verdict: InterfaceVerdict
     public var radioVerdict: RadioVerdict
 }
@@ -74,11 +92,9 @@ public struct CrossTestReport: Codable, Sendable, Hashable {
 /// Compares the tests of a session with each other.
 ///
 /// **Servers** — every server used by a session test and every cross-validation endpoint is
-/// one entry. An entry is anomalous when (best = lowest median among entries):
+/// one entry (rules on `compareServers`). Unavailable endpoints are excluded from verdicts:
 ///
-///     loss > 2 %   OR   median > max(2 × best, best + 50 ms)   OR   probe failed
-///
-///     verdict: < 2 entries → insufficient; 0 anomalous → allNormal; all → allServersAnomalous;
+///     verdict: < 2 measured → insufficient; 0 anomalous → allNormal; all → allServersAnomalous;
 ///              1 → singleServerAnomalous; otherwise multipleServersAnomalous
 ///
 /// **Throughput outlier** — with ≥ 2 speed-tested servers, a server whose download is < 50 % of
@@ -98,8 +114,9 @@ public struct CrossTestAnalyzer: Sendable {
         self.thresholds = thresholds
     }
 
-    public func analyze(_ session: DiagnosticSession) -> CrossTestReport {
-        CrossTestReport(servers: compareServers(session), ipFamilies: compareIPFamilies(session), interfaces: compareInterfaces(session))
+    public func analyze(_ session: DiagnosticSession, endpointBaselines: [EndpointBaseline] = []) -> CrossTestReport {
+        CrossTestReport(servers: compareServers(session, endpointBaselines: endpointBaselines), ipFamilies: compareIPFamilies(session),
+                        interfaces: compareInterfaces(session))
     }
 
     // MARK: Servers
@@ -110,18 +127,28 @@ public struct CrossTestAnalyzer: Sendable {
         var downloads: [Double] = []
         var errors: [String] = []
         var unhealthy = false
+        var baselineDeviations: [(median: Double, baseline: Double)] = []
     }
 
-    public func compareServers(_ session: DiagnosticSession) -> ServerComparison {
+    /// Anomaly rules for one endpoint (the latency *level* is never compared across providers):
+    ///
+    ///     unavailable ⇔ no reply at all / error          (excluded from all verdicts)
+    ///     anomalous   ⇔ loss > 2 %  OR  jitter > 30 ms
+    ///                   OR median deviates from this endpoint's own baseline (robust z > 3)
+    ///                   OR server health check failed
+    ///     higherLatencyRelativeToPeers ⇔ median > max(2 × best, best + 50 ms)   (informational)
+    public func compareServers(_ session: DiagnosticSession, endpointBaselines: [EndpointBaseline] = []) -> ServerComparison {
         var raw: [String: RawEntry] = [:]
         var order: [String] = []
         func entry(_ id: String, _ name: String, _ region: String, _ method: String, _ update: (inout RawEntry) -> Void) {
             if raw[id] == nil { raw[id] = RawEntry(id: id, name: name, region: region, method: method); order.append(id) }
             update(&raw[id]!)
         }
+        let detector = AnomalyDetector()
 
         for test in session.tests {
             let r = test.result
+            let network = test.networkClass
             if let server = r.server {
                 entry(server.id, server.name, server.location, "speed test") { e in
                     if let lat = r.idleLatency { e.stats.append(lat) }
@@ -133,41 +160,54 @@ public struct CrossTestAnalyzer: Sendable {
                 entry(check.id, check.name, check.region, check.method.rawValue) { e in
                     if let s = check.statistics { e.stats.append(s) }
                     if let err = check.error { e.errors.append(err) }
+                    if let median = check.statistics?.rtt?.median,
+                       let b = endpointBaselines.first(where: { $0.endpointID == check.id && $0.network == network }),
+                       detector.robustZ(value: median, baseline: b.latency) > detector.threshold {
+                        e.baselineDeviations.append((median, b.latency.median))
+                    }
                 }
             }
         }
 
-        // Per-entry medians / loss (pooled across tests by averaging).
-        struct Summary { var median: Double?; var loss: Double?; var dl: Double?; var failed: Bool }
-        var summaries: [String: Summary] = [:]
+        var entries: [ServerComparisonEntry] = []
+        var medians: [String: Double] = [:]
         for id in order {
             let e = raw[id]!
-            let medians = e.stats.compactMap { $0.rtt?.median }
-            let losses = e.stats.filter { $0.sent > 0 }.map(\.loss.lossPercent)
-            let failed = medians.isEmpty && (!e.errors.isEmpty || e.stats.contains { $0.sent > 0 && $0.rtt == nil })
-            summaries[id] = Summary(median: Descriptive.mean(medians), loss: Descriptive.mean(losses),
-                                    dl: e.downloads.max(), failed: failed)
+            if let m = Descriptive.mean(e.stats.compactMap { $0.rtt?.median }) { medians[id] = m }
         }
+        let best = medians.values.min()
 
-        let measuredIDs = order.filter { summaries[$0]!.median != nil || summaries[$0]!.failed }
-        let best = measuredIDs.compactMap { summaries[$0]!.median }.min()
-
-        var entries: [ServerComparisonEntry] = []
         for id in order {
-            let e = raw[id]!, s = summaries[id]!
+            let e = raw[id]!
+            let answered = e.stats.filter { $0.rtt != nil }
+            let loss = Descriptive.mean(answered.map(\.loss.lossPercent))
+            let jitter = Descriptive.mean(answered.compactMap { $0.rtt?.jitter })
+            let median = medians[id]
             var reasons: [String] = []
-            if s.failed { reasons.append("無回應或連線失敗") }
-            if let loss = s.loss, loss > thresholds.maxLossPercent { reasons.append("遺失 \(Fmt.d(loss, 1))%") }
-            if let median = s.median, let best, median > max(2 * best, best + 50) {
-                reasons.append("延遲 \(Fmt.d(median, 0)) ms（最佳 \(Fmt.d(best, 0)) ms）")
+            var status: HealthStatus
+            var unavailable: String?
+            if answered.isEmpty {
+                status = .notMeasured
+                unavailable = e.errors.first ?? "沒有任何回應"
+            } else {
+                if let loss, loss > thresholds.maxLossPercent { reasons.append("遺失 \(Fmt.d(loss, 1))%") }
+                if let jitter, jitter > thresholds.maxJitterMs { reasons.append("抖動 \(Fmt.d(jitter, 0)) ms") }
+                for d in e.baselineDeviations {
+                    reasons.append("延遲 \(Fmt.d(d.median, 0)) ms，偏離此端點歷史基準 \(Fmt.d(d.baseline, 0)) ms")
+                }
+                if e.unhealthy { reasons.append("伺服器健康檢查異常") }
+                status = reasons.isEmpty ? .healthy : .degraded
             }
-            if e.unhealthy { reasons.append("伺服器健康檢查異常") }
-            entries.append(ServerComparisonEntry(id: id, name: e.name, region: e.region, method: e.method,
-                                                 latencyMedianMs: s.median, lossPercent: s.loss, downloadMbps: s.dl,
-                                                 isAnomalous: !reasons.isEmpty, reasons: reasons))
+            var slower = false
+            if let median, let best, median > max(2 * best, best + 50) { slower = true }
+            let baseline = endpointBaselines.first { $0.endpointID == id }?.latency.median
+            entries.append(ServerComparisonEntry(id: id, name: e.name, region: e.region, method: e.method, latencyMedianMs: median,
+                                                 lossPercent: loss, jitterMs: jitter, downloadMbps: e.downloads.max(), status: status,
+                                                 reasons: reasons, higherLatencyRelativeToPeers: slower, baselineMedianMs: baseline,
+                                                 unavailableReason: unavailable))
         }
 
-        let measured = entries.filter { measuredIDs.contains($0.id) }
+        let measured = entries.filter { $0.status != .notMeasured }
         let anomalous = measured.filter(\.isAnomalous)
         let verdict: ServerComparisonVerdict
         if measured.count < 2 { verdict = .insufficientData }
@@ -237,8 +277,13 @@ public struct CrossTestAnalyzer: Sendable {
 
     public func compareInterfaces(_ session: DiagnosticSession) -> InterfaceComparison {
         var states: [NetworkClass: (ids: [UUID], degraded: Int, total: Int, reasons: [String])] = [:]
+        var unavailable: [UnavailableProbe] = []
         func add(_ cls: NetworkClass, _ id: UUID, _ a: TestHealthAssessment) {
-            guard a.measured, cls != .unknown else { return }
+            guard cls != .unknown else { return }
+            guard a.measured else {
+                if let reason = a.unavailableReason { unavailable.append(UnavailableProbe(networkClass: cls, testID: id, reason: reason)) }
+                return
+            }
             var s = states[cls] ?? ([], 0, 0, [])
             if !s.ids.contains(id) { s.ids.append(id) }
             s.total += 1
@@ -261,7 +306,7 @@ public struct CrossTestAnalyzer: Sendable {
         let groups = NetworkClass.allCases.compactMap { cls -> NetworkGroupSummary? in
             guard let s = states[cls] else { return nil }
             return NetworkGroupSummary(networkClass: cls, testIDs: s.ids, degraded: Double(s.degraded) > Double(s.total) / 2,
-                                       reasons: Array(Set(s.reasons)).sorted())
+                                       reasons: Array(Set(s.reasons)).sorted(), measuredCount: s.total)
         }
 
         let fixed = groups.filter { $0.networkClass.isFixed }
@@ -293,6 +338,6 @@ public struct CrossTestAnalyzer: Sendable {
         } else {
             radioVerdict = .insufficientData
         }
-        return InterfaceComparison(groups: groups, verdict: verdict, radioVerdict: radioVerdict)
+        return InterfaceComparison(groups: groups, unavailable: unavailable, verdict: verdict, radioVerdict: radioVerdict)
     }
 }

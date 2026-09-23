@@ -23,6 +23,7 @@ public struct RootCauseAnalysis: Codable, Sendable, Hashable {
     public var possible: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .possible } }
     public var unlikely: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .unlikely } }
     public var insufficient: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .insufficientEvidence } }
+    public var notTested: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .notTested } }
     public var ruledOut: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .ruledOut } }
 }
 
@@ -43,8 +44,11 @@ public protocol RootCauseAnalyzing: Sendable {
 /// 4. **Scoring** — log-odds accumulation, one contribution per evidence code, capped.
 /// 5. **Classification**
 ///
-///        missing required dimension → conf ≤ 0.6; ≥ 0.40 possible, else insufficient evidence
-///        no supporting evidence     → unlikely
+///        required condition never exercised  → not tested (never "ruled out")
+///        decisive measured contradiction     → ruled out
+///        missing required dimension          → conf ≤ 0.6; ≥ 0.40 with support possible;
+///                                              never attempted → not tested, else insufficient evidence
+///        no supporting evidence              → unlikely
 ///        conf ≥ 0.70 likely · ≥ 0.40 possible · else unlikely
 ///
 /// No single metric can produce a "likely" verdict on its own unless the model's weight for it is
@@ -89,45 +93,63 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         let evidence = scoped(set.evidence, model.scope)
         let codes = Set(evidence.map(\.code))
         let missing = model.requiredDimensions.subtracting(set.measuredDimensions).sorted { $0.rawValue < $1.rawValue }
+        let neverAttempted = model.requiredDimensions.subtracting(set.attemptedDimensions)
 
         func make(_ confidence: Double, _ likelihood: Likelihood, supporting: [DiagnosticEvidence] = [],
-                  contradicting: [DiagnosticEvidence] = [], rulingOut: [DiagnosticEvidence] = []) -> DiagnosticHypothesis {
+                  contradicting: [DiagnosticEvidence] = [], rulingOut: [DiagnosticEvidence] = [], reason: String? = nil) -> DiagnosticHypothesis {
             DiagnosticHypothesis(cause: model.cause, layer: model.layer, title: model.title, explanation: model.explanation,
                                  supportingEvidence: supporting, contradictingEvidence: contradicting, rulingOutEvidence: rulingOut,
-                                 missingDimensions: missing, confidence: confidence, likelihood: likelihood,
+                                 statusReason: reason, missingDimensions: missing, confidence: confidence, likelihood: likelihood,
                                  recommendedNextTests: nextTests(model, missing: missing, codes: allCodes),
                                  limitations: model.limitations)
         }
 
-        // Applicability.
+        // 1. Applicability. A required condition that was never exercised is "not tested" —
+        //    only an authoritative measurement of its absence can rule the cause out.
         if !model.requiresAny.isEmpty, allCodes.isDisjoint(with: model.requiresAny) {
             let absent = set.evidence.filter { model.notApplicableWhen.contains($0.code) }
-            return absent.isEmpty ? make(0, .insufficientEvidence) : make(0, .ruledOut, rulingOut: absent)
+            if !absent.isEmpty {
+                let decisive = model.absenceIsDecisive && absent.allSatisfy { $0.kind == .measured }
+                return decisive
+                    ? make(0, .ruledOut, rulingOut: absent, reason: "實測條件不成立")
+                    : make(0.05, .unlikely, contradicting: absent, reason: "觀察到條件不成立（非決定性證據）")
+            }
+            let need = model.requirement.isEmpty ? "所需條件" : model.requirement
+            return make(0, .notTested, reason: "本工作階段沒有\(need)，無法評估此原因（未測試 ≠ 已排除）")
         }
 
         let supporting = evidence.filter { (model.weights[$0.code] ?? 0) > 0 }
         let contradicting = evidence.filter { (model.weights[$0.code] ?? 0) < 0 }
-        let rulingOut = evidence.filter { model.ruledOutBy.contains($0.code) }
+        // 2. Ruling out needs a decisive, directly measured or derived fact — never a
+        //    "not tested" / heuristic observation.
+        let rulingOut = evidence.filter { model.ruledOutBy.contains($0.code) && ($0.kind == .measured || $0.kind == .derived) }
 
         let score = model.prior + codes.reduce(0.0) { $0 + (model.weights[$1] ?? 0) }
         var confidence = min(model.confidenceCap, Self.sigmoid(score))
 
         if !rulingOut.isEmpty {
-            return make(min(confidence, 0.05), .ruledOut, supporting: supporting, contradicting: contradicting, rulingOut: rulingOut)
+            return make(min(confidence, 0.05), .ruledOut, supporting: supporting, contradicting: contradicting, rulingOut: rulingOut,
+                        reason: "決定性實測證據與此原因矛盾")
         }
-        let likelihood: Likelihood
+        // 3. Missing data.
         if !missing.isEmpty {
             confidence = min(confidence, HypothesisModel.incompleteCap)
-            likelihood = confidence >= Self.possibleThreshold && !supporting.isEmpty ? .possible : .insufficientEvidence
-        } else if supporting.isEmpty {
-            likelihood = .unlikely
-        } else if confidence >= Self.likelyThreshold {
-            likelihood = .likely
-        } else if confidence >= Self.possibleThreshold {
-            likelihood = .possible
-        } else {
-            likelihood = .unlikely
+            if confidence >= Self.possibleThreshold && !supporting.isEmpty {
+                return make(confidence, .possible, supporting: supporting, contradicting: contradicting,
+                            reason: "部分支持，但缺少：\(missing.map(\.displayName).joined(separator: "、"))")
+            }
+            if neverAttempted.count == model.requiredDimensions.subtracting(set.measuredDimensions).count && supporting.isEmpty {
+                return make(confidence, .notTested, supporting: supporting, contradicting: contradicting,
+                            reason: "未執行：\(missing.map(\.displayName).joined(separator: "、"))")
+            }
+            return make(confidence, .insufficientEvidence, supporting: supporting, contradicting: contradicting,
+                        reason: "已測試但資料不足以判斷：\(missing.map(\.displayName).joined(separator: "、"))")
         }
+        // 4. Scored classification.
+        if supporting.isEmpty {
+            return make(confidence, .unlikely, contradicting: contradicting, reason: "沒有支持此原因的觀察")
+        }
+        let likelihood: Likelihood = confidence >= Self.likelyThreshold ? .likely : (confidence >= Self.possibleThreshold ? .possible : .unlikely)
         return make(confidence, likelihood, supporting: supporting, contradicting: contradicting)
     }
 
@@ -156,9 +178,9 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
 
     func prioritizeTests(_ hypotheses: [DiagnosticHypothesis]) -> [PrioritizedTest] {
         var table: [RecommendedTest: PrioritizedTest] = [:]
-        for h in hypotheses where h.likelihood == .likely || h.likelihood == .possible || h.likelihood == .insufficientEvidence {
-            // Insufficient-evidence hypotheses still deserve a test, at a low priority.
-            let weight = h.likelihood == .insufficientEvidence ? 0.1 : h.confidence
+        for h in hypotheses where [.likely, .possible, .insufficientEvidence, .notTested].contains(h.likelihood) {
+            // Untested / inconclusive hypotheses still deserve a test, at a low priority.
+            let weight = h.likelihood == .insufficientEvidence ? 0.1 : (h.likelihood == .notTested ? 0.05 : h.confidence)
             for t in h.recommendedNextTests {
                 var entry = table[t] ?? PrioritizedTest(test: t, priority: 0, reasons: [])
                 entry.priority = max(entry.priority, weight)
@@ -192,7 +214,11 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         }
         let ruled = hypotheses.filter { $0.likelihood == .ruledOut }
         if !ruled.isEmpty {
-            lines.append("已排除：" + ruled.prefix(6).map(\.title).joined(separator: "、") + "。")
+            lines.append("已排除（有決定性實測證據）：" + ruled.prefix(6).map(\.title).joined(separator: "、") + "。")
+        }
+        let untested = hypotheses.filter { $0.likelihood == .notTested }
+        if !untested.isEmpty {
+            lines.append("未測試（不代表已排除）：" + untested.prefix(6).map(\.title).joined(separator: "、") + "。")
         }
         if let next = tests.first {
             lines.append("建議下一步：\(next.test.title)。")

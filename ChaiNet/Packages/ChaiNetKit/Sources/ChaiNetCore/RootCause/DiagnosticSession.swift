@@ -100,10 +100,27 @@ public struct HealthThresholds: Codable, Sendable, Hashable {
     public static let standard = HealthThresholds()
 }
 
+/// Health of one measurement. `notMeasured` covers "not tested" and "unavailable" (interface
+/// down, probe impossible) — it is never counted as degraded.
+public enum HealthStatus: String, Codable, Sendable, Hashable {
+    case healthy, degraded, notMeasured
+}
+
 public struct TestHealthAssessment: Codable, Sendable, Hashable {
     public var measured: Bool
     public var isDegraded: Bool
     public var reasons: [String]
+    /// Why nothing could be measured (unavailable interface, probe failure, not run).
+    public var unavailableReason: String?
+
+    public var status: HealthStatus { !measured ? .notMeasured : (isDegraded ? .degraded : .healthy) }
+
+    public init(measured: Bool, isDegraded: Bool, reasons: [String], unavailableReason: String? = nil) {
+        self.measured = measured
+        self.isDegraded = isDegraded && measured
+        self.reasons = measured ? reasons : []
+        self.unavailableReason = unavailableReason
+    }
 }
 
 public enum TestHealthEvaluator {
@@ -123,21 +140,26 @@ public enum TestHealthEvaluator {
         check(m.uploadMbps, { $0 < t.minUploadMbps }) { "上傳 \(Fmt.d($0, 1)) Mbps" }
         check(m.downloadBloatMs, { $0 > t.maxBloatMs }) { "下載負載延遲 +\(Fmt.d($0, 0)) ms" }
         check(m.uploadBloatMs, { $0 > t.maxBloatMs }) { "上傳負載延遲 +\(Fmt.d($0, 0)) ms" }
-        return TestHealthAssessment(measured: measured, isDegraded: !reasons.isEmpty, reasons: reasons)
+        return TestHealthAssessment(measured: measured, isDegraded: !reasons.isEmpty, reasons: reasons,
+                                    unavailableReason: measured ? nil : "此測試沒有可評估的指標")
     }
 
     /// Latency-only assessment (endpoint checks, per-interface probes).
+    ///
+    /// A probe that could not run at all (error, interface unavailable, zero replies) is
+    /// **not measured** — it says nothing about quality and must not make a network "degraded".
     public static func assess(_ stats: LatencyStatistics?, error: String?, thresholds t: HealthThresholds = .standard) -> TestHealthAssessment {
-        if let error { return TestHealthAssessment(measured: true, isDegraded: true, reasons: ["失敗：\(error)"]) }
-        guard let stats, stats.sent > 0 else { return TestHealthAssessment(measured: false, isDegraded: false, reasons: []) }
+        if let error { return TestHealthAssessment(measured: false, isDegraded: false, reasons: [], unavailableReason: error) }
+        guard let stats, stats.sent > 0 else {
+            return TestHealthAssessment(measured: false, isDegraded: false, reasons: [], unavailableReason: "未測試")
+        }
+        guard let rtt = stats.rtt else {
+            return TestHealthAssessment(measured: false, isDegraded: false, reasons: [], unavailableReason: "沒有任何回應（無法區分無法連線與過濾）")
+        }
         var reasons: [String] = []
         if stats.loss.lossPercent > t.maxLossPercent { reasons.append("遺失 \(Fmt.d(stats.loss.lossPercent, 1))%") }
-        if let rtt = stats.rtt {
-            if rtt.median > t.maxLatencyMs { reasons.append("延遲 \(Fmt.d(rtt.median, 0)) ms") }
-            if rtt.jitter > t.maxJitterMs { reasons.append("抖動 \(Fmt.d(rtt.jitter, 0)) ms") }
-        } else {
-            reasons.append("無任何回應")
-        }
+        if rtt.median > t.maxLatencyMs { reasons.append("延遲 \(Fmt.d(rtt.median, 0)) ms") }
+        if rtt.jitter > t.maxJitterMs { reasons.append("抖動 \(Fmt.d(rtt.jitter, 0)) ms") }
         return TestHealthAssessment(measured: true, isDegraded: !reasons.isEmpty, reasons: reasons)
     }
 }

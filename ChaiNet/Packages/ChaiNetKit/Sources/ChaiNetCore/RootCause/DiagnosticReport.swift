@@ -186,6 +186,10 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
             for (name, s) in [("download", r.download), ("upload", r.upload)] {
                 guard let s else { out.append("  \(name): not measured"); continue }
                 out.append("  \(name): avg=\(v(s.averageMbps, 2, "Mbps")) peak=\(v(s.peakMbps, 2)) min=\(v(s.minimumMbps, 2)) median=\(v(s.medianMbps, 2)) p95=\(v(s.p95Mbps, 2)) p10=\(v(s.p10Mbps, 2)) stability=\(v(s.stability.score, 0, "%")) cv=\(v(s.stability.coefficientOfVariation, 3)) drops=\(s.stability.dropCount) bytes=\(s.totalBytes) duration=\(v(s.duration, 1, "s"))")
+                out.append("    method: \(s.methodDescription)")
+                if let windows = s.analysisWindowMbps {
+                    out.append("    statistics windows (Mbps, basis of median/p95/p10/min/peak/stability): " + windows.map { Fmt.d($0, 1) }.joined(separator: " "))
+                }
             }
             for (name, l) in [("idle latency", r.idleLatency), ("download-loaded latency", r.downloadLoadedLatency), ("upload-loaded latency", r.uploadLoadedLatency)] {
                 guard let l else { out.append("  \(name): not measured"); continue }
@@ -214,7 +218,7 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
                     let mbps = SpeedMath.mbps(bytes: s.reduce(0) { $0 + $1.intervalBytes }, seconds: s.reduce(0) { $0 + $1.intervalDuration })
                     return Fmt.d(mbps, 1)
                 }
-                out.append("[\(t.label)] \(speed.direction.rawValue) Mbps per 0.5 s: \(series.joined(separator: " "))")
+                out.append("[\(t.label)] \(speed.direction.rawValue) Mbps per 0.5 s clock bucket (ALL samples incl. warm-up / stream transitions; display aggregation, NOT the statistics basis — see statistics windows in section 3): \(series.joined(separator: " "))")
                 if !speed.streamChanges.isEmpty {
                     out.append("[\(t.label)] \(speed.direction.rawValue) parallel streams: " + speed.streamChanges.map { "\(Fmt.d($0.offset, 1))s→\($0.streams)" }.joined(separator: ", "))
                 }
@@ -233,7 +237,10 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
             }
             if let p = r.protocolProbe, let http = p.http {
                 out.append("[\(t.label)] http: proto=\(http.negotiatedProtocol.rawValue) dns=\(v(http.dnsMs)) tcp=\(v(http.tcpConnectMs)) tls=\(v(http.tlsMs)) ttfb=\(v(http.ttfbMs)) total=\(v(http.totalMs)) ms tls=\(http.tlsVersion ?? "n/a") remote=\(http.remoteAddress ?? "n/a")")
-                out.append("[\(t.label)] http3Attempt=\(p.http3Attempt?.negotiatedProtocol.rawValue ?? "n/a") quicHandshake=\(avail(p.quicHandshakeMs) { v($0, 1, "ms") }) ipv4=\(avail(p.ipv4Reachable) { v($0, 1, "ms") }) ipv6=\(avail(p.ipv6Reachable) { v($0, 1, "ms") })")
+                out.append("[\(t.label)] http3Attempt=\(p.http3Attempt?.negotiatedProtocol.rawValue ?? "n/a") quicHandshake(target)=\(avail(p.quicHandshakeMs) { v($0, 1, "ms") }) ipv4=\(avail(p.ipv4Reachable) { v($0, 1, "ms") }) ipv6=\(avail(p.ipv6Reachable) { v($0, 1, "ms") })")
+                out.append("[\(t.label)] quic assessment=\((p.quicAssessment ?? .notTested).rawValue): " + (p.quicProbes ?? []).map {
+                    "\($0.host) \($0.handshakeMs.map { v($0, 0, "ms") } ?? "fail(\($0.failure?.rawValue ?? "?"))") tcp443=\($0.tcpReachable.map { $0 ? "ok" : "fail" } ?? "n/a")"
+                }.joined(separator: "; "))
             }
             if let c = r.ipFamilyComparison {
                 out.append("[\(t.label)] ipv4 vs ipv6 (\(c.method.rawValue) → \(c.target)): v4 median=\(v(c.ipv4?.rtt?.median)) loss=\(v(c.ipv4?.loss.lossPercent, 1, "%")) err=\(c.ipv4Error ?? "-") · v6 median=\(v(c.ipv6?.rtt?.median)) loss=\(v(c.ipv6?.loss.lossPercent, 1, "%")) err=\(c.ipv6Error ?? "-")")
@@ -266,31 +273,40 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
         if let c = report.crossTest {
             out.append("servers: verdict=\(c.servers.verdict.rawValue)\(c.servers.anomalousRegion.map { " anomalousRegion=\($0)" } ?? "")\(c.servers.throughputConsistent.map { " throughputConsistent=\($0)" } ?? "")")
             for e in c.servers.entries {
-                out.append("  - \(e.name) [\(e.region)] via \(e.method): median=\(v(e.latencyMedianMs)) ms loss=\(v(e.lossPercent, 1, "%")) download=\(v(e.downloadMbps, 1, "Mbps")) anomalous=\(e.isAnomalous) \(e.reasons.joined(separator: ", "))")
+                out.append("  - \(e.name) [\(e.region)] via \(e.method): status=\(e.status.rawValue) median=\(v(e.latencyMedianMs)) ms loss=\(v(e.lossPercent, 1, "%")) jitter=\(v(e.jitterMs)) ms download=\(v(e.downloadMbps, 1, "Mbps")) endpointBaseline=\(v(e.baselineMedianMs)) ms higherLatencyRelativeToPeers=\(e.higherLatencyRelativeToPeers) \(e.reasons.joined(separator: ", "))\(e.unavailableReason.map { " unavailable: \($0)" } ?? "")")
             }
             let ip = c.ipFamilies
             out.append("ip families: verdict=\(ip.verdict.rawValue) v4=\(v(ip.ipv4MedianMs)) ms/\(v(ip.ipv4LossPercent, 1, "%")) v6=\(v(ip.ipv6MedianMs)) ms/\(v(ip.ipv6LossPercent, 1, "%"))")
             out.append("interfaces: verdict=\(c.interfaces.verdict.rawValue) radio=\(c.interfaces.radioVerdict.rawValue)")
             for g in c.interfaces.groups {
-                out.append("  - \(g.networkClass.displayName): \(g.degraded ? "degraded" : "normal") (\(g.testIDs.count) tests) \(g.reasons.joined(separator: ", "))")
+                out.append("  - \(g.networkClass.displayName): \(g.degraded ? "degraded" : "normal") (\(g.measuredCount) measured) \(g.reasons.joined(separator: ", "))")
+            }
+            for u in c.interfaces.unavailable {
+                out.append("  - \(u.networkClass.displayName): NOT TESTED / unavailable (\(u.reason)) — excluded from verdicts")
             }
         }
 
-        h("8. Evidence")
-        for e in report.analysis.evidence.evidence {
-            out.append("- [\(e.code.rawValue)] \(e.statement)")
+        h("8. Evidence (observations — not conclusions)")
+        for kind in [EvidenceKind.measured, .derived, .heuristic, .notTested] {
+            let items = report.analysis.evidence.evidence.filter { $0.kind == kind }
+            guard !items.isEmpty else { continue }
+            out.append("### \(kind.rawValue)（\(kind.displayName)）")
+            for e in items { out.append("- [\(e.code.rawValue)] \(e.statement)") }
         }
         out.append("measured dimensions: " + report.analysis.evidence.measuredDimensions.map(\.rawValue).sorted().joined(separator: ", "))
         let unmeasured = EvidenceDimension.allCases.filter { !report.analysis.evidence.measuredDimensions.contains($0) }
         out.append("not measured: " + (unmeasured.isEmpty ? "none" : unmeasured.map(\.rawValue).joined(separator: ", ")))
+        out.append("attempted but inconclusive: " + report.analysis.evidence.attemptedDimensions.subtracting(report.analysis.evidence.measuredDimensions)
+            .map(\.rawValue).sorted().joined(separator: ", "))
 
         h("9. Diagnostic hypotheses")
-        for group in [Likelihood.likely, .possible, .insufficientEvidence, .unlikely] {
+        for group in [Likelihood.likely, .possible, .insufficientEvidence, .notTested, .unlikely] {
             let hs = report.analysis.hypotheses.filter { $0.likelihood == group }
             guard !hs.isEmpty else { continue }
             out.append("### \(group.displayName)")
             for hyp in hs {
-                out.append("* \(hyp.title) — confidence \(hyp.confidencePercent)% — layer: \(hyp.layer.displayName)")
+                out.append("* \(hyp.title) — status: \(hyp.likelihood.rawValue) — confidence \(hyp.confidencePercent)% — layer: \(hyp.layer.displayName)")
+                if let reason = hyp.statusReason { out.append("  status reason: \(reason)") }
                 out.append("  why: \(hyp.explanation)")
                 for e in hyp.supportingEvidence { out.append("  + \(e.statement)") }
                 for e in hyp.contradictingEvidence { out.append("  − \(e.statement)") }
@@ -300,7 +316,7 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
             }
         }
 
-        h("10. Ruled-out causes")
+        h("10. Ruled-out causes (decisive measured contradiction only; untested causes are listed under not tested)")
         let ruled = report.analysis.ruledOut
         if ruled.isEmpty { out.append("none") }
         for hyp in ruled {
@@ -319,6 +335,11 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
 
         h("13. Platform limitations")
         for l in report.platformLimitations { out.append("- \(l)") }
+
+        h("14. Consistency check")
+        let issues = ReportConsistencyValidator.validate(report)
+        out.append(issues.isEmpty ? "passed (summary, statistics, raw measurements, evidence, hypotheses and ruled-out causes agree)"
+                                  : issues.map { "FAILED: \($0)" }.joined(separator: "\n"))
         out.append("")
         out.append("— end of ChaiNet Diagnostic Report v\(report.metadata.version) —")
         return out.joined(separator: "\n")

@@ -4,13 +4,19 @@ public struct EvidenceSet: Codable, Sendable, Hashable {
     public var evidence: [DiagnosticEvidence]
     /// Dimensions that were actually measured (even when they produced no notable evidence).
     public var measuredDimensions: Set<EvidenceDimension>
+    /// Dimensions for which a test was *run*, even if the result was inconclusive (e.g. a
+    /// cross-server check where only one endpoint answered). Attempted but not measured →
+    /// "insufficient evidence"; never attempted → "not tested".
+    public var attemptedDimensions: Set<EvidenceDimension>
     public var crossTest: CrossTestReport?
     public var baselineComparisons: [BaselineComparison]
 
     public init(evidence: [DiagnosticEvidence], measuredDimensions: Set<EvidenceDimension>,
+                attemptedDimensions: Set<EvidenceDimension>? = nil,
                 crossTest: CrossTestReport? = nil, baselineComparisons: [BaselineComparison] = []) {
         self.evidence = evidence
         self.measuredDimensions = measuredDimensions
+        self.attemptedDimensions = (attemptedDimensions ?? []).union(measuredDimensions)
         self.crossTest = crossTest
         self.baselineComparisons = baselineComparisons
     }
@@ -67,7 +73,7 @@ public struct EvidenceExtractor: Sendable {
         }
 
         // Cross-test comparisons.
-        let cross = crossTestAnalyzer.analyze(session)
+        let cross = crossTestAnalyzer.analyze(session, endpointBaselines: baselines?.endpoints ?? [])
         evidence += crossEvidence(cross, measured: &measured)
 
         // Baseline.
@@ -92,7 +98,24 @@ public struct EvidenceExtractor: Sendable {
                 }
             }
         }
-        return EvidenceSet(evidence: evidence, measuredDimensions: measured, crossTest: cross, baselineComparisons: comparisons)
+        // Attempted = a test for the dimension ran, whatever its outcome.
+        var attempted = measured
+        let results = session.tests.map(\.result)
+        if results.contains(where: { $0.crossValidation != nil }) || Set(results.compactMap { $0.server?.id }).count >= 2 {
+            attempted.insert(.crossServer)
+        }
+        if results.contains(where: { $0.ipFamilyComparison != nil || $0.ipFamilyPreference != .automatic }) { attempted.insert(.ipFamily) }
+        if results.contains(where: { $0.interfaceCompare != nil }) || Set(classes.filter { $0 != .unknown }).count >= 2 {
+            attempted.insert(.interfaceCompare)
+        }
+        if classes.contains(.lte) && classes.contains(.nr) { attempted.insert(.radioCompare) }
+        if baselines != nil { attempted.insert(.baseline) }
+        if results.contains(where: { $0.dns != nil }) { attempted.insert(.dns) }
+        if results.contains(where: { $0.protocolProbe != nil }) { attempted.insert(.protocols) }
+        if results.contains(where: { $0.mtu != nil }) { attempted.insert(.mtu) }
+        if results.contains(where: { $0.monitoring != nil }) { attempted.insert(.stabilityMonitoring) }
+        return EvidenceSet(evidence: evidence, measuredDimensions: measured, attemptedDimensions: attempted,
+                           crossTest: cross, baselineComparisons: comparisons)
     }
 
     // MARK: Per test
@@ -232,18 +255,33 @@ public struct EvidenceExtractor: Sendable {
                 let server = ttfb - (http.tcpConnectMs ?? 0) - (http.tlsMs ?? 0)
                 if server > 300 { add(.ttfbSlow, "TTFB \(Fmt.d(ttfb, 0)) ms，扣除連線後伺服器回應約 \(Fmt.d(server, 0)) ms", ttfb, "ms") }
             }
-            if probe.http3Attempt?.negotiatedProtocol == .http3 || probe.quicHandshakeMs.value != nil {
-                add(.http3Negotiated, "HTTP/3（QUIC）協商成功")
-            } else if probe.http?.statusCode != nil, r.serverInfo?.supportsHTTP3 == true || r.server?.kind == .cloudflare {
-                add(.quicBlocked, "伺服器支援 HTTP/3，但 QUIC 交握失敗，HTTP/2 正常")
+            // Statements quote the protocol that was actually negotiated (never assume HTTP/2).
+            let httpProto = probe.http?.negotiatedProtocol.displayName ?? "HTTP"
+            let assessment = probe.quicAssessment ?? (probe.quicHandshakeMs.value != nil ? .working : nil)
+            if probe.http3Attempt?.negotiatedProtocol == .http3 || assessment == .working {
+                add(.http3Negotiated, "HTTP/3（QUIC）可用：至少一個端點完成 QUIC 交握")
+            } else if let assessment {
+                let hosts = (probe.quicProbes ?? []).map { "\($0.host)（\($0.failure?.rawValue ?? "ok")，TCP \($0.tcpReachable == true ? "可連" : "不可連")）" }
+                    .joined(separator: "、")
+                switch assessment {
+                case .probableUDPBlocking:
+                    add(.quicBlocked, "\(probe.quicProbes?.count ?? 0) 個獨立端點 QUIC 交握皆逾時，但 TCP 443 可連（\(httpProto) 正常）：\(hosts)")
+                case .implementationFailure:
+                    add(.quicImplementationFailure, "各端點 QUIC 皆出現相同協定錯誤，較像本機 / 實作層問題而非網路封鎖：\(hosts)")
+                case .endpointFailure:
+                    add(.quicEndpointFailure, "QUIC 交握失敗僅限個別端點或樣本不足，無法推論為 UDP 封鎖：\(hosts)")
+                case .working, .notTested:
+                    break
+                }
             }
         }
 
         // MTU
         if let mtu = r.mtu?.pathMTU {
             measured.insert(.mtu)
-            if mtu < 1400 { add(.mtuReduced, "路徑 MTU \(mtu) bytes", Double(mtu), "bytes") }
-            else { add(.mtuNormal, "路徑 MTU \(mtu) bytes", Double(mtu), "bytes") }
+            let target = r.mtu?.target ?? "目標"
+            if mtu < 1400 { add(.mtuReduced, "IPv4 → \(target) 路徑 MTU \(mtu) bytes", Double(mtu), "bytes") }
+            else { add(.mtuNormal, "IPv4 → \(target) 路徑 MTU \(mtu) bytes：受測路徑未觀察到 MTU 問題（noIssueObservedOnTestedPath，不代表其他路徑）", Double(mtu), "bytes") }
         }
 
         // Monitoring
@@ -266,21 +304,32 @@ public struct EvidenceExtractor: Sendable {
 
     func crossEvidence(_ cross: CrossTestReport, measured: inout Set<EvidenceDimension>) -> [DiagnosticEvidence] {
         var out: [DiagnosticEvidence] = []
+        var measuredNote = ""
         let s = cross.servers
         let anomalousNames = s.entries.filter(\.isAnomalous).map { "\($0.name)（\($0.reasons.joined(separator: "、"))）" }
-        let total = s.entries.filter { $0.latencyMedianMs != nil || $0.isAnomalous }.count
+        let total = s.entries.filter { $0.status != .notMeasured }.count
+        let unavailable = s.entries.filter { $0.status == .notMeasured }
+        if !unavailable.isEmpty {
+            measuredNote = "（另有 \(unavailable.count) 個端點無法測試，不列入判斷：\(unavailable.map(\.name).joined(separator: "、"))）"
+        }
         switch s.verdict {
         case .insufficientData: break
         case .allNormal:
-            out.append(DiagnosticEvidence(code: .allServersNormal, statement: "\(total) 個獨立伺服器 / 端點皆正常"))
+            out.append(DiagnosticEvidence(code: .allServersNormal, statement: "\(total) 個獨立伺服器 / 端點皆正常\(measuredNote)"))
         case .singleServerAnomalous:
             out.append(DiagnosticEvidence(code: .singleServerAnomalous, statement: "僅 1 個伺服器異常：\(anomalousNames.joined(separator: "；"))，其他 \(total - 1) 個正常"))
         case .multipleServersAnomalous:
             out.append(DiagnosticEvidence(code: .multipleServersAnomalous, statement: "\(anomalousNames.count)/\(total) 個伺服器異常：\(anomalousNames.joined(separator: "；"))"))
         case .allServersAnomalous:
-            out.append(DiagnosticEvidence(code: .allServersAnomalous, statement: "全部 \(total) 個獨立伺服器皆出現相同異常"))
+            out.append(DiagnosticEvidence(code: .allServersAnomalous, statement: "全部 \(total) 個可測試的獨立伺服器皆出現異常\(measuredNote)"))
         }
         if s.verdict != .insufficientData { measured.insert(.crossServer) }
+        let slower = s.entries.filter { $0.higherLatencyRelativeToPeers && !$0.isAnomalous }
+        if !slower.isEmpty {
+            out.append(DiagnosticEvidence(code: .higherLatencyRelativeToPeers,
+                statement: "延遲高於其他端點（僅供參考，不同 Anycast 業者節點位置不同，不視為異常）：" +
+                    slower.map { "\($0.name) \(Fmt.d($0.latencyMedianMs ?? 0, 0)) ms" }.joined(separator: "、")))
+        }
         if let region = s.anomalousRegion {
             out.append(DiagnosticEvidence(code: .regionSpecificAnomaly, statement: "異常集中在「\(region)」區域的伺服器，其他區域正常"))
         }
@@ -309,6 +358,11 @@ public struct EvidenceExtractor: Sendable {
         if ip.verdict != .insufficientData { measured.insert(.ipFamily) }
 
         let i = cross.interfaces
+        for u in i.unavailable {
+            out.append(DiagnosticEvidence(code: .interfaceProbeUnavailable,
+                                          statement: "\(u.networkClass.displayName) 介面無法測試（\(u.reason)）— 視為未測試，不視為異常",
+                                          testIDs: [u.testID]))
+        }
         let groupText = i.groups.map { "\($0.networkClass.displayName)：\($0.degraded ? "異常（\($0.reasons.prefix(3).joined(separator: "、"))）" : "正常")" }
             .joined(separator: "；")
         switch i.verdict {
