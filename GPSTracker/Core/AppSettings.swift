@@ -62,6 +62,8 @@ final class AppSettings: ObservableObject {
     @Published var customLapDistances: [Double] { didSet { defaults.set(customLapDistances, forKey: Keys.customLapDistances) } }
     /// 軌跡上色依據（相對配速／絕對速度／海拔／單色）
     @Published var routeColorModeRaw: String { didSet { defaults.set(routeColorModeRaw, forKey: Keys.routeColorMode) } }
+    /// 定位失效時自動改用推估繼續記錄
+    @Published var assistedTracking: Bool { didSet { defaults.set(assistedTracking, forKey: Keys.assistedTracking) } }
 
     private enum Keys {
         static let unit = "unit"
@@ -105,6 +107,7 @@ final class AppSettings: ObservableObject {
         static let customPaces = "customPaces"
         static let customLapDistances = "customLapDistances"
         static let routeColorMode = "routeColorMode"
+        static let assistedTracking = "assistedTracking"
     }
 
     init() {
@@ -144,7 +147,8 @@ final class AppSettings: ObservableObject {
             Keys.backgroundLocation: true,
             Keys.ruckLoad: 0.0,
             Keys.metronomeBPM: 170,
-            Keys.preferBigText: false
+            Keys.preferBigText: false,
+            Keys.assistedTracking: true
         ])
         unitRaw = defaults.string(forKey: Keys.unit) ?? DistanceUnit.metric.rawValue
         bodyWeight = defaults.double(forKey: Keys.bodyWeight)
@@ -187,6 +191,7 @@ final class AppSettings: ObservableObject {
         customPaces = (defaults.array(forKey: Keys.customPaces) as? [Double]) ?? AppSettings.defaultPaces
         customLapDistances = (defaults.array(forKey: Keys.customLapDistances) as? [Double]) ?? AppSettings.defaultLapDistances
         routeColorModeRaw = defaults.string(forKey: Keys.routeColorMode) ?? RouteColorMode.pace.rawValue
+        assistedTracking = defaults.bool(forKey: Keys.assistedTracking)
     }
 
     var routeColorMode: RouteColorMode {

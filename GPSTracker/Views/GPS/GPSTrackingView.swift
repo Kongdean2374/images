@@ -134,9 +134,11 @@ struct GPSTrackingView: View {
             ? recorder.samples.map { $0.altitude }
             : speeds
         let scale = RouteColorScale.make(mode: settings.routeColorMode, values: values)
+        let gaps = RouteRenderer.gapIndices(timestamps: recorder.samples.map { $0.timestamp })
         return RouteRenderer.segments(coordinates: recorder.coordinates,
                                       values: values,
-                                      scale: scale)
+                                      scale: scale,
+                                      gapAfterIndex: gaps)
     }
 
     private var mapLayer: some View {
@@ -207,7 +209,15 @@ struct GPSTrackingView: View {
 
             Spacer()
 
-            if recorder.isAutoPaused {
+            if recorder.isAssisted {
+                Label(recorder.assistReason.displayName, systemImage: "location.slash.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.violet)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(.ultraThinMaterial))
+                    .transition(.scale.combined(with: .opacity))
+            } else if recorder.isAutoPaused {
                 Label("自動暫停", systemImage: "pause.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.amber)

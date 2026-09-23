@@ -239,6 +239,9 @@ struct WorkoutSummaryView: View {
                         StatPill(title: "步幅", value: String(format: "%.2fm", stride), tint: Theme.accent)
                     }
                 }
+                if session.usedAssistedTracking {
+                    assistedNotice
+                }
                 if let source = session.distanceSource {
                     HStack(spacing: 5) {
                         Text("距離來源")
@@ -269,6 +272,31 @@ struct WorkoutSummaryView: View {
                 }
             }
         }
+    }
+
+    /// 定位中斷過的說明
+    private var assistedNotice: some View {
+        let gaps = session.coverageGaps
+        let totals = session.assistedTotals
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "location.slash.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.violet)
+                Text("定位中斷 \(gaps.count) 次，共 \(Fmt.duration(totals.duration))")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.violet)
+                GlossaryButton(termID: "assistedTracking", size: 12)
+            }
+            Text(totals.distance > 0
+                 ? "中斷期間以計步推估補上 \(Fmt.distance(totals.distance, unit: settings.unit))，地圖上這幾段沒有軌跡。"
+                 : "中斷期間沒有可靠的距離來源，這幾段只記時間不計距離，地圖上也沒有軌跡。")
+                .font(.caption2)
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.violet.opacity(0.10)))
     }
 
     private var lapsCard: some View {

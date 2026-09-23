@@ -71,6 +71,38 @@ final class GPSWorkoutRecorder: ObservableObject {
     private var autoPauseAnchor: (coordinate: CLLocationCoordinate2D, date: Date)?
     /// 最近一次拿到的有效衛星速度（CoreLocation 給 -1 代表沒有值）
     private var lastValidSpeed: Double = 0
+
+    // MARK: 輔助模式（定位失效時自動改用推估）
+
+    /// 目前是不是靠推估在記錄
+    @Published private(set) var isAssisted = false
+    /// 目前這段空白的原因
+    @Published private(set) var assistReason: CoverageGap.Reason = .noSignal
+    /// 已經完成的空白區段
+    @Published private(set) var coverageGaps: [CoverageGap] = []
+
+    /// 最近一次收到「可用」座標的時間
+    private var lastGoodFix: Date?
+    /// 精度連續不佳的起始時間
+    private var poorAccuracySince: Date?
+    /// 目前這段空白的起點
+    private var currentGapStart: (date: Date, distance: Double, steps: Int)?
+    /// 進入輔助模式時的計步基準
+    private var assistStepBaseline: Int = 0
+    /// 推估用的步幅
+    private var assistStride: Double = 0
+    /// 推估距離的累計，離開輔助模式時併入總距離
+    private var assistDistance: Double = 0
+    /// 上次推估的時間點（非計步型運動用最後速度推算時會用到）
+    private var lastAssistTick: Date?
+    /// 剛離開輔助模式，下一個座標要當成新起點而不是接續
+    private var justResumedFromGap = false
+
+    /// 收不到座標超過這麼久就進入輔助模式
+    private let noSignalTimeout: TimeInterval = 10
+    /// 精度持續超過這個值這麼久也算失效
+    private let poorAccuracyLimit: Double = 40
+    private let poorAccuracyTimeout: TimeInterval = 12
     private var lastLapDistance: Double = 0
     private var lastLapElapsed: TimeInterval = 0
 
@@ -171,6 +203,13 @@ final class GPSWorkoutRecorder: ObservableObject {
         pauseLog = []
         autoPauseAnchor = nil
         lastValidSpeed = 0
+        isAssisted = false
+        coverageGaps = []
+        currentGapStart = nil
+        lastGoodFix = nil
+        poorAccuracySince = nil
+        assistDistance = 0
+        justResumedFromGap = false
         lastAccepted = nil
         lastAltitude = nil
         announcedKM = 0
@@ -207,9 +246,124 @@ final class GPSWorkoutRecorder: ObservableObject {
         if distance > 10, elapsed > 0 {
             averagePace = elapsed / (distance / 1000)
         }
+        updateAssistedTracking()
         updateLiveActivity()
         checkAutoPause()
         autosave()
+    }
+
+    /// 每收到一次座標就更新訊號品質，作為自動切換的依據
+    private func noteSignalQuality(of raw: CLLocation) {
+        let accuracy = raw.horizontalAccuracy
+        guard accuracy > 0 else { return }
+
+        if accuracy <= poorAccuracyLimit {
+            lastGoodFix = Date()
+            poorAccuracySince = nil
+        } else if poorAccuracySince == nil {
+            poorAccuracySince = Date()
+        }
+    }
+
+    // MARK: 輔助模式切換
+
+    /// 每個計時週期檢查一次定位還可不可信，必要時自動切換。
+    private func updateAssistedTracking() {
+        guard settings.assistedTracking, state == .recording else {
+            if isAssisted { endGap() }
+            return
+        }
+
+        let now = Date()
+        let silence = lastGoodFix.map { now.timeIntervalSince($0) } ?? now.timeIntervalSince(startDate)
+        let poorFor = poorAccuracySince.map { now.timeIntervalSince($0) } ?? 0
+
+        if isAssisted {
+            accumulateAssistedDistance(at: now)
+            // 恢復條件：剛剛收到夠準的座標
+            if silence < 3 { endGap() }
+            return
+        }
+
+        if silence > noSignalTimeout {
+            beginGap(reason: .noSignal, at: now)
+        } else if poorFor > poorAccuracyTimeout {
+            beginGap(reason: .poorAccuracy, at: now)
+        }
+    }
+
+    private func beginGap(reason: CoverageGap.Reason, at date: Date) {
+        guard !isAssisted else { return }
+        isAssisted = true
+        assistReason = reason
+        assistStepBaseline = pedometer.steps
+        assistDistance = 0
+        lastAssistTick = date
+        assistStride = StrideCalibration.stride(workoutType.strideProfile)
+        currentGapStart = (date, distance, pedometer.steps)
+        CueService.shared.impact(.light)
+        if settings.voiceCues {
+            let how = usesSteps ? "改用計步記錄" : "這段不計距離"
+            CueService.shared.speak(reason == .noSignal ? "定位中斷，\(how)" : "定位精度不佳，\(how)")
+        }
+    }
+
+    /// 輔助期間補距離。
+    ///
+    /// 只有「腳實際走出來」的運動（走路、跑步、健行）才用計步 × 步幅推估，
+    /// 這種推估有實際依據。騎車、划船這類沒有步數的運動則**完全不補距離**：
+    /// 時間照跑、空白段照記，但距離停在中斷前的數字。
+    /// 寧可少算，也不要憑空生出一個錯的數字讓整筆紀錄失真。
+    private func accumulateAssistedDistance(at date: Date) {
+        defer { lastAssistTick = date }
+        guard usesSteps else { return }
+        guard let last = lastAssistTick else { return }
+        let dt = date.timeIntervalSince(last)
+        guard dt > 0, dt < 5 else { return }
+
+        // 以計步增量 × 個人步幅推估
+        let newSteps = max(0, pedometer.steps - assistStepBaseline)
+        let estimated = Double(newSteps) * assistStride
+        let increment = max(0, estimated - assistDistance)
+        assistDistance = estimated
+        distance += increment
+    }
+
+    /// 這個運動用計步推估距離才有意義。
+    /// 不成立的話，空白段就只記時間，不碰距離。
+    private var usesSteps: Bool {
+        guard let sport else { return workoutType.isStepBased || workoutType == .gpsRun || workoutType == .gpsHike }
+        switch SportCatalog.healthKitType(for: sport) {
+        case .walking, .running, .hiking: return true
+        default: return false
+        }
+    }
+
+    private func endGap() {
+        guard isAssisted, let start = currentGapStart else {
+            isAssisted = false
+            currentGapStart = nil
+            return
+        }
+        let now = Date()
+        isAssisted = false
+        currentGapStart = nil
+        lastAssistTick = nil
+
+        // 太短的中斷不留紀錄，免得一堆兩秒的空白
+        guard now.timeIntervalSince(start.date) >= 8 else { return }
+
+        let gap = CoverageGap(start: start.date,
+                              end: now,
+                              startDistance: start.distance,
+                              endDistance: distance,
+                              steps: usesSteps ? max(0, pedometer.steps - start.steps) : nil,
+                              sourceRaw: (usesSteps ? DistanceSource.stride : DistanceSource.gps).rawValue,
+                              reasonRaw: assistReason.rawValue)
+        coverageGaps.append(gap)
+        justResumedFromGap = true
+        CueService.shared.impact(.medium)
+        if settings.voiceCues { CueService.shared.speak("定位已恢復") }
     }
 
     private func commitSegment() {
@@ -264,6 +418,9 @@ final class GPSWorkoutRecorder: ObservableObject {
     private func ingest(_ raw: CLLocation) {
         guard state == .recording || (state == .paused && isAutoPaused) else { return }
 
+        // 先記錄訊號品質，輔助模式靠這個判斷要不要接手
+        noteSignalQuality(of: raw)
+
         // 精度閘門：還沒有任何點時放寬一些好盡快起步，之後收緊，
         // 45 公尺太鬆會讓軌跡在馬路旁邊亂飄。
         let accuracyLimit: Double = lastAccepted == nil ? 40 : 25
@@ -306,6 +463,22 @@ final class GPSWorkoutRecorder: ObservableObject {
         guard state == .recording else { return }
 
         var delta = 0.0
+        // 剛從空白段恢復：距離已經由推估補過了，這一點不再重複累加，
+        // 只把它當成新的起點，地圖上就會留下一段空白
+        if justResumedFromGap {
+            justResumedFromGap = false
+            lastAccepted = TrackSample(latitude: smoothed.latitude,
+                                       longitude: smoothed.longitude,
+                                       altitude: smoothed.altitude,
+                                       timestamp: raw.timestamp,
+                                       speed: max(0, currentSpeed),
+                                       distanceFromStart: distance)
+            samples.append(lastAccepted!)
+            lastAltitude = smoothed.altitude
+            currentPace = GeoMath.pace(fromSpeed: currentSpeed)
+            return
+        }
+
         if let last = lastAccepted {
             delta = GeoMath.haversine(last.coordinate, coord)
             let dt = raw.timestamp.timeIntervalSince(last.timestamp)
@@ -370,7 +543,8 @@ final class GPSWorkoutRecorder: ObservableObject {
                                                             duration: $0.duration,
                                                             distance: $0.distance,
                                                             timestamp: $0.timestamp)
-                              })
+                              },
+                              gaps: coverageGaps)
     }
 
     /// 把目前進度寫到磁碟。force 用在暫停、進背景這種關鍵時刻。
@@ -393,6 +567,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         targetPace = snapshot.targetPace
         autoLapDistance = snapshot.autoLapDistance
         pauseLog = snapshot.pauseLog
+        coverageGaps = snapshot.gaps ?? []
         accumulated = snapshot.elapsed
         elapsed = snapshot.elapsed
         distance = snapshot.distance
@@ -573,6 +748,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         session.weatherNote = weatherNote
         session.temperature = temperature
         session.pauseLog = pauseLog.isEmpty ? nil : pauseLog
+        session.coverageGaps = coverageGaps
         session.laps = laps.map {
             LapRecord(lapNumber: $0.number,
                       lapDuration: $0.duration,

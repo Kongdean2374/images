@@ -210,6 +210,8 @@ final class WorkoutSession {
     var setCount: Int?
     /// 暫停／繼續的時間點（成對出現），用來讓健康 App 算出正確的「體能訓練時間」
     var pauseLog: [Date]?
+    /// 定位失效期間改用推估記錄的區段（JSON）。地圖上是空白，數據照常累積。
+    var coverageGapsJSON: String?
     /// 同路線比較用的識別名稱（GPS 路線名或圈數設定）。
     var routeKey: String?
     var title: String?
@@ -289,6 +291,22 @@ final class WorkoutSession {
     var sport: SportKind? {
         get { SportCatalog.find(sportRaw) }
         set { sportRaw = newValue?.id }
+    }
+
+    /// 定位失效而改用推估的區段
+    var coverageGaps: [CoverageGap] {
+        get { [CoverageGap].decode(coverageGapsJSON) }
+        set { coverageGapsJSON = newValue.encodedJSON }
+    }
+
+    /// 這筆紀錄有沒有用到輔助推估
+    var usedAssistedTracking: Bool { !coverageGaps.isEmpty }
+
+    /// 推估補上的總距離與總時間
+    var assistedTotals: (distance: Double, duration: TimeInterval) {
+        let gaps = coverageGaps
+        return (gaps.reduce(0) { $0 + $1.distance },
+                gaps.reduce(0) { $0 + $1.duration })
     }
 
     /// 熱量與強度估算用的 MET：有指定項目就用項目的

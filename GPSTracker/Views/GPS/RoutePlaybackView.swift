@@ -70,6 +70,10 @@ struct RoutePlaybackView: View {
     @State private var scale: RouteColorScale = .placeholder
     @State private var fastestRange: ClosedRange<Int>?
     @State private var ready = false
+    /// 空白段（定位失效那幾段）的起始索引
+    @State private var gapIndices: Set<Int> = []
+    /// 整段的時間長度，回放改以時間推進，空白段才會依時間等速通過
+    @State private var timeSpan: TimeInterval = 0
 
     /// 動畫時鐘
     @State private var lastTick: Date?
@@ -77,14 +81,41 @@ struct RoutePlaybackView: View {
 
     // MARK: 位置計算
 
+    /// 回放目前對應的「實際時刻」。以時間而不是索引推進，
+    /// 所以沒有軌跡的空白段會依實際經過的時間等速通過，
+    /// 而不是一瞬間跳到恢復定位的那一點。
+    private var currentTime: Date {
+        guard let first = points.first?.timestamp else { return Date() }
+        return first.addingTimeInterval(progress * timeSpan)
+    }
+
+    /// 以時間換算出的浮點位置
     private var exactPosition: Double {
-        guard coordinates.count > 1 else { return 0 }
-        return progress * Double(coordinates.count - 1)
+        guard points.count > 1 else { return 0 }
+        let target = currentTime
+        // 二分搜尋找出目標時間落在哪兩個點之間
+        var low = 0
+        var high = points.count - 1
+        while low < high - 1 {
+            let mid = (low + high) / 2
+            if points[mid].timestamp <= target { low = mid } else { high = mid }
+        }
+        let a = points[low].timestamp
+        let b = points[high].timestamp
+        let span = b.timeIntervalSince(a)
+        guard span > 0 else { return Double(low) }
+        let fraction = min(1, max(0, target.timeIntervalSince(a) / span))
+        return Double(low) + fraction
     }
 
     private var currentIndex: Int {
         guard coordinates.count > 1 else { return 0 }
         return min(coordinates.count - 1, max(0, Int(exactPosition)))
+    }
+
+    /// 現在正通過空白段嗎
+    private var isCrossingGap: Bool {
+        gapIndices.contains(currentIndex)
     }
 
     /// 內插後的頭部座標，兩點之間是連續移動而不是一格一格跳
@@ -129,6 +160,26 @@ struct RoutePlaybackView: View {
 
     private var playbackDuration: Double {
         max(8.0, Double(coordinates.count) / 30.0)
+    }
+
+    /// 空白段的連線（虛線），從斷點直接連到恢復點
+    private var gapLines: [[CLLocationCoordinate2D]] {
+        gapIndices.sorted().compactMap { index in
+            guard index + 1 < coordinates.count else { return nil }
+            return [coordinates[index], coordinates[index + 1]]
+        }
+    }
+
+    /// 已經走過的空白段連線
+    private var visibleGapLines: [[CLLocationCoordinate2D]] {
+        let position = exactPosition
+        return gapIndices.sorted().compactMap { index in
+            guard index + 1 < coordinates.count, Double(index) <= position else { return nil }
+            let head = Double(index + 1) <= position
+                ? coordinates[index + 1]
+                : (headCoordinate ?? coordinates[index])
+            return [coordinates[index], head]
+        }
     }
 
     private var isInFastestSection: Bool {
@@ -203,6 +254,10 @@ struct RoutePlaybackView: View {
         points = working
         coordinates = coords
         fastestRange = best
+        gapIndices = RouteRenderer.gapIndices(timestamps: working.map { $0.timestamp })
+        if let first = working.first?.timestamp, let last = working.last?.timestamp {
+            timeSpan = max(1, last.timeIntervalSince(first))
+        }
         applyColors(points: working, coordinates: coords, mode: colorMode)
         ready = true
         lastTick = nil
@@ -228,7 +283,11 @@ struct RoutePlaybackView: View {
         }
         let built = RouteColorScale.make(mode: mode, values: numbers)
         scale = built
-        allSegments = RouteRenderer.segments(coordinates: coords, values: numbers, scale: built)
+        let gaps = RouteRenderer.gapIndices(timestamps: source.map { $0.timestamp })
+        allSegments = RouteRenderer.segments(coordinates: coords,
+                                             values: numbers,
+                                             scale: built,
+                                             gapAfterIndex: gaps)
     }
 
     /// 依實際經過的時間推進，掉幀也不會變慢
@@ -254,6 +313,13 @@ struct RoutePlaybackView: View {
                 MapPolyline(coordinates: Array(coordinates[currentIndex...]))
                     .stroke(Color.white.opacity(0.22),
                             style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [7, 9]))
+            }
+
+            // 空白段：用虛線標示「這段沒有軌跡」
+            ForEach(Array(visibleGapLines.enumerated()), id: \.offset) { _, line in
+                MapPolyline(coordinates: line)
+                    .stroke(Color.white.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round, dash: [2, 10]))
             }
 
             // 已走過的路線：先畫一層較寬的半透明當作發光底層
@@ -370,7 +436,15 @@ struct RoutePlaybackView: View {
                     .background(Circle().fill(.ultraThinMaterial))
             }
             Spacer()
-            if isInFastestSection {
+            if isCrossingGap {
+                Label("這段沒有定位訊號", systemImage: "location.slash.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.amber)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(.ultraThinMaterial))
+                    .transition(.scale.combined(with: .opacity))
+            } else if isInFastestSection {
                 Label("最快配速段", systemImage: "flame.fill")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Theme.accentWarm)
@@ -409,6 +483,7 @@ struct RoutePlaybackView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isInFastestSection)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isCrossingGap)
     }
 
     /// 顏色尺規圖例

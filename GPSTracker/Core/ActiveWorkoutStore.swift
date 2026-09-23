@@ -39,6 +39,8 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
     var pauseLog: [Date]
     var points: [Point]
     var laps: [Lap]
+    /// 定位失效的空白段
+    var gaps: [CoverageGap]?
 
     var type: WorkoutType { WorkoutType(rawValue: typeRaw) ?? .gpsRun }
     var sport: SportKind? { SportCatalog.find(sportID) }
@@ -141,6 +143,7 @@ final class ActiveWorkoutStore {
                                      notes: "從中斷的紀錄自動回復")
         session.sport = snapshot.sport
         session.pauseLog = snapshot.pauseLog.isEmpty ? nil : snapshot.pauseLog
+        session.coverageGaps = snapshot.gaps ?? []
 
         let met = snapshot.sport?.met ?? snapshot.type.metValue
         session.calories = IntensityCalculator.calories(met: met,

@@ -213,6 +213,7 @@ struct WorkoutSettingsView: View {
                 showPaceEditor = true
             }
 
+            Toggle("定位失效時自動接手", isOn: $settings.assistedTracking)
             Toggle("背景持續記錄", isOn: $settings.backgroundLocation)
             Toggle("自動暫停（停下就暫停）", isOn: $settings.autoPause)
             Toggle("省電取樣（長距離較耐用）", isOn: $settings.batterySaver)
@@ -225,7 +226,7 @@ struct WorkoutSettingsView: View {
         } header: {
             Text("GPS 軌跡")
         } footer: {
-            Text("分圈距離與目標配速都可以自己輸入任意數值，不限於預設選項。軌跡上色選「絕對速度」時，尺規會跟著當下最高速即時重新分級。背景持續記錄需要「永遠允許」定位。")
+            Text("「定位失效時自動接手」：收不到訊號或精度太差時自動改用計步推估繼續記錄，恢復後自動接回，地圖上那段會留白。走路跑步健行才會推估距離；單車這類沒有步數的運動只記時間，不虛構距離。\n\n分圈距離與目標配速都可以自己輸入任意數值。軌跡上色選「絕對速度」時，尺規會跟著當下最高速即時重新分級。背景持續記錄需要「永遠允許」定位。")
         }
 
         presetSection

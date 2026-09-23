@@ -138,9 +138,13 @@ enum RouteRenderer {
 
     /// 將座標 + 數值切成小段。段數越多漸層越細緻，但太多會拖慢地圖，
     /// 所以依點數自動調整每段長度，維持在 maxSegments 以內。
+    ///
+    /// `gapAfterIndex` 指出哪些索引之後是「沒有軌跡的空白段」，切段時會在
+    /// 那裡斷開，不會把空白兩端硬連成一條直線。
     static func segments(coordinates: [CLLocationCoordinate2D],
                          values: [Double],
-                         scale: RouteColorScale) -> [RouteSegment] {
+                         scale: RouteColorScale,
+                         gapAfterIndex: Set<Int> = []) -> [RouteSegment] {
         guard coordinates.count > 1 else { return [] }
         let chunkSize = max(1, Int(ceil(Double(coordinates.count) / Double(maxSegments))))
 
@@ -149,7 +153,21 @@ enum RouteRenderer {
 
         var index = 0
         while index < coordinates.count - 1 {
-            let end = min(index + chunkSize, coordinates.count - 1)
+            // 遇到空白段就跳過，不要連線
+            if gapAfterIndex.contains(index) {
+                index += 1
+                continue
+            }
+            var end = min(index + chunkSize, coordinates.count - 1)
+            // 這一段內若有空白，提早收尾
+            for probe in index..<end where gapAfterIndex.contains(probe) {
+                end = probe
+                break
+            }
+            guard end > index else {
+                index += 1
+                continue
+            }
             let slice = Array(coordinates[index...end])
             let valueSlice = values.isEmpty ? [] : Array(values[index...min(end, values.count - 1)])
             let average = valueSlice.isEmpty ? scale.low : valueSlice.reduce(0, +) / Double(valueSlice.count)
@@ -159,6 +177,19 @@ enum RouteRenderer {
                                        value: average,
                                        color: scale.color(for: average)))
             index = end
+        }
+        return result
+    }
+
+    /// 從時間戳自動找出空白段：相鄰兩點間隔太久，中間一定沒有軌跡。
+    /// 這樣連匯入的 GPX 檔有中斷也能正確斷開。
+    static func gapIndices(timestamps: [Date], threshold: TimeInterval = 20) -> Set<Int> {
+        guard timestamps.count > 1 else { return [] }
+        var result: Set<Int> = []
+        for index in 0..<(timestamps.count - 1) {
+            if timestamps[index + 1].timeIntervalSince(timestamps[index]) > threshold {
+                result.insert(index)
+            }
         }
         return result
     }
