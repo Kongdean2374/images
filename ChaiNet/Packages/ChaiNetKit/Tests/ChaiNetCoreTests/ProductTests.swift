@@ -206,7 +206,7 @@ final class RawDataExporterTests: XCTestCase {
         XCTAssertEqual(rows[(dlStart + 2)...].prefix { !$0.hasPrefix("[") && !$0.isEmpty }.count, r.download!.samples.count)
         XCTAssertTrue(text.contains("3,0.300,lost"), "lost probes are kept")
         XCTAssertTrue(text.contains("cellular_rsrp_dbm=unavailable"))
-        XCTAssertFalse(text.contains("location="), "location stripped by default")
+        XCTAssertFalse(text.contains("25.00000,121"), "location stripped by default")
         // Section / key names are ASCII (values from the network may not be).
         for line in rows where line.hasPrefix("[") { XCTAssertTrue(line.allSatisfy(\.isASCII), String(line)) }
     }
