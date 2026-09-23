@@ -32,7 +32,7 @@ struct FeatureSettingsSheet: View {
             Section {
                 picker("伺服器", \.serverSelection, ServerSelectionMode.allCases, global.serverSelection.displayName) { $0.displayName }
                 ServerModeDetail(settings: effective, allServers: store.allServers,
-                                 manualID: overrideBinding(\.manualServerID, fallback: global.manualServerID),
+                                 manualID: manualIDBinding(),
                                  selectedIDs: overrideBinding(\.selectedServerIDs, fallback: global.selectedServerIDs),
                                  autoCount: overrideBinding(\.autoServerCount, fallback: global.autoServerCount))
                 Toggle("加入多端點驗證", isOn: overrideBinding(\.multiPointValidation, fallback: global.multiPointValidation))
@@ -64,6 +64,11 @@ struct FeatureSettingsSheet: View {
     /// Non-optional binding that stores an override on first change.
     private func overrideBinding<T>(_ key: WritableKeyPath<RunOverrides, T?>, fallback: T) -> Binding<T> {
         Binding(get: { overrides()[keyPath: key] ?? fallback }, set: { v in var o = overrides(); o[keyPath: key] = v; write(o) })
+    }
+
+    private func manualIDBinding() -> Binding<String?> {
+        Binding(get: { overrides().manualServerID ?? global.manualServerID },
+                set: { v in var o = overrides(); o.manualServerID = v; write(o) })
     }
 
     private func picker<T: Hashable>(_ label: String, _ key: WritableKeyPath<RunOverrides, T?>, _ options: [T], _ globalName: String,
