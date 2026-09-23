@@ -228,7 +228,10 @@ extension TestRunner {
             let cross = plan.phases(round: round).first { $0.kind == .crossServerValidation }?.seconds ?? 3
             emit(.phase(.crossValidation))
             hc = begin(.crossServerValidation, round: round, total: total)
-            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: count(cross, pps: 10, minimum: 5))
+            let endpoints = c.crossValidationEndpoints, crossProbes = count(cross, pps: 10, minimum: 5)
+            var checks = try await guarded(max(30, cross * 3), "跨節點驗證", &result.notes) {
+                await self.crossValidation.run(endpoints: endpoints, probes: crossProbes)
+            } ?? []
             if let primary, let idle = result.idleLatency {
                 checks.insert(EndpointCheck(id: primary.id, name: primary.name, host: primary.host, region: primary.location,
                                             method: .httpPing, statistics: idle, error: nil, isPrimary: true), at: 0)
@@ -274,13 +277,15 @@ extension TestRunner {
         emit(.phase(.dns))
         let dnsPlanned = plan.phases.first { $0.kind == .dnsProtocols }?.seconds ?? 10
         hc = begin(.dnsProtocols, total: total)
-        do { result.dns = try await dns.run(resolvers: c.dnsResolvers, domains: DNSBenchmarkEngine.defaultDomains) { _ in } }
-        catch is CancellationError { throw CancellationError() }
-        catch { result.notes.append("DNS 測試失敗：\(error.localizedDescription)") }
+        let resolvers = c.dnsResolvers
+        result.dns = try await guarded(Self.dnsWatchdog, "DNS 測試", &result.notes) {
+            try await self.dns.run(resolvers: resolvers, domains: DNSBenchmarkEngine.defaultDomains) { _ in }
+        }
         emit(.phase(.protocols))
-        do { result.protocolProbe = try await protocols.run(url: primary?.pingURL() ?? URL(string: "https://www.apple.com")!) }
-        catch is CancellationError { throw CancellationError() }
-        catch { result.notes.append("協定分析失敗：\(error.localizedDescription)") }
+        let protocolURL = primary?.pingURL() ?? URL(string: "https://www.apple.com")!
+        result.protocolProbe = try await guarded(Self.protocolWatchdog, "協定分析", &result.notes) {
+            try await self.protocols.run(url: protocolURL)
+        }
         end(.dnsProtocols, hc, planned: dnsPlanned)
         emit(.partial(result))
 
@@ -289,7 +294,10 @@ extension TestRunner {
         let ipPlanned = plan.phases.first { $0.kind == .ipFamilies }?.seconds ?? 4
         hc = begin(.ipFamilies, total: total)
         let familyHost = primary?.host ?? latencyNode?.host ?? "www.apple.com"
-        result.ipFamilyComparison = await ipFamilies.run(host: familyHost, port: 443, probes: count(ipPlanned, pps: 5, minimum: 5))
+        let familyProbes = count(ipPlanned, pps: 5, minimum: 5)
+        result.ipFamilyComparison = try await guarded(max(30, ipPlanned * 3), "IPv4 / IPv6 比較", &result.notes) {
+            await self.ipFamilies.run(host: familyHost, port: 443, probes: familyProbes)
+        }
         end(.ipFamilies, hc, planned: ipPlanned)
 
         // 9. Route / MTU.
@@ -297,13 +305,11 @@ extension TestRunner {
         hc = begin(.routeMTU, total: total)
         let icmpTarget = primary?.icmpHost ?? primary?.host ?? "1.1.1.1"
         emit(.phase(.mtu))
-        do { result.mtu = try await mtu.run(host: icmpTarget) }
-        catch is CancellationError { throw CancellationError() }
-        catch { result.notes.append("MTU 測試失敗：\(error.localizedDescription)") }
+        result.mtu = try await guarded(Self.mtuWatchdog, "MTU 測試", &result.notes) { try await self.mtu.run(host: icmpTarget) }
         emit(.phase(.traceroute))
-        do { result.traceroute = try await traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) } }
-        catch is CancellationError { throw CancellationError() }
-        catch { result.notes.append("路由追蹤失敗：\(error.localizedDescription)") }
+        result.traceroute = try await guarded(Self.tracerouteWatchdog, "路由追蹤", &result.notes) {
+            try await self.traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) }
+        }
         end(.routeMTU, hc, planned: routePlanned)
         try Task.checkCancellation()
 
@@ -339,6 +345,30 @@ extension TestRunner {
         result.evaluate(scoreEngine: scoreEngine, diagnostics: diagnostics)
         emit(.phase(.done))
         return result
+    }
+
+    // Hard upper bounds per fixed-cost phase: a stuck endpoint is recorded and the test moves on.
+    static let dnsWatchdog = 60.0
+    static let protocolWatchdog = 45.0
+    static let mtuWatchdog = 45.0
+    static let tracerouteWatchdog = 120.0
+
+    /// Runs one phase with a watchdog. Timeout / failure → note + nil; only cancellation propagates.
+    func guarded<T: Sendable>(_ seconds: Double, _ what: String, _ notes: inout [String],
+                              _ operation: @escaping @Sendable () async throws -> T) async throws -> T? {
+        do {
+            return try await withTimeout(seconds, operation)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch EngineError.timeout {
+            try Task.checkCancellation()
+            notes.append("\(what)逾時（超過 \(Int(seconds)) 秒），已略過並繼續下一階段。")
+            return nil
+        } catch {
+            try Task.checkCancellation()
+            notes.append("\(what)失敗：\(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// One transfer with loaded latency on a separate connection. Endpoint errors are returned, not thrown.

@@ -251,3 +251,54 @@ final class StressTestRunnerTests: XCTestCase {
         do { _ = try await task.value } catch is CancellationError {} catch {}
     }
 }
+
+final class TimeoutTests: XCTestCase {
+    /// Regression: the stress test hung in DNS because the old `withTimeout` (a task group) waited
+    /// for an operation stuck on a UDP reply that never arrived.
+    func testReturnsEvenIfOperationNeverFinishes() async {
+        let stopwatch = Stopwatch()
+        do {
+            _ = try await withTimeout(0.2) {
+                await withCheckedContinuation { (_: CheckedContinuation<Int, Never>) in }   // never resumes
+            }
+            XCTFail("expected timeout")
+        } catch {
+            XCTAssertEqual(error as? EngineError, .timeout)
+        }
+        XCTAssertLessThan(stopwatch.elapsed, 2)
+    }
+
+    func testValueBeforeDeadline() async throws {
+        let v = try await withTimeout(5) { 42 }
+        XCTAssertEqual(v, 42)
+    }
+
+    func testCallerCancellation() async {
+        let task = Task {
+            try await withTimeout(30) { await withCheckedContinuation { (_: CheckedContinuation<Int, Never>) in } }
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        let stopwatch = Stopwatch()
+        task.cancel()
+        do { _ = try await task.value; XCTFail("expected cancellation") } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertLessThan(stopwatch.elapsed, 2)
+    }
+
+    func testStressWatchdogSkipsStuckPhase() async throws {
+        var runner = TestRunner.mock(sampleDelay: 0)
+        runner.dns = StuckDNSEngine()
+        var notes: [String] = []
+        let r: DNSBenchmarkResult? = try await runner.guarded(0.2, "DNS 測試", &notes) {
+            try await StuckDNSEngine().run(resolvers: [], domains: []) { _ in }
+        }
+        XCTAssertNil(r)
+        XCTAssertTrue(notes.first?.contains("逾時") == true)
+    }
+}
+
+struct StuckDNSEngine: DNSBenchmarkEngineProtocol {
+    func run(resolvers: [DNSResolverDescriptor], domains: [String],
+             progress: @escaping @Sendable (DNSResolverResult) -> Void) async throws -> DNSBenchmarkResult {
+        await withCheckedContinuation { (_: CheckedContinuation<DNSBenchmarkResult, Never>) in }
+    }
+}

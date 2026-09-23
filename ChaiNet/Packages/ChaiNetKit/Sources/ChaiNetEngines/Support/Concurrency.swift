@@ -82,17 +82,65 @@ public enum EngineError: Error, LocalizedError, Sendable, Equatable {
 }
 
 /// Runs `operation`, throwing `EngineError.timeout` if it does not finish in time.
-/// The operation is cancelled when the timeout wins.
+///
+/// Returns as soon as the deadline passes — it never waits for the operation to wind down.
+/// (A task group would: it awaits every child, so an operation stuck on a callback that never
+/// fires — e.g. a UDP reply lost under load — would hang the caller forever.) The operation is
+/// cancelled when the timeout or the caller's cancellation wins.
 public func withTimeout<T: Sendable>(_ seconds: Double, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(for: .seconds(seconds))
-            throw EngineError.timeout
+    let race = TimeoutRace<T>()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
+            race.start(cont, seconds: seconds, operation)
         }
-        defer { group.cancelAll() }
-        guard let first = try await group.next() else { throw EngineError.timeout }
-        return first
+    } onCancel: {
+        race.finish(.failure(CancellationError()))
+    }
+}
+
+final class TimeoutRace<T: Sendable>: @unchecked Sendable {
+    private struct State {
+        var continuation: CheckedContinuation<T, Error>?
+        var result: Result<T, Error>?
+        var work: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+    }
+    private let state = LockedValue(State())
+
+    func start(_ cont: CheckedContinuation<T, Error>, seconds: Double, _ operation: @escaping @Sendable () async throws -> T) {
+        // Cancelled before we started: resume right away.
+        let early: Result<T, Error>? = state.withLock { s in
+            if let r = s.result { return r }
+            s.continuation = cont
+            return nil
+        }
+        if let early { cont.resume(with: early); return }
+        let work = Task { [self] in
+            do { finish(.success(try await operation())) } catch { finish(.failure(error)) }
+        }
+        let timer = Task { [self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            if !Task.isCancelled { finish(.failure(EngineError.timeout)) }
+        }
+        let done = state.withLock { s -> Bool in
+            s.work = work
+            s.timer = timer
+            return s.continuation == nil
+        }
+        if done { work.cancel(); timer.cancel() }
+    }
+
+    func finish(_ result: Result<T, Error>) {
+        let (cont, work, timer): (CheckedContinuation<T, Error>?, Task<Void, Never>?, Task<Void, Never>?) = state.withLock { s in
+            guard s.result == nil else { return (nil, nil, nil) }
+            s.result = result
+            let c = s.continuation
+            s.continuation = nil
+            return (c, s.work, s.timer)
+        }
+        work?.cancel()
+        timer?.cancel()
+        cont?.resume(with: result)
     }
 }
 

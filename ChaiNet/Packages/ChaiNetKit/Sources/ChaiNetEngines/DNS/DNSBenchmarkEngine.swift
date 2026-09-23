@@ -22,19 +22,30 @@ public struct DNSBenchmarkEngine: DNSBenchmarkEngineProtocol {
         self.timeout = timeout
     }
 
+    public static let consecutiveFailureLimit = 3
+
     public static let defaultDomains = ["apple.com", "google.com", "cloudflare.com", "youtube.com", "netflix.com",
                                         "github.com", "wikipedia.org", "amazon.com", "line.me", "twitch.tv"]
 
     public func run(resolvers: [DNSResolverDescriptor], domains: [String] = Self.defaultDomains,
                     progress: @escaping @Sendable (DNSResolverResult) -> Void) async throws -> DNSBenchmarkResult {
-        var results: [DNSResolverResult] = []
-        for resolver in resolvers {
-            try Task.checkCancellation()
-            let r = await benchmark(resolver, domains: domains)
-            results.append(r)
-            progress(r)
+        // Resolvers run concurrently (each is bounded by per-query timeouts), so one unreachable
+        // resolver can't stretch the benchmark to minutes. Output keeps the requested order.
+        let engine = self
+        let finished = await withTaskGroup(of: (Int, DNSResolverResult).self) { group in
+            for (i, resolver) in resolvers.enumerated() {
+                group.addTask {
+                    let r = await engine.benchmark(resolver, domains: domains)
+                    progress(r)
+                    return (i, r)
+                }
+            }
+            var out: [(Int, DNSResolverResult)] = []
+            for await r in group { out.append(r) }
+            return out
         }
-        return DNSBenchmarkResult(date: Date(), domains: domains, resolvers: results)
+        try Task.checkCancellation()
+        return DNSBenchmarkResult(date: Date(), domains: domains, resolvers: finished.sorted { $0.0 < $1.0 }.map(\.1))
     }
 
     func benchmark(_ resolver: DNSResolverDescriptor, domains: [String]) async -> DNSResolverResult {
@@ -62,6 +73,12 @@ public struct DNSBenchmarkEngine: DNSBenchmarkEngineProtocol {
             } catch {
                 samples.append(LatencySample(sequence: i, offset: offset, rttMs: nil))
                 errors.append("\(domain): \(error.localizedDescription)")
+                // Unreachable resolver (no IPv6, UDP 53 blocked…): stop after 3 consecutive failures.
+                if samples.suffix(Self.consecutiveFailureLimit).count == Self.consecutiveFailureLimit,
+                   samples.suffix(Self.consecutiveFailureLimit).allSatisfy(\.isLost) {
+                    errors.append("連續 \(Self.consecutiveFailureLimit) 次失敗，停止此解析器")
+                    break
+                }
             }
         }
         doh?.invalidateAndCancel()
@@ -84,6 +101,9 @@ public struct DNSBenchmarkEngine: DNSBenchmarkEngineProtocol {
         let query = Data(DNSMessage.makeQuery(id: id, name: name, type: .a))
         let t = timeout
         return try await withTimeout(t) {
+            // Cancelling the connection makes a pending receive complete with an error, so a lost
+            // reply can never leave this continuation hanging.
+            try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Double, Error>) in
                 let stopwatch = Stopwatch()
                 let once = OnceFlag()
@@ -101,6 +121,9 @@ public struct DNSBenchmarkEngine: DNSBenchmarkEngineProtocol {
                 connection.send(content: query, completion: .contentProcessed { error in
                     if let error, once.trySet() { cont.resume(throwing: error) }
                 })
+            }
+            } onCancel: {
+                connection.cancel()
             }
         }
     }
