@@ -20,7 +20,8 @@ final class VoiceQualityTests: XCTestCase {
         XCTAssertEqual(VoiceQualityCalculator.mos(rFactor: 0), 1)
         XCTAssertEqual(VoiceQualityCalculator.mos(rFactor: 100), 4.5)
         // R = 93.2: 1 + 3.262 + 7e-6·93.2·33.2·6.8
-        let expected = 1 + 0.035 * 93.2 + 0.000007 * 93.2 * 33.2 * 6.8
+        let cubic: Double = 0.000007 * 93.2 * 33.2 * 6.8
+        let expected: Double = 1 + 0.035 * 93.2 + cubic
         XCTAssertEqual(VoiceQualityCalculator.mos(rFactor: 93.2), expected, accuracy: 1e-9)
         XCTAssertEqual(VoiceRating.from(rFactor: 93.2), .excellent)
         XCTAssertEqual(VoiceRating.from(rFactor: 65), .poor)
@@ -67,7 +68,8 @@ final class StreamingAndOBSTests: XCTestCase {
         // 1080p needs 8 × 1.25 = 10 ≤ 12 ✓ ; 1440p needs 20 ✗
         XCTAssertEqual(r.maxSupportedTier?.name, "1080p Full HD")
         // startup = 50 + 2 × 8 / 12 × 1000
-        XCTAssertEqual(r.estimatedStartupMs!, 50 + 2 * 8 / 12 * 1000, accuracy: 1)
+        let startup: Double = 50 + 2.0 * 8.0 / 12.0 * 1000.0
+        XCTAssertEqual(r.estimatedStartupMs!, startup, accuracy: 1)
     }
 
     func testOBSRecommendation() {

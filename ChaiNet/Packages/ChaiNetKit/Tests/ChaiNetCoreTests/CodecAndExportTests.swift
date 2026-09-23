@@ -15,7 +15,10 @@ final class ICMPPacketTests: XCTestCase {
     }
 
     func ipHeader(src: [UInt8]) -> [UInt8] {
-        [0x45, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0] + src + [192, 168, 1, 2]
+        var header: [UInt8] = [0x45, 0, 0, 0, 0, 0, 0, 0, 64, 1, 0, 0]
+        header.append(contentsOf: src)
+        header.append(contentsOf: [192, 168, 1, 2] as [UInt8])
+        return header
     }
 
     func testParseEchoReply() {
@@ -28,7 +31,7 @@ final class ICMPPacketTests: XCTestCase {
 
     func testParseTimeExceeded() {
         let original = ipHeader(src: [192, 168, 1, 2]) + ICMPPacket.makeEchoRequest(identifier: 0x1234, sequence: 3, payloadSize: 0)
-        let icmp: [UInt8] = [11, 0, 0, 0, 0, 0, 0, 0] + original
+        let icmp: [UInt8] = ([11, 0, 0, 0, 0, 0, 0, 0] as [UInt8]) + original
         let data = ipHeader(src: [10, 0, 0, 1]) + icmp
         XCTAssertEqual(ICMPPacket.parse(data), .timeExceeded(identifier: 0x1234, sequence: 3))
         XCTAssertEqual(ICMPPacket.sourceAddress(data), "10.0.0.1")
@@ -36,7 +39,7 @@ final class ICMPPacketTests: XCTestCase {
 
     func testParseFragmentationNeeded() {
         let original = ipHeader(src: [192, 168, 1, 2]) + ICMPPacket.makeEchoRequest(identifier: 1, sequence: 2, payloadSize: 0)
-        let icmp: [UInt8] = [3, 4, 0, 0, 0, 0, 0x05, 0xDC] + original
+        let icmp: [UInt8] = ([3, 4, 0, 0, 0, 0, 0x05, 0xDC] as [UInt8]) + original
         XCTAssertEqual(ICMPPacket.parse(ipHeader(src: [1, 1, 1, 1]) + icmp),
                        .unreachable(code: 4, identifier: 1, sequence: 2, nextHopMTU: 1500))
     }
@@ -50,7 +53,12 @@ final class DNSMessageTests: XCTestCase {
     func testQueryEncoding() {
         let q = DNSMessage.makeQuery(id: 0xABCD, name: "example.com", type: .a)
         XCTAssertEqual(Array(q[0..<4]), [0xAB, 0xCD, 0x01, 0x00])
-        XCTAssertEqual(Array(q[12...]), [7] + Array("example".utf8) + [3] + Array("com".utf8) + [0, 0, 1, 0, 1])
+        var expected: [UInt8] = [7]
+        expected.append(contentsOf: Array("example".utf8))
+        expected.append(3)
+        expected.append(contentsOf: Array("com".utf8))
+        expected.append(contentsOf: [0, 0, 1, 0, 1] as [UInt8])
+        XCTAssertEqual(Array(q[12...]), expected)
     }
 
     func testHeaderParsing() {

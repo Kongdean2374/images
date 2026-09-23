@@ -54,7 +54,11 @@ final class ScoreEngineTests: XCTestCase {
         m.uploadStability = 60 // identity → 60
         m.uploadBloatMs = 30   // curve → 85
         m.lossPercent = 0.5    // curve → 80
-        let expected = (0.45 * 80 + 0.25 * 60 + 0.15 * 85 + 0.15 * 80) / 1.0
+        let a: Double = 0.45 * 80
+        let b: Double = 0.25 * 60
+        let c: Double = 0.15 * 85
+        let d: Double = 0.15 * 80
+        let expected: Double = a + b + c + d
         XCTAssertEqual(engine.score(m, profile: .upload), Int(expected.rounded()))
     }
 
@@ -63,7 +67,9 @@ final class ScoreEngineTests: XCTestCase {
         m.uploadMbps = 20          // 80, weight .45
         m.uploadStability = 60     // 60, weight .25
         // coverage .70 ≥ .5 → (0.45·80 + 0.25·60) / 0.70
-        XCTAssertEqual(engine.score(m, profile: .upload), Int(((0.45 * 80 + 0.25 * 60) / 0.70).rounded()))
+        let weighted: Double = 0.45 * 80 + 0.25 * 60
+        let expected: Double = weighted / 0.70
+        XCTAssertEqual(engine.score(m, profile: .upload), Int(expected.rounded()))
     }
 
     func testInsufficientCoverageYieldsNil() {
