@@ -30,6 +30,10 @@ enum SessionSaver {
         } catch {
             // 儲存失敗時保留自動存檔，下次開啟 App 還救得回來
             context.rollback()
+            DiagnosticsLog.shared.log(.error, category: "storage", "紀錄寫入資料庫失敗",
+                                      detail: ["錯誤": error.localizedDescription,
+                                               "運動": session.type.displayName,
+                                               "距離": String(format: "%.0f m", session.totalDistance ?? 0)])
             return .failed(error.localizedDescription)
         }
     }

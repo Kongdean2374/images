@@ -75,10 +75,27 @@ enum StatsEngine {
 
     // MARK: 分段配速
 
-    /// GPS 模式：每公里切段（依 splitDistance 公尺）
-    static func splits(for session: WorkoutSession, splitDistance: Double = 1000) -> [SplitSegment] {
+    /// 依總距離挑一個合理的分段長度。
+    ///
+    /// 固定切每公里的話，不到一公里的紀錄只會得到一根佔滿整張圖的長條，
+    /// 什麼也看不出來。短距離自動改用較細的分段。
+    static func adaptiveSplitDistance(for totalDistance: Double) -> Double {
+        switch totalDistance {
+        case ..<600: return 100
+        case ..<1_500: return 200
+        case ..<4_000: return 500
+        case ..<25_000: return 1_000
+        default: return 5_000
+        }
+    }
+
+    /// GPS 模式：每公里切段（依 splitDistance 公尺）。
+    /// 傳 nil 代表依總距離自動決定分段長度。
+    static func splits(for session: WorkoutSession, splitDistance: Double? = nil) -> [SplitSegment] {
+        let step = splitDistance
+            ?? adaptiveSplitDistance(for: session.totalDistance ?? 0)
         if session.type.requiresLocation && session.hasRoute {
-            return gpsSplits(points: session.sortedPoints, splitDistance: splitDistance)
+            return gpsSplits(points: session.sortedPoints, splitDistance: step)
         }
         if !session.laps.isEmpty {
             return lapSplits(laps: session.sortedLaps)

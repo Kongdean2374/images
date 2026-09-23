@@ -40,6 +40,8 @@ struct RootView: View {
             if DatabaseHealth.needsAttention { showDatabaseNotice = true }
             // App 被砍掉時 Live Activity 不會自己結束，開啟時清掉殘留的
             LiveActivityController.shared.endStaleActivities()
+            // 比對「乾淨結束」標記，判定上次是不是被系統強制終止
+            DiagnosticsLog.shared.checkPreviousRun()
             // 上次沒有正常結束的運動
             if let snapshot = ActiveWorkoutStore.shared.load(), snapshot.isWorthRecovering {
                 pendingRecovery = snapshot

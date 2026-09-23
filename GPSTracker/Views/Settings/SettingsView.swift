@@ -730,6 +730,11 @@ struct SettingsView: View {
                                        tint: Theme.amber)
                 }
                 rowDivider
+                documentRow(icon: "stethoscope", title: "診斷紀錄",
+                            subtitle: "異常中斷的原始資訊，可複製回報", tint: Theme.accentWarm) {
+                    DiagnosticsView()
+                }
+                rowDivider
                 documentRow(icon: "character.book.closed.fill", title: "名詞解釋",
                             subtitle: "CTL、ATL、TSB、ACWR⋯⋯白話版", tint: Theme.violet) {
                     GlossaryListView()

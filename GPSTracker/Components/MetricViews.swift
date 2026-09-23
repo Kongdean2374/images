@@ -8,6 +8,8 @@ struct MetricTile: View {
     var systemImage: String? = nil
     var tint: Color = Theme.textPrimary
     var size: CGFloat = 34
+    /// 專有名詞的話填名詞 id，標題旁會出現一個問號
+    var termID: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -20,6 +22,9 @@ struct MetricTile: View {
                     .font(.caption)
                     .textCase(.uppercase)
                     .kerning(0.8)
+                if let termID {
+                    GlossaryButton(termID: termID, size: 11)
+                }
             }
             .foregroundStyle(Theme.textSecondary)
 

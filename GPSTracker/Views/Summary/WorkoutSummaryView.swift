@@ -52,7 +52,7 @@ struct WorkoutSummaryView: View {
                     headerCard
                     if session.hasRoute { mapCard }
                     metricsCard
-                    if !splits.isEmpty {
+                    if splits.count > 1 {
                         GlassCard {
                             SplitsChartView(splits: splits, selection: $selectedSplit, unit: settings.unit)
                         }
@@ -217,9 +217,12 @@ struct WorkoutSummaryView: View {
                                  value: String(format: "%.1f km/h", speed * 3.6),
                                  tint: Theme.accent)
                     }
-                    StatPill(title: "爬升", value: Fmt.elevation(session.elevationGain), tint: Theme.amber)
-                    StatPill(title: "下降", value: Fmt.elevation(session.elevationLoss), tint: Theme.violet)
-                    StatPill(title: "熱量", value: Fmt.decimal(session.calories, digits: 0), tint: Theme.accentWarm)
+                    StatPill(title: "爬升", value: Fmt.elevation(session.elevationGain),
+                             tint: Theme.amber, termID: "elevation")
+                    StatPill(title: "下降", value: Fmt.elevation(session.elevationLoss),
+                             tint: Theme.violet, termID: "elevation")
+                    StatPill(title: "熱量", value: Fmt.decimal(session.calories, digits: 0),
+                             tint: Theme.accentWarm, termID: "calories")
                     if let steps = session.stepCount {
                         StatPill(title: "步數", value: "\(steps)", tint: Theme.mint)
                     }

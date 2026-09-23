@@ -9,6 +9,15 @@ struct SplitsChartView: View {
 
     @State private var selectedLabel: String?
 
+    /// 分段很少時把長條寬度收窄，不要一根佔滿整張圖
+    private var barWidth: CGFloat {
+        switch splits.count {
+        case ...2: return 44
+        case 3...5: return 34
+        default: return 26
+        }
+    }
+
     private var fastest: Double { splits.compactMap { $0.pace }.min() ?? 0 }
     private var slowest: Double { splits.compactMap { $0.pace }.max() ?? 1 }
 
@@ -21,9 +30,7 @@ struct SplitsChartView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("分段配速")
-                    .font(.headline)
-                    .foregroundStyle(Theme.textPrimary)
+                GlossaryHeader(title: "分段配速", termID: "splitPace")
                 Spacer()
                 if let selection {
                     Text("\(selection.label)　\(Fmt.pace(selection.pace, unit: unit))")
@@ -36,7 +43,8 @@ struct SplitsChartView: View {
             Chart(splits) { split in
                 BarMark(
                     x: .value("分段", split.label),
-                    y: .value("配速", split.pace ?? 0)
+                    y: .value("配速", split.pace ?? 0),
+                    width: .fixed(barWidth)
                 )
                 .foregroundStyle(color(for: split))
                 .opacity(selection == nil || selection?.id == split.id ? 1 : 0.35)
@@ -48,7 +56,8 @@ struct SplitsChartView: View {
                 AxisMarks(position: .leading) { value in
                     AxisGridLine().foregroundStyle(Color.white.opacity(0.08))
                     AxisValueLabel {
-                        if let seconds = value.as(Double.self) {
+                        // 配速為 0 或無效時 Fmt.pace 會回 --'--"，那種刻度不要畫
+                        if let seconds = value.as(Double.self), seconds > 0 {
                             Text(Fmt.pace(seconds, unit: unit))
                                 .font(.caption2)
                                 .foregroundStyle(Theme.textSecondary)
@@ -109,7 +118,7 @@ struct ElevationChartView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("海拔剖面")
+            GlossaryHeader(title: "海拔剖面", termID: "elevation")
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
             Chart {

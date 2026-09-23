@@ -146,6 +146,11 @@ final class GPSWorkoutRecorder: ObservableObject {
         LiveActivityController.shared.start(mode: type, usesDistance: true)
         announcer.reset()
         if settings.keepScreenAwake { UIApplication.shared.isIdleTimerDisabled = true }
+        DiagnosticsLog.shared.markRecordingStarted()
+        DiagnosticsLog.shared.log(.info, category: "recording", "開始記錄",
+                                  detail: ["運動": type.displayName,
+                                           "項目": sport?.name ?? "—",
+                                           "定位權限": DiagnosticsLog.authorizationText])
         CueService.shared.impact(.heavy)
         CueService.shared.speak("開始記錄")
     }
@@ -183,6 +188,16 @@ final class GPSWorkoutRecorder: ObservableObject {
         pedometer.stop()
         altimeter.stop()
         UIApplication.shared.isIdleTimerDisabled = false
+        DiagnosticsLog.shared.markCleanExit()
+        DiagnosticsLog.shared.log(.info, category: "recording", "正常結束記錄",
+                                  detail: ["時間": String(format: "%.0f 秒", elapsed),
+                                           "距離": String(format: "%.0f m", distance),
+                                           "軌跡點數": "\(samples.count)",
+                                           "收到座標": "\(received)",
+                                           "精度擋下": "\(rejectedAccuracy)",
+                                           "靜止擋下": "\(rejectedDrift)",
+                                           "跳點擋下": "\(rejectedJump)",
+                                           "空白段": "\(coverageGaps.count)"])
         // 用這次可信的 GPS 距離校正個人步幅，之後沒訊號時就靠它換算
         StrideCalibration.learn(distance: distance,
                                 steps: pedometer.steps,
@@ -278,6 +293,11 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     private func enterBackground() {
         isInBackground = true
+        DiagnosticsLog.shared.log(.info, category: "lifecycle", "進入背景",
+                                  detail: ["已記時間": String(format: "%.0f 秒", elapsed),
+                                           "軌跡點數": "\(samples.count)",
+                                           "採用率": received > 0
+                                            ? "\(Int(Double(samples.count) / Double(received) * 100))%" : "—"])
         LiveActivityController.shared.isInBackground = true
         ActiveWorkoutStore.shared.isInBackground = true
         guard state == .recording || state == .paused else { return }
@@ -290,6 +310,9 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     private func enterForeground() {
         isInBackground = false
+        DiagnosticsLog.shared.log(.info, category: "lifecycle", "回到前景",
+                                  detail: ["已記時間": String(format: "%.0f 秒", elapsed),
+                                           "軌跡點數": "\(samples.count)"])
         LiveActivityController.shared.isInBackground = false
         ActiveWorkoutStore.shared.isInBackground = false
         guard state == .recording || state == .paused else { return }
@@ -419,6 +442,10 @@ final class GPSWorkoutRecorder: ObservableObject {
                               reasonRaw: assistReason.rawValue)
         coverageGaps.append(gap)
         justResumedFromGap = true
+        DiagnosticsLog.shared.log(.warning, category: "location", "定位中斷後恢復",
+                                  detail: ["原因": assistReason.displayName,
+                                           "持續": String(format: "%.0f 秒", gap.duration),
+                                           "補上距離": String(format: "%.0f m", gap.distance)])
         CueService.shared.impact(.medium)
         if settings.voiceCues { CueService.shared.speak("定位已恢復") }
     }
