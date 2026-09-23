@@ -1,0 +1,9 @@
+ChaiNet/ChaiNet.xcodeproj/
+ChaiNet/build/
+ChaiNet/Payload/
+*.ipa
+.build/
+.swiftpm/
+DerivedData/
+backend/chainet-server
+.DS_Store

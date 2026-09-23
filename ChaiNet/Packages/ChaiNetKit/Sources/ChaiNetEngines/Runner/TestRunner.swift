@@ -1,0 +1,439 @@
+import Foundation
+import ChaiNetCore
+
+public enum TestPhase: String, Sendable, Hashable, CaseIterable {
+    case preparing, selectingServer, idleLatency, packetLoss, download, upload, monitoring
+    case dns, protocols, ipFamilies, crossValidation, interfaceCompare, mtu, traceroute, analyzing, done
+
+    public var displayName: String {
+        switch self {
+        case .preparing: "準備中"
+        case .selectingServer: "選擇伺服器"
+        case .idleLatency: "Ping"
+        case .packetLoss: "封包遺失 / 抖動"
+        case .download: "下載"
+        case .upload: "上傳"
+        case .monitoring: "穩定度監測"
+        case .dns: "DNS"
+        case .protocols: "HTTP / TLS / QUIC"
+        case .ipFamilies: "IPv4 / IPv6"
+        case .crossValidation: "交叉驗證"
+        case .interfaceCompare: "介面比較"
+        case .mtu: "MTU"
+        case .traceroute: "路由追蹤"
+        case .analyzing: "分析中"
+        case .done: "完成"
+        }
+    }
+}
+
+public struct TestRunConfiguration: Sendable {
+    public var kind: TestKind
+    public var items: Set<TestItem>
+    public var candidateServers: [ServerDescriptor]
+    /// Use this server instead of auto-selection.
+    public var fixedServer: ServerDescriptor?
+    public var settings: AppSettings
+    public var onCellular: Bool
+    public var idleProbeCount: Int = 20
+    /// Loss-probe schedule; quality tests override (gaming 50 pps, voice 50 pps × 172 B).
+    public var lossProbeInterval: Double = 0.05
+    public var lossProbeCount: Int = 100
+    public var lossPayloadBytes: Int = 64
+    public var monitoringSeconds: Double = 60
+    public var crossValidationEndpoints: [ValidationEndpoint] = ValidationEndpoint.defaults
+    public var dnsResolvers: [DNSResolverDescriptor] = DNSResolverDescriptor.defaults
+    public var tracerouteHost: String?
+
+    public init(kind: TestKind, items: Set<TestItem>, candidateServers: [ServerDescriptor], fixedServer: ServerDescriptor? = nil,
+                settings: AppSettings, onCellular: Bool) {
+        self.kind = kind
+        self.items = items
+        self.candidateServers = candidateServers
+        self.fixedServer = fixedServer
+        self.settings = settings
+        self.onCellular = onCellular
+    }
+
+    /// Quality-test presets.
+    public static func quality(_ kind: TestKind, servers: [ServerDescriptor], fixedServer: ServerDescriptor?, settings: AppSettings, onCellular: Bool) -> TestRunConfiguration {
+        var c: TestRunConfiguration
+        switch kind {
+        case .gaming:
+            c = TestRunConfiguration(kind: kind, items: [.ping, .jitter, .packetLoss, .burstLoss, .latencySpikes, .bufferbloat],
+                                     candidateServers: servers, fixedServer: fixedServer, settings: settings, onCellular: onCellular)
+            c.lossProbeInterval = 0.02; c.lossProbeCount = 750; c.lossPayloadBytes = 64          // 50 pps × 15 s
+        case .voice:
+            c = TestRunConfiguration(kind: kind, items: [.ping, .jitter, .packetLoss, .burstLoss, .upload],
+                                     candidateServers: servers, fixedServer: fixedServer, settings: settings, onCellular: onCellular)
+            c.lossProbeInterval = 0.02; c.lossProbeCount = 750; c.lossPayloadBytes = 172         // G.711 20 ms RTP frame
+        case .streaming:
+            c = TestRunConfiguration(kind: kind, items: [.ping, .download, .bufferbloat, .http],
+                                     candidateServers: servers, fixedServer: fixedServer, settings: settings, onCellular: onCellular)
+        case .obsUpload:
+            c = TestRunConfiguration(kind: kind, items: [.ping, .upload, .bufferbloat, .packetLoss],
+                                     candidateServers: servers, fixedServer: fixedServer, settings: settings, onCellular: onCellular)
+        default:
+            c = TestRunConfiguration(kind: kind, items: TestProfile.quickSpeed.items, candidateServers: servers, fixedServer: fixedServer,
+                                     settings: settings, onCellular: onCellular)
+        }
+        return c
+    }
+}
+
+public enum TestRunEvent: Sendable {
+    case phase(TestPhase)
+    case network(NetworkSnapshot)
+    case serverSelected(ServerDescriptor)
+    case latencySample(TestPhase, LatencySample)
+    case speedSample(TransferDirection, SpeedSample)
+    case streams(TransferDirection, Int)
+    case traceHop(TracerouteHop)
+    case partial(TestResult)
+    case completed(TestResult)
+}
+
+public protocol TestRunnerProtocol: Sendable {
+    func run(_ configuration: TestRunConfiguration) -> AsyncThrowingStream<TestRunEvent, Error>
+}
+
+/// Executes a set of `TestItem`s against one server and assembles a `TestResult`.
+///
+/// Order (idle before load so load can't disturb idle measurements):
+/// network snapshot → server → idle latency → loss/jitter probe → download (+ loaded latency)
+/// → upload (+ loaded latency) → monitoring → DNS → HTTP/TLS/QUIC → IPv4/IPv6 → cross-validation
+/// → interface compare → MTU → traceroute → scoring / diagnostics / quality verdicts.
+///
+/// After every phase a `.partial` result is emitted, so a stopped test keeps what it measured.
+public struct TestRunner: TestRunnerProtocol {
+    public var speed: any SpeedTestEngineProtocol
+    public var dns: any DNSBenchmarkEngineProtocol
+    public var protocols: any ProtocolProbeEngineProtocol
+    public var traceroute: any TracerouteEngineProtocol
+    public var mtu: any MTUDiscoveryEngineProtocol
+    public var crossValidation: any CrossValidationEngineProtocol
+    public var ipFamilies: any IPFamilyCompareEngineProtocol
+    public var interfaces: any InterfaceCompareEngineProtocol
+    public var servers: any ServerDirectoryProtocol
+    public var networkInfo: any NetworkInfoProviding
+    public var probes: any LatencyProbeFactory
+    public var scoreEngine: any ScoreEngineProtocol
+    public var diagnostics: any DiagnosticsEngineProtocol
+
+    public init(speed: any SpeedTestEngineProtocol = URLSessionSpeedTestEngine(),
+                dns: any DNSBenchmarkEngineProtocol = DNSBenchmarkEngine(),
+                protocols: any ProtocolProbeEngineProtocol = ProtocolProbeEngine(),
+                traceroute: any TracerouteEngineProtocol = ICMPTracerouteEngine(),
+                mtu: any MTUDiscoveryEngineProtocol = ICMPMTUDiscoveryEngine(),
+                crossValidation: any CrossValidationEngineProtocol = CrossValidationEngine(),
+                ipFamilies: any IPFamilyCompareEngineProtocol = IPFamilyCompareEngine(),
+                interfaces: any InterfaceCompareEngineProtocol = InterfaceCompareEngine(),
+                servers: any ServerDirectoryProtocol = ServerDirectory(),
+                networkInfo: any NetworkInfoProviding = NetworkInfoProvider(),
+                probes: any LatencyProbeFactory = DefaultLatencyProbeFactory(),
+                scoreEngine: any ScoreEngineProtocol = ScoreEngine(),
+                diagnostics: any DiagnosticsEngineProtocol = DiagnosticsEngine()) {
+        self.speed = speed
+        self.dns = dns
+        self.protocols = protocols
+        self.traceroute = traceroute
+        self.mtu = mtu
+        self.crossValidation = crossValidation
+        self.ipFamilies = ipFamilies
+        self.interfaces = interfaces
+        self.servers = servers
+        self.networkInfo = networkInfo
+        self.probes = probes
+        self.scoreEngine = scoreEngine
+        self.diagnostics = diagnostics
+    }
+
+    public func run(_ configuration: TestRunConfiguration) -> AsyncThrowingStream<TestRunEvent, Error> {
+        let runner = self
+        return makeCancellableStream { continuation in
+            let result = try await runner.execute(configuration) { continuation.yield($0) }
+            continuation.yield(.completed(result))
+        }
+    }
+
+    // MARK: - Execution
+
+    func execute(_ c: TestRunConfiguration, emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> TestResult {
+        let items = c.items
+        let needsLatency = !items.isDisjoint(with: [.ping, .jitter, .download, .upload, .bufferbloat])
+        let needsLoss = !items.isDisjoint(with: [.packetLoss, .burstLoss, .latencySpikes, .jitter])
+        let settings = c.settings
+
+        emit(.phase(.preparing))
+        let snapshot = await networkInfo.snapshot(includePublicIP: true)
+        emit(.network(snapshot))
+        guard snapshot.status == .satisfied else { throw EngineError.noNetwork }
+        var result = TestResult(kind: c.kind, network: snapshot)
+        result.ipFamilyPreference = settings.ipPreference
+        try Task.checkCancellation()
+
+        // Server
+        emit(.phase(.selectingServer))
+        var server: ServerDescriptor
+        if let fixed = c.fixedServer {
+            server = fixed
+        } else {
+            let ranking = await servers.rank(c.candidateServers)
+            guard let best = ranking.first(where: { $0.medianMs != nil })?.server ?? c.candidateServers.first else {
+                throw EngineError.server("沒有可用的測速伺服器")
+            }
+            server = best
+        }
+        if let info = await servers.info(for: server) {
+            result.serverInfo = info
+            if server.udpEchoPort == nil { server.udpEchoPort = info.udpEchoPort }
+        }
+        result.serverHealth = await servers.health(for: server)
+        result.server = server
+        emit(.serverSelected(server))
+        emit(.partial(result))
+        try Task.checkCancellation()
+
+        // Idle latency
+        if needsLatency {
+            emit(.phase(.idleLatency))
+            let probe = probes.latencyProbe(for: server, ipPreference: settings.ipPreference)
+            try await probe.prepare()
+            let samples = await LatencySampler.collect(probe: probe, count: c.idleProbeCount, interval: 0.1, timeout: 2) {
+                emit(.latencySample(.idleLatency, $0))
+            }
+            await probe.close()
+            try Task.checkCancellation()
+            result.idleSamples = samples
+            result.idleLatency = LatencyStatistics.compute(from: samples)
+            emit(.partial(result))
+        }
+
+        // Loss / jitter / burst / spikes
+        if needsLoss {
+            emit(.phase(.packetLoss))
+            if let pair = probes.lossProbe(for: server, payloadSize: c.lossPayloadBytes, ipPreference: settings.ipPreference) {
+                let probe = pair.probe, method = pair.method
+                do {
+                    try await probe.prepare()
+                    let count = items.contains(.latencySpikes) ? max(c.lossProbeCount, 200) : c.lossProbeCount
+                    let samples = await LatencySampler.collect(probe: probe, count: count, interval: c.lossProbeInterval, timeout: 1) {
+                        emit(.latencySample(.packetLoss, $0))
+                    }
+                    await probe.close()
+                    try Task.checkCancellation()
+                    let stats = LatencyStatistics.compute(from: samples)
+                    result.packetLoss = stats
+                    result.packetLossMethod = "\(method)，\(count) 個封包，每 \(Int(c.lossProbeInterval * 1000)) ms"
+                    if items.contains(.latencySpikes) {
+                        result.monitoring = Self.monitoringSummary(target: probe.targetDescription, interval: c.lossProbeInterval, samples: samples)
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    await probe.close()
+                    result.notes.append("封包遺失測試失敗：\(error.localizedDescription)")
+                }
+            } else {
+                result.notes.append("此伺服器沒有 UDP echo，且無可用的 ICMP 目標；封包遺失無法量測（TCP 會以重傳隱藏遺失）。")
+            }
+            emit(.partial(result))
+        }
+
+        // Throughput
+        let maxDuration = settings.effectiveMaxDuration(onCellular: c.onCellular)
+        let auto: AutoDurationPolicy? = settings.testDuration == .auto ? AutoDurationPolicy() : nil
+        for direction in [TransferDirection.download, .upload] {
+            let wanted = direction == .download
+                ? (items.contains(.download) || (items.contains(.bufferbloat) && c.kind != .obsUpload && c.kind != .voice))
+                : (items.contains(.upload) || (items.contains(.bufferbloat) && c.kind != .streaming && c.kind != .gaming))
+            guard wanted else { continue }
+            emit(.phase(direction == .download ? .download : .upload))
+            let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: maxDuration, autoDuration: auto,
+                                                fixedStreams: settings.parallelConnections.fixedCount,
+                                                byteCap: settings.transferByteCap(onCellular: c.onCellular))
+            let (speedResult, loaded) = try await runThroughput(config, server: server, measureLoaded: needsLatency, ipPreference: settings.ipPreference, emit: emit)
+            if direction == .download {
+                result.download = speedResult
+                result.downloadLoadedLatency = loaded
+            } else {
+                result.upload = speedResult
+                result.uploadLoadedLatency = loaded
+            }
+            emit(.partial(result))
+        }
+        if let idle = result.idleLatency {
+            result.bufferbloat = BufferbloatCalculator.evaluate(idle: idle, downloadLoaded: result.downloadLoadedLatency, uploadLoaded: result.uploadLoadedLatency)
+        }
+
+        // Monitoring (drop detection)
+        if items.contains(.continuousPing) || items.contains(.dropMonitor) {
+            emit(.phase(.monitoring))
+            let pair = probes.lossProbe(for: server, payloadSize: 64, ipPreference: settings.ipPreference)
+            let probe = pair?.probe ?? probes.latencyProbe(for: server, ipPreference: settings.ipPreference)
+            let engine = ContinuousPingEngine(networkInfo: networkInfo)
+            var samples: [LatencySample] = [], spikes: [LatencySpikeEvent] = [], drops: [NetworkDropEvent] = [], paths: [PathChangeEvent] = []
+            for try await event in engine.run(probe: probe, interval: 0.5, duration: c.monitoringSeconds) {
+                switch event {
+                case .sample(let s): samples.append(s); emit(.latencySample(.monitoring, s))
+                case .spike(let s): spikes.append(s)
+                case .dropStarted: break
+                case .dropEnded(let d): drops.append(d)
+                case .pathChanged(let p): paths.append(p)
+                }
+            }
+            result.monitoring = MonitoringResult(target: probe.targetDescription, intervalSeconds: 0.5, samples: samples,
+                                                 statistics: LatencyStatistics.compute(from: samples), spikes: spikes, drops: drops, pathChanges: paths)
+            emit(.partial(result))
+        }
+
+        if items.contains(.dns) {
+            emit(.phase(.dns))
+            result.dns = try await dns.run(resolvers: c.dnsResolvers, domains: DNSBenchmarkEngine.defaultDomains) { _ in }
+            emit(.partial(result))
+        }
+        if !items.isDisjoint(with: [.http, .tls, .quic]) {
+            emit(.phase(.protocols))
+            result.protocolProbe = try await protocols.run(url: server.pingURL())
+            emit(.partial(result))
+        }
+        if items.contains(.ipFamilies) {
+            emit(.phase(.ipFamilies))
+            result.ipFamilyComparison = await ipFamilies.run(host: server.host, port: UInt16(server.baseURL.port ?? 443), probes: 15)
+            emit(.partial(result))
+        }
+        try Task.checkCancellation()
+
+        // Cross-validation: explicit, or automatic when the primary server looks abnormal.
+        let primaryStats = result.packetLoss ?? result.idleLatency
+        let primaryAbnormal = primaryStats.map { TestHealthEvaluator.assess($0, error: nil).isDegraded } ?? false
+        if items.contains(.crossValidation) || (settings.autoCrossValidation && primaryAbnormal) {
+            emit(.phase(.crossValidation))
+            if primaryAbnormal && !items.contains(.crossValidation) {
+                result.notes.append("主要伺服器出現異常，已自動對 \(c.crossValidationEndpoints.count) 個獨立端點進行交叉驗證。")
+            }
+            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: 30)
+            if let primaryStats {
+                checks.insert(EndpointCheck(id: server.id, name: server.name, host: server.host, region: server.location,
+                                            method: result.packetLoss != nil ? (server.udpEchoPort != nil ? .udpEcho : .icmpEcho) : .httpPing,
+                                            statistics: primaryStats, error: nil, isPrimary: true), at: 0)
+            }
+            result.crossValidation = checks
+            emit(.partial(result))
+        }
+        if items.contains(.interfaceCompare) {
+            emit(.phase(.interfaceCompare))
+            result.interfaceCompare = await interfaces.run(host: server.host, interfaces: [.wifi, .cellular], probes: 15)
+            emit(.partial(result))
+        }
+        let icmpTarget = c.tracerouteHost ?? server.icmpHost ?? server.host
+        if items.contains(.mtu) {
+            emit(.phase(.mtu))
+            do { result.mtu = try await mtu.run(host: icmpTarget) }
+            catch is CancellationError { throw CancellationError() }
+            catch { result.notes.append("MTU 測試失敗：\(error.localizedDescription)") }
+            emit(.partial(result))
+        }
+        if items.contains(.traceroute) {
+            emit(.phase(.traceroute))
+            do { result.traceroute = try await traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) } }
+            catch is CancellationError { throw CancellationError() }
+            catch { result.notes.append("路由追蹤失敗：\(error.localizedDescription)") }
+            emit(.partial(result))
+        }
+        try Task.checkCancellation()
+
+        emit(.phase(.analyzing))
+        result.evaluate(scoreEngine: scoreEngine, diagnostics: diagnostics)
+        applyQualityVerdicts(&result, c)
+        if settings.ipPreference != .automatic {
+            result.notes.append("IP 協定限制（\(settings.ipPreference.displayName)）套用於延遲與遺失測試；下載 / 上傳由系統選擇（URLSession 無法指定 IP 版本）。")
+        }
+        emit(.phase(.done))
+        return result
+    }
+
+    /// Runs one throughput direction while measuring latency on a separate connection.
+    func runThroughput(_ config: SpeedTestConfiguration, server: ServerDescriptor, measureLoaded: Bool, ipPreference: IPFamilyPreference,
+                       emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> (SpeedResult, LatencyStatistics?) {
+        let direction = config.direction
+        let phase: TestPhase = direction == .download ? .download : .upload
+        let loadedProbe: (any LatencyProbe)? = measureLoaded ? probes.latencyProbe(for: server, ipPreference: ipPreference) : nil
+        try? await loadedProbe?.prepare()
+
+        let loadedTask: Task<[LatencySample], Never>? = loadedProbe.map { probe in
+            Task {
+                var out: [LatencySample] = []
+                for await s in LatencySampler.stream(probe: probe, count: nil, interval: 0.25, timeout: 3) {
+                    out.append(s)
+                    emit(.latencySample(phase, s))
+                }
+                return out
+            }
+        }
+
+        var speedResult: SpeedResult?
+        do {
+            for try await event in speed.run(config) {
+                switch event {
+                case .sample(let s): emit(.speedSample(direction, s))
+                case .streamsChanged(let n): emit(.streams(direction, n))
+                case .completed(let r): speedResult = r
+                }
+            }
+        } catch {
+            loadedTask?.cancel()
+            await loadedProbe?.close()
+            throw error
+        }
+        loadedTask?.cancel()
+        // Samples from the first second (TCP slow start, link not yet saturated) are excluded
+        // when later samples exist.
+        let allLoaded = await loadedTask?.value ?? []
+        let rampedUp = allLoaded.filter { $0.offset >= 1.0 }
+        let loadedSamples = rampedUp.isEmpty ? allLoaded : rampedUp
+        await loadedProbe?.close()
+        try Task.checkCancellation()
+        guard let speedResult else { throw EngineError.invalidResponse("測速未完成") }
+        return (speedResult, loadedSamples.isEmpty ? nil : LatencyStatistics.compute(from: loadedSamples))
+    }
+
+    static func monitoringSummary(target: String, interval: Double, samples: [LatencySample]) -> MonitoringResult {
+        var spikes = LatencySpikeDetector()
+        var drops = NetworkDropDetector()
+        var spikeEvents: [LatencySpikeEvent] = []
+        var dropEvents: [NetworkDropEvent] = []
+        for s in samples.sorted(by: { $0.sequence < $1.sequence }) {
+            if let rtt = s.rttMs, let e = spikes.ingest(sequence: s.sequence, offset: s.offset, rttMs: rtt) { spikeEvents.append(e) }
+            if case .ended(let d)? = drops.ingest(s) { dropEvents.append(d) }
+        }
+        return MonitoringResult(target: target, intervalSeconds: interval, samples: samples, statistics: LatencyStatistics.compute(from: samples),
+                                spikes: spikeEvents, drops: dropEvents, pathChanges: [])
+    }
+
+    func applyQualityVerdicts(_ r: inout TestResult, _ c: TestRunConfiguration) {
+        switch c.kind {
+        case .gaming:
+            if let idle = r.packetLoss ?? r.idleLatency {
+                r.gaming = GamingQualityCalculator.evaluate(idle: idle, loaded: r.downloadLoadedLatency, spikes: r.monitoring?.spikes ?? [],
+                                                            packetsPerSecond: 1 / c.lossProbeInterval, downloadMbps: r.download?.summary.averageMbps,
+                                                            score: r.scores.gaming)
+            }
+        case .voice:
+            if let stats = r.packetLoss ?? r.idleLatency {
+                r.voice = VoiceQualityCalculator.evaluate(stats, packetsPerSecond: 1 / c.lossProbeInterval, payloadBytes: c.lossPayloadBytes)
+            }
+        case .streaming:
+            if let dl = r.download {
+                r.streaming = StreamingQualityCalculator.evaluate(download: dl, ttfbMs: r.protocolProbe?.http?.ttfbMs, score: r.scores.streaming)
+            }
+        case .obsUpload:
+            if let ul = r.upload {
+                r.obs = OBSSuitabilityCalculator.evaluate(upload: ul, idleLatency: r.idleLatency, uploadLoadedLatency: r.uploadLoadedLatency,
+                                                          score: r.scores.upload)
+            }
+        default:
+            break
+        }
+    }
+}

@@ -1,0 +1,185 @@
+name: iOS
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "ChaiNet/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ChaiNet/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Newest Xcode 16.x / 26.x present on the runner is selected by the "Select Xcode" step.
+  XCODE_MAJOR_PREFERENCE: "26 16"
+
+jobs:
+  package-tests:
+    name: ChaiNetKit unit tests (swift test)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          for major in $XCODE_MAJOR_PREFERENCE; do
+            XCODE=$(ls -d /Applications/Xcode_${major}*.app 2>/dev/null | sort -V | tail -1 || true)
+            if [ -n "$XCODE" ]; then break; fi
+          done
+          if [ -z "${XCODE:-}" ]; then XCODE=/Applications/Xcode.app; fi
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: swift test
+        run: |
+          set -o pipefail
+          swift test --package-path ChaiNet/Packages/ChaiNetKit 2>&1 | tee swift-test.log
+
+      - name: Upload swift test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-test-log
+          path: swift-test.log
+          if-no-files-found: ignore
+
+  build-unsigned-ipa:
+    name: Build unsigned IPA (iphoneos Release)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          for major in $XCODE_MAJOR_PREFERENCE; do
+            XCODE=$(ls -d /Applications/Xcode_${major}*.app 2>/dev/null | sort -V | tail -1 || true)
+            if [ -n "$XCODE" ]; then break; fi
+          done
+          if [ -z "${XCODE:-}" ]; then XCODE=/Applications/Xcode.app; fi
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ChaiNet
+        run: xcodegen generate --spec project.yml
+
+      - name: Build (Release, iphoneos, code signing disabled)
+        working-directory: ChaiNet
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ChaiNet.xcodeproj \
+            -scheme ChaiNet \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee xcodebuild.log
+
+      - name: Verify .app exists
+        working-directory: ChaiNet
+        run: |
+          set -euo pipefail
+          APP=build/Build/Products/Release-iphoneos/ChaiNet.app
+          test -d "$APP" || { echo "::error::$APP not found"; exit 1; }
+          test -f "$APP/ChaiNet" || { echo "::error::executable missing in $APP"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          lipo -info "$APP/ChaiNet"
+
+      - name: Package ChaiNet-unsigned.ipa
+        working-directory: ChaiNet
+        run: |
+          set -euo pipefail
+          rm -rf Payload ChaiNet-unsigned.ipa
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/ChaiNet.app Payload/ChaiNet.app
+          /usr/bin/zip -qry ChaiNet-unsigned.ipa Payload
+          unzip -l ChaiNet-unsigned.ipa | head -5
+          ls -lh ChaiNet-unsigned.ipa
+
+      - name: Upload ChaiNet-unsigned.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChaiNet-unsigned.ipa
+          path: ChaiNet/ChaiNet-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload full xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ChaiNet/xcodebuild.log
+          if-no-files-found: ignore
+
+      - name: Show compiler errors
+        if: failure()
+        working-directory: ChaiNet
+        run: grep -E "error:|fatal error" xcodebuild.log | sort -u | head -150 || true
+
+  app-tests:
+    name: App unit tests (iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 45
+    needs: build-unsigned-ipa
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          for major in $XCODE_MAJOR_PREFERENCE; do
+            XCODE=$(ls -d /Applications/Xcode_${major}*.app 2>/dev/null | sort -V | tail -1 || true)
+            if [ -n "$XCODE" ]; then break; fi
+          done
+          if [ -z "${XCODE:-}" ]; then XCODE=/Applications/Xcode.app; fi
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ChaiNet
+        run: xcodegen generate --spec project.yml
+
+      - name: Test
+        working-directory: ChaiNet
+        run: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          echo "Simulator: $UDID"
+          xcodebuild test -project ChaiNet.xcodeproj -scheme ChaiNet -destination "id=$UDID" \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO 2>&1 | tee xcodebuild-test.log
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-test-log
+          path: ChaiNet/xcodebuild-test.log
+          if-no-files-found: ignore

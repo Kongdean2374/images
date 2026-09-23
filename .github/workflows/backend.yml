@@ -1,0 +1,30 @@
+name: Backend
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: go build -o chainet-server ./cmd/chainet-server
