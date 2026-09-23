@@ -118,7 +118,8 @@ final class AppContainer {
         self.serverDirectory = serverDirectory
         self.analyzer = analyzer
         self.reportGenerator = DiagnosticReportGenerator()
-        self.location = LocationService()
+        let location = LocationService()
+        self.location = location
         let tasks = TaskRegistry()
         self.tasks = tasks
         let recorder = ResultRecorder(history: history, settings: settings, location: location)

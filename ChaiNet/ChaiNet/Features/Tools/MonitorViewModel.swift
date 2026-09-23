@@ -82,8 +82,8 @@ final class MonitorViewModel {
         let probe = makeProbe()
         targetDescription = probe.targetDescription
         registration = tasks.register { [weak self] in self?.stop() }
-        let engine = engine
-        let interval = interval
+        let engine = self.engine
+        let interval = self.interval
         task = Task { [weak self] in
             do {
                 for try await event in engine.run(probe: probe, interval: interval, duration: nil) {

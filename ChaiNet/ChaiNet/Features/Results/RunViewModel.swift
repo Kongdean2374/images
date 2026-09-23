@@ -108,7 +108,7 @@ final class RunViewModel {
         configuration = config
         status = .running
         registration = tasks.register { [weak self] in self?.stop() }
-        let runner = runner
+        let runner = self.runner
         task = Task { [weak self] in
             do {
                 for try await event in runner.run(config) {
