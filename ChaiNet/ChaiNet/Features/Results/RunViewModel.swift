@@ -34,6 +34,7 @@ final class RunViewModel {
     /// Partial while running, final afterwards.
     private(set) var result: TestResult?
     private(set) var configuration: TestRunConfiguration?
+    private(set) var startedAt: Date?
 
     private let runner: any TestRunnerProtocol
     private let settings: SettingsStore
@@ -127,6 +128,7 @@ final class RunViewModel {
         stop()
         reset()
         configuration = config
+        startedAt = Date()
         status = .running
         registration = tasks.register { [weak self] in self?.stop() }
         let runner = self.runner

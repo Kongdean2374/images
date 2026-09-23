@@ -144,3 +144,30 @@ final class TestRunnerTests: XCTestCase {
         }
     }
 }
+
+final class ExtremeFullTestTests: XCTestCase {
+    func testExtremeConfigurationRunsEveryItemAtMaximumLoad() async throws {
+        var settings = AppSettings()
+        settings.trafficUsage = .saveOnCellular
+        let plan = FullTestPlan.make(totalSeconds: 60)
+        var config = TestRunConfiguration.extreme(plan: plan, servers: ServerDescriptor.builtIn, fixedServer: nil, settings: settings, onCellular: true)
+        XCTAssertEqual(config.items, Set(TestItem.allCases))
+        XCTAssertEqual(config.settings.parallelConnections, .sixteen)
+        XCTAssertEqual(config.settings.trafficUsage, .unlimited)
+        XCTAssertEqual(config.throughputSecondsOverride, plan.throughputSeconds)
+        XCTAssertEqual(config.lossProbeCount, Int(plan.lossSeconds / 0.02))
+
+        // Fast mock run: keep the plan shape but shrink the timed phases.
+        config.monitoringSeconds = 1
+        config.lossProbeInterval = 0.001
+        config.lossProbeCount = 20
+        var final: TestResult?
+        for try await e in TestRunner.mock().run(config) { if case .completed(let r) = e { final = r } }
+        let r = try XCTUnwrap(final)
+        XCTAssertEqual(r.kind, .extremeFullTest)
+        XCTAssertNotNil(r.fullTestPlan)
+        XCTAssertNotNil(r.gaming); XCTAssertNotNil(r.voice); XCTAssertNotNil(r.streaming); XCTAssertNotNil(r.obs)
+        XCTAssertNotNil(r.packetLossSamples)
+        XCTAssertNotNil(r.dns); XCTAssertNotNil(r.traceroute); XCTAssertNotNil(r.mtu); XCTAssertNotNil(r.monitoring)
+    }
+}

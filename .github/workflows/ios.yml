@@ -99,6 +99,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -114,6 +115,7 @@ jobs:
           test -d "$APP" || { echo "::error::$APP not found"; exit 1; }
           test -f "$APP/ChaiNet" || { echo "::error::executable missing in $APP"; exit 1; }
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          echo "Version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist") ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist"))"
           lipo -info "$APP/ChaiNet"
 
       - name: Package ChaiNet-unsigned.ipa
@@ -124,13 +126,15 @@ jobs:
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/ChaiNet.app Payload/ChaiNet.app
           /usr/bin/zip -qry ChaiNet-unsigned.ipa Payload
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Payload/ChaiNet.app/Info.plist)
+          echo "IPA_NAME=ChaiNet-unsigned-v${VERSION}-build${{ github.run_number }}.ipa" >> "$GITHUB_ENV"
           unzip -l ChaiNet-unsigned.ipa | head -5
           ls -lh ChaiNet-unsigned.ipa
 
       - name: Upload ChaiNet-unsigned.ipa
         uses: actions/upload-artifact@v4
         with:
-          name: ChaiNet-unsigned.ipa
+          name: ${{ env.IPA_NAME }}
           path: ChaiNet/ChaiNet-unsigned.ipa
           if-no-files-found: error
 

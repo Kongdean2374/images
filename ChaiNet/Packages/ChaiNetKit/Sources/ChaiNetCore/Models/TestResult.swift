@@ -12,6 +12,7 @@ public enum TestKind: String, Codable, Sendable, Hashable, CaseIterable {
     case mtu
     case monitoring
     case interfaceCompare
+    case extremeFullTest
 
     public var displayName: String {
         switch self {
@@ -26,6 +27,7 @@ public enum TestKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .mtu: "MTU 測試"
         case .monitoring: "連續監測"
         case .interfaceCompare: "Wi-Fi / 行動網路比較"
+        case .extremeFullTest: "完整測試（極限）"
         }
     }
 }
@@ -133,6 +135,12 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
     public var ipFamilyPreference: IPFamilyPreference
     /// The same server-dependent measurements repeated on additional servers (multi-server test).
     public var serverRuns: [ServerRun]?
+    /// Every raw probe behind the loaded-latency and packet-loss statistics (kept for export).
+    public var downloadLoadedSamples: [LatencySample]?
+    public var uploadLoadedSamples: [LatencySample]?
+    public var packetLossSamples: [LatencySample]?
+    /// Time plan of an extreme full test.
+    public var fullTestPlan: FullTestPlan?
 
     public var scores: QualityScores
     public var findings: [DiagnosticFinding]

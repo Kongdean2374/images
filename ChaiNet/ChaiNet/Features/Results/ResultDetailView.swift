@@ -14,6 +14,7 @@ struct ResultDetailView: View {
                 ResultSummaryView(result: result)
                 TechnicalDetailsView(result: result)
                 shareCard
+                RawDataCard(result: result)
             }
             .padding()
         }

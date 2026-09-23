@@ -49,6 +49,26 @@ enum ExportService {
         return url
     }
 
+    static var platform: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
+    /// Complete English raw-data export of one result (TXT or JSON).
+    static func exportRawData(_ result: TestResult, analysis: RootCauseAnalysis?, asJSON: Bool, includeLocation: Bool) throws -> URL {
+        let dir = try directory()
+        if asJSON {
+            let url = dir.appending(path: "ChaiNet-raw-\(stamp()).json")
+            try RawDataExporter.json(result, analysis: analysis, appVersion: appVersion, platform: platform,
+                                     includeLocation: includeLocation).write(to: url, options: .atomic)
+            return url
+        }
+        let url = dir.appending(path: "ChaiNet-raw-\(stamp()).txt")
+        try Data(RawDataExporter.text(result, analysis: analysis, appVersion: appVersion, platform: platform,
+                                      includeLocation: includeLocation).utf8).write(to: url, options: .atomic)
+        return url
+    }
+
     static var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"

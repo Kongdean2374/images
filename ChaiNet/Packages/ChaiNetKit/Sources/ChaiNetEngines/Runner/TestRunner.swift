@@ -45,6 +45,10 @@ public struct TestRunConfiguration: Sendable {
     public var crossValidationProbes: Int = 30
     public var ipFamilyProbes: Int = 15
     public var interfaceProbes: Int = 15
+    /// Extreme Full Test: per-phase times come from this plan (overrides `applyTiming`).
+    public var fullTestPlan: FullTestPlan?
+    /// Download / upload duration override (seconds, per direction per server).
+    public var throughputSecondsOverride: Double?
     /// Extra servers measured with the same server-dependent items (multi-server test).
     public var additionalServers: [ServerDescriptor] = []
     /// Add this many extra servers automatically from the latency ranking.
@@ -73,6 +77,27 @@ public struct TestRunConfiguration: Sendable {
         ipFamilyProbes = t.ipFamilyProbes
         interfaceProbes = t.interfaceProbes
         monitoringSeconds = t.monitoringSeconds
+    }
+
+    /// Extreme Full Test: every item, maximum load, times from `plan`.
+    public static func extreme(plan: FullTestPlan, servers: [ServerDescriptor], fixedServer: ServerDescriptor?, settings: AppSettings,
+                               onCellular: Bool) -> TestRunConfiguration {
+        var s = settings
+        s.trafficUsage = .unlimited
+        if plan.forceMaxStreams { s.parallelConnections = .sixteen }
+        s.autoCrossValidation = true
+        var c = TestRunConfiguration(kind: .extremeFullTest, items: FullTestPlan.allItems, candidateServers: servers,
+                                     fixedServer: fixedServer, settings: s, onCellular: onCellular)
+        c.fullTestPlan = plan
+        c.idleProbeCount = max(1, Int(plan.idleSeconds / 0.1))
+        c.lossProbeInterval = 0.02                       // 50 pps, like a game / VoIP stream
+        c.lossProbeCount = max(1, Int(plan.lossSeconds / 0.02))
+        c.throughputSecondsOverride = plan.throughputSeconds
+        c.monitoringSeconds = plan.monitoringSeconds
+        c.crossValidationProbes = max(1, Int(plan.crossValidationSeconds / 0.1))
+        c.ipFamilyProbes = max(1, Int(plan.ipFamilySeconds / 0.2))
+        c.interfaceProbes = max(1, Int(plan.interfaceSeconds / 0.2))
+        return c
     }
 
     /// Quality-test presets.
@@ -246,7 +271,8 @@ public struct TestRunner: TestRunnerProtocol {
                 let probe = pair.probe, method = pair.method
                 do {
                     try await probe.prepare()
-                    let count = items.contains(.latencySpikes) && c.settings.testDuration == .auto ? max(c.lossProbeCount, 200) : c.lossProbeCount
+                    let count = items.contains(.latencySpikes) && c.settings.testDuration == .auto && c.fullTestPlan == nil
+                        ? max(c.lossProbeCount, 200) : c.lossProbeCount
                     let samples = await LatencySampler.collect(probe: probe, count: count, interval: c.lossProbeInterval, timeout: 1) {
                         emit(.latencySample(.packetLoss, $0))
                     }
@@ -254,6 +280,7 @@ public struct TestRunner: TestRunnerProtocol {
                     try Task.checkCancellation()
                     let stats = LatencyStatistics.compute(from: samples)
                     result.packetLoss = stats
+                    result.packetLossSamples = samples
                     result.packetLossMethod = "\(method)，\(count) 個封包，每 \(Int(c.lossProbeInterval * 1000)) ms"
                     if items.contains(.latencySpikes) {
                         result.monitoring = Self.monitoringSummary(target: probe.targetDescription, interval: c.lossProbeInterval, samples: samples)
@@ -271,8 +298,9 @@ public struct TestRunner: TestRunnerProtocol {
         }
 
         // Throughput
-        let maxDuration = settings.effectiveMaxDuration(onCellular: c.onCellular)
-        let auto: AutoDurationPolicy? = settings.testDuration == .auto ? AutoDurationPolicy() : nil
+        let maxDuration = c.throughputSecondsOverride ?? settings.effectiveMaxDuration(onCellular: c.onCellular)
+        let auto: AutoDurationPolicy? = settings.testDuration == .auto && c.throughputSecondsOverride == nil ? AutoDurationPolicy() : nil
+        result.fullTestPlan = c.fullTestPlan
         for direction in [TransferDirection.download, .upload] {
             let wanted = direction == .download
                 ? (items.contains(.download) || (items.contains(.bufferbloat) && c.kind != .obsUpload && c.kind != .voice))
@@ -282,13 +310,16 @@ public struct TestRunner: TestRunnerProtocol {
             let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: maxDuration, autoDuration: auto,
                                                 fixedStreams: settings.parallelConnections.fixedCount,
                                                 byteCap: settings.transferByteCap(onCellular: c.onCellular))
-            let (speedResult, loaded) = try await runThroughput(config, server: server, measureLoaded: needsLatency, ipPreference: settings.ipPreference, emit: emit)
+            let (speedResult, loaded, loadedSamples) = try await runThroughput(config, server: server, measureLoaded: needsLatency,
+                                                                               ipPreference: settings.ipPreference, emit: emit)
             if direction == .download {
                 result.download = speedResult
                 result.downloadLoadedLatency = loaded
+                result.downloadLoadedSamples = loadedSamples
             } else {
                 result.upload = speedResult
                 result.uploadLoadedLatency = loaded
+                result.uploadLoadedSamples = loadedSamples
             }
             emit(.partial(result))
         }
@@ -439,7 +470,7 @@ public struct TestRunner: TestRunnerProtocol {
 
     /// Runs one throughput direction while measuring latency on a separate connection.
     func runThroughput(_ config: SpeedTestConfiguration, server: ServerDescriptor, measureLoaded: Bool, ipPreference: IPFamilyPreference,
-                       emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> (SpeedResult, LatencyStatistics?) {
+                       emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> (SpeedResult, LatencyStatistics?, [LatencySample]) {
         let direction = config.direction
         let phase: TestPhase = direction == .download ? .download : .upload
         let loadedProbe: (any LatencyProbe)? = measureLoaded ? probes.latencyProbe(for: server, ipPreference: ipPreference) : nil
@@ -479,7 +510,7 @@ public struct TestRunner: TestRunnerProtocol {
         await loadedProbe?.close()
         try Task.checkCancellation()
         guard let speedResult else { throw EngineError.invalidResponse("測速未完成") }
-        return (speedResult, loadedSamples.isEmpty ? nil : LatencyStatistics.compute(from: loadedSamples))
+        return (speedResult, loadedSamples.isEmpty ? nil : LatencyStatistics.compute(from: loadedSamples), allLoaded)
     }
 
     static func monitoringSummary(target: String, interval: Double, samples: [LatencySample]) -> MonitoringResult {
@@ -496,6 +527,15 @@ public struct TestRunner: TestRunnerProtocol {
     }
 
     func applyQualityVerdicts(_ r: inout TestResult, _ c: TestRunConfiguration) {
+        if c.kind == .extremeFullTest {
+            // Every scenario verdict from the same, complete data set.
+            for kind in [TestKind.gaming, .voice, .streaming, .obsUpload] {
+                var sub = c
+                sub.kind = kind
+                applyQualityVerdicts(&r, sub)
+            }
+            return
+        }
         switch c.kind {
         case .gaming:
             if let idle = r.packetLoss ?? r.idleLatency {

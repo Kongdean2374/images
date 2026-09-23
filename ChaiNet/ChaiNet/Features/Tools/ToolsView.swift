@@ -5,6 +5,20 @@ struct ToolsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                NavigationLink { FullTestView() } label: {
+                    HStack {
+                        Image(systemName: "bolt.horizontal.circle.fill").font(.title2).foregroundStyle(Theme.upload)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("完整測試（極限）").font(.headline).foregroundStyle(Theme.textPrimary)
+                            Text("所有項目 · 最大負載 · 自訂總時間 · 完整原始資料匯出").font(.caption).foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.textSecondary)
+                    }
+                    .cardStyle()
+                }
+                .buttonStyle(.plain)
+
                 NavigationLink { CustomTestView() } label: {
                     HStack {
                         Image(systemName: "slider.horizontal.3").font(.title2).foregroundStyle(Theme.accent)

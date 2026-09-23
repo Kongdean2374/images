@@ -35,7 +35,7 @@ struct HomeView: View {
                 QuickActionLink(title: "連續 Ping", symbol: "timer", tint: Theme.latency) { MonitorView() }
                 QuickActionLink(title: "DNS", symbol: "globe", tint: Theme.info) { ToolRunView(tool: .dns) }
                 QuickActionLink(title: "精靈", symbol: "wand.and.stars", tint: Theme.accent) { TroubleshootingWizardView() }
-                QuickAction(title: "完整診斷", symbol: "stethoscope", tint: Theme.upload) { app.selectedTab = .diagnostics }
+                QuickActionLink(title: "完整測試", symbol: "bolt.horizontal.circle.fill", tint: Theme.upload) { FullTestView() }
             }
         }
     }

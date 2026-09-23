@@ -151,3 +151,76 @@ final class HistoryDashboardTests: XCTestCase {
         XCTAssertEqual(medians[.wifi]!, 100, accuracy: 1)
     }
 }
+
+final class FullTestPlanTests: XCTestCase {
+    func testTwoMinutePlan() {
+        let p = FullTestPlan.make(totalSeconds: 120, serverCount: 1)
+        // budget = max(120 − 71, 60) = 60 → download 22 % = 13.2 s
+        XCTAssertEqual(p.throughputSeconds, 13.2, accuracy: 0.01)
+        XCTAssertEqual(p.monitoringSeconds, 10, accuracy: 0.01, "16 % of 60 = 9.6 → floor 10 s")
+        XCTAssertEqual(p.items.count, 13)
+        XCTAssertTrue(p.items.contains { $0.key == "traceroute" && !$0.budgeted })
+    }
+
+    func testMultiServerSharesServerPhases() {
+        let one = FullTestPlan.make(totalSeconds: 600, serverCount: 1)
+        let three = FullTestPlan.make(totalSeconds: 600, serverCount: 3)
+        XCTAssertEqual(three.throughputSeconds, one.throughputSeconds / 3, accuracy: 0.01)
+        XCTAssertEqual(three.estimatedSeconds, one.estimatedSeconds, accuracy: 1, "total time is honoured regardless of server count")
+    }
+
+    func testClampsAndFloors() {
+        XCTAssertEqual(FullTestPlan.make(totalSeconds: 5).requestedSeconds, 60)
+        XCTAssertEqual(FullTestPlan.make(totalSeconds: 99_999).requestedSeconds, 1800)
+        let tiny = FullTestPlan.make(totalSeconds: 60, serverCount: 6)
+        XCTAssertGreaterThanOrEqual(tiny.throughputSeconds, 6)
+        XCTAssertGreaterThanOrEqual(tiny.lossSeconds, 5)
+    }
+
+    func testAllItemsIncluded() {
+        XCTAssertEqual(FullTestPlan.allItems, Set(TestItem.allCases))
+    }
+}
+
+final class RawDataExporterTests: XCTestCase {
+    func sample() -> TestResult {
+        var r = Fixture.result(.nr, download: 300, upload: 20, latency: 15, loss: 2)
+        r.idleSamples = (0..<5).map { LatencySample(sequence: $0, offset: Double($0) * 0.1, rttMs: $0 == 3 ? nil : 15) }
+        r.packetLossSamples = r.idleSamples
+        r.location = GeoPoint(latitude: 25, longitude: 121, horizontalAccuracy: 5)
+        r.fullTestPlan = FullTestPlan.make(totalSeconds: 120)
+        return r
+    }
+
+    func testTextContainsEveryRawSampleAndIsEnglish() {
+        let r = sample()
+        let text = RawDataExporter.text(r, analysis: RawDataExporter.analysis(for: r), appVersion: "2.0.0", platform: "iOS 26")
+        XCTAssertTrue(text.hasPrefix("ChaiNet Raw Data Export v1"))
+        for section in ["[meta]", "[full_test_plan]", "[environment]", "[download]", "[upload]", "[latency_idle]", "[root_cause_hypotheses]",
+                        "[raw.download_samples_100ms]", "[raw.upload_samples_100ms]", "[raw.idle_latency]", "[raw.packet_loss_probe]"] {
+            XCTAssertTrue(text.contains(section), section)
+        }
+        let rows = text.split(separator: "\n")
+        let dlStart = rows.firstIndex { $0 == "[raw.download_samples_100ms]" }!
+        XCTAssertEqual(rows[dlStart + 1], "offset_s,interval_s,interval_bytes,cumulative_bytes,active_streams,mbps")
+        XCTAssertEqual(rows[(dlStart + 2)...].prefix { !$0.hasPrefix("[") && !$0.isEmpty }.count, r.download!.samples.count)
+        XCTAssertTrue(text.contains("3,0.300,lost"), "lost probes are kept")
+        XCTAssertTrue(text.contains("cellular_rsrp_dbm=unavailable"))
+        XCTAssertFalse(text.contains("location="), "location stripped by default")
+        // Section / key names are ASCII (values from the network may not be).
+        for line in rows where line.hasPrefix("[") { XCTAssertTrue(line.allSatisfy(\.isASCII), String(line)) }
+    }
+
+    func testJSONRoundTripKeepsEverything() throws {
+        let r = sample()
+        let data = try RawDataExporter.json(r, analysis: RawDataExporter.analysis(for: r), appVersion: "2.0.0", platform: "iOS 26")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let export = try decoder.decode(RawDataExport.self, from: data)
+        XCTAssertEqual(export.schema, "chainet.raw-export")
+        XCTAssertEqual(export.result.download?.samples.count, r.download?.samples.count)
+        XCTAssertEqual(export.result.packetLossSamples?.count, 5)
+        XCTAssertNil(export.result.location)
+        XCTAssertEqual(export.analysis?.hypotheses.count, RootCause.allCases.count)
+    }
+}
