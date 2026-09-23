@@ -129,9 +129,10 @@ final class TestRunnerTests: XCTestCase {
 
     func testCancellationStopsRunner() async throws {
         let runner = TestRunner.mock(sampleDelay: 0.05)
+        let configuration = config([.download, .upload])
         let task = Task {
             var count = 0
-            for try await _ in runner.run(config([.download, .upload])) { count += 1 }
+            for try await _ in runner.run(configuration) { count += 1 }
             return count
         }
         try await Task.sleep(for: .milliseconds(150))
