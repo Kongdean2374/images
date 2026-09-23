@@ -359,6 +359,7 @@ struct GPSTrackingView: View {
                                tint: Theme.violet,
                                size: 26)
                 }
+                signalDiagnostics
                 .transition(.opacity)
             }
 
@@ -372,6 +373,51 @@ struct GPSTrackingView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
         .animation(.easeInOut(duration: 0.25), value: expandedMetrics)
+    }
+
+    /// 收訊診斷：收到幾個座標、收下幾個、被哪一關擋掉。
+    /// 軌跡變成直線或距離對不上時，一眼就看得出是哪個環節有問題。
+    private var signalDiagnostics: some View {
+        let dropped = recorder.received - recorder.accepted
+        let rate = recorder.received > 0
+            ? Double(recorder.accepted) / Double(recorder.received) : 1
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 10))
+                Text("收訊診斷")
+                    .font(.system(size: 10, weight: .semibold))
+                Spacer()
+                Text("採用率 \(Int(rate * 100))%")
+                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(rate > 0.5 ? Theme.mint : Theme.amber)
+            }
+            .foregroundStyle(Theme.textSecondary)
+
+            HStack(spacing: 10) {
+                diagnosticChip("收到", recorder.received, Theme.textSecondary)
+                diagnosticChip("採用", recorder.accepted, Theme.mint)
+                if dropped > 0 {
+                    diagnosticChip("精度", recorder.rejectedAccuracy, Theme.amber)
+                    diagnosticChip("靜止", recorder.rejectedDrift, Theme.textSecondary)
+                    diagnosticChip("跳點", recorder.rejectedJump, Theme.accentWarm)
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func diagnosticChip(_ label: String, _ value: Int, _ tint: Color) -> some View {
+        VStack(spacing: 1) {
+            Text("\(value)")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: 大字模式（跑步中看得清楚，也避免誤觸）

@@ -98,11 +98,21 @@ final class GPSWorkoutRecorder: ObservableObject {
     /// 剛離開輔助模式，下一個座標要當成新起點而不是接續
     private var justResumedFromGap = false
 
-    /// 收不到座標超過這麼久就進入輔助模式
-    private let noSignalTimeout: TimeInterval = 10
-    /// 精度持續超過這個值這麼久也算失效
-    private let poorAccuracyLimit: Double = 40
-    private let poorAccuracyTimeout: TimeInterval = 12
+    // MARK: 診斷計數（讓收訊問題可以被看見，不用猜）
+    @Published private(set) var received = 0
+    @Published private(set) var rejectedAccuracy = 0
+    @Published private(set) var rejectedStale = 0
+    @Published private(set) var rejectedDrift = 0
+    @Published private(set) var rejectedJump = 0
+    var accepted: Int { samples.count }
+
+    /// 完全沒有可用座標超過這麼久才進入輔助模式。
+    /// 判斷依據是「有沒有真的收進軌跡的點」，不是原始精度數字——
+    /// 精度 40 公尺照樣可以是有用的點，不該因此停止記錄。
+    private let noSignalTimeout: TimeInterval = 25
+    /// 精度爛到連放寬後的閘門都收不下，才算失效
+    private let poorAccuracyLimit: Double = 75
+    private let poorAccuracyTimeout: TimeInterval = 30
     private var lastLapDistance: Double = 0
     private var lastLapElapsed: TimeInterval = 0
 
@@ -210,6 +220,11 @@ final class GPSWorkoutRecorder: ObservableObject {
         poorAccuracySince = nil
         assistDistance = 0
         justResumedFromGap = false
+        received = 0
+        rejectedAccuracy = 0
+        rejectedStale = 0
+        rejectedDrift = 0
+        rejectedJump = 0
         lastAccepted = nil
         lastAltitude = nil
         announcedKM = 0
@@ -252,13 +267,13 @@ final class GPSWorkoutRecorder: ObservableObject {
         autosave()
     }
 
-    /// 每收到一次座標就更新訊號品質，作為自動切換的依據
+    /// 每收到一次座標就更新訊號品質，作為自動切換的依據。
+    /// 只有「爛到連放寬後的閘門都收不下」才開始計時，避免在開闊地誤判。
     private func noteSignalQuality(of raw: CLLocation) {
         let accuracy = raw.horizontalAccuracy
         guard accuracy > 0 else { return }
 
         if accuracy <= poorAccuracyLimit {
-            lastGoodFix = Date()
             poorAccuracySince = nil
         } else if poorAccuracySince == nil {
             poorAccuracySince = Date()
@@ -421,13 +436,31 @@ final class GPSWorkoutRecorder: ObservableObject {
         // 先記錄訊號品質，輔助模式靠這個判斷要不要接手
         noteSignalQuality(of: raw)
 
-        // 精度閘門：還沒有任何點時放寬一些好盡快起步，之後收緊，
-        // 45 公尺太鬆會讓軌跡在馬路旁邊亂飄。
-        let accuracyLimit: Double = lastAccepted == nil ? 40 : 25
-        guard raw.horizontalAccuracy > 0, raw.horizontalAccuracy <= accuracyLimit else { return }
+        received += 1
 
-        // 太舊的座標不要（背景恢復時系統可能一次丟一批過期的點）
-        guard raw.timestamp.timeIntervalSinceNow > -30 else { return }
+        // 精度閘門。
+        //
+        // 上一版寫死 25 公尺太嚴：螢幕關閉時 iOS 會降低 GPS 取樣功率，
+        // 即使在開闊地回報的誤差也常落在 25–40 公尺，結果整批座標被丟掉，
+        // 軌跡就變成兩點之間的一條直線。
+        // 改成基準 35 公尺，而且愈久沒收到可用座標就愈放寬，最多到 70 公尺，
+        // 寧可先收下再靠後面的跳點與漂移檢查把壞點濾掉，也不要整段變空白。
+        let starvedFor = lastAccepted.map { Date().timeIntervalSince($0.timestamp) } ?? 0
+        let accuracyLimit: Double = min(70, 35 + max(0, starvedFor - 10) * 2)
+        guard raw.horizontalAccuracy > 0, raw.horizontalAccuracy <= accuracyLimit else {
+            rejectedAccuracy += 1
+            return
+        }
+
+        // 時間檢查。
+        //
+        // 原本丟掉「超過 30 秒前」的座標，但 iOS 在背景會把更新批次化，
+        // 一次送來一串時間較早的點——那正是我們最需要的資料。
+        // 改成只要比「已接受的最後一點」新就收下。
+        if let last = lastAccepted, raw.timestamp <= last.timestamp {
+            rejectedStale += 1
+            return
+        }
 
         // 速度：-1 代表系統無法判定，這時不要當成 0
         if raw.speed >= 0 {
@@ -474,6 +507,7 @@ final class GPSWorkoutRecorder: ObservableObject {
                                        speed: max(0, currentSpeed),
                                        distanceFromStart: distance)
             samples.append(lastAccepted!)
+            lastGoodFix = Date()
             lastAltitude = smoothed.altitude
             currentPace = GeoMath.pace(fromSpeed: currentSpeed)
             return
@@ -484,11 +518,28 @@ final class GPSWorkoutRecorder: ObservableObject {
             let dt = raw.timestamp.timeIntervalSince(last.timestamp)
 
             // 合理性檢查：算出來的速度超過 40 m/s（144 km/h）一定是跳點
-            if dt > 0.3, delta / dt > 40 { return }
+            if dt > 0.3, delta / dt > 40 {
+                rejectedJump += 1
+                return
+            }
 
-            // 位移必須明顯大於這次的定位誤差，否則只是原地漂移
-            let driftFloor = max(2.5, raw.horizontalAccuracy * 0.55)
-            guard delta > driftFloor else { return }
+            // 漂移門檻。
+            //
+            // 原本是「誤差 × 0.55」，在誤差 25 公尺時等於要移動 13.7 公尺才收，
+            // 騎車一秒才移動 5 公尺，等於幾乎每個點都被丟掉。
+            // 改成先看「照速度推算應該移動多少」：確定在動就用很小的門檻，
+            // 只有靜止時才用誤差推算的門檻，而且上限壓在 8 公尺。
+            let expected = max(lastValidSpeed, 0) * max(0, dt)
+            let driftFloor: Double
+            if expected > 3 || lastValidSpeed > 1.0 {
+                driftFloor = 1.5          // 明顯在移動
+            } else {
+                driftFloor = min(8, max(2.5, raw.horizontalAccuracy * 0.35))
+            }
+            guard delta > driftFloor else {
+                rejectedDrift += 1
+                return
+            }
 
             heading = GeoMath.bearing(from: last.coordinate, to: coord)
         }
@@ -510,6 +561,7 @@ final class GPSWorkoutRecorder: ObservableObject {
                                  distanceFromStart: distance)
         samples.append(sample)
         lastAccepted = sample
+        lastGoodFix = Date()
         currentPace = GeoMath.pace(fromSpeed: sample.speed)
         announceIfNeeded()
     }
