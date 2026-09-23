@@ -208,7 +208,46 @@ public struct EvidenceExtractor: Sendable {
 
         // Loss
         let lossStats = r.packetLoss ?? r.gaming?.idle ?? r.voice?.latency ?? r.monitoring?.statistics ?? r.idleLatency
-        if let loss = lossStats?.loss, loss.sent > 0 {
+        if let st = r.stress {
+            // Stress: only multi-probe (control) loss counts; the 50 pps ICMP probe alone never does.
+            let lc = st.lossConfirmation
+            let stressText = lc.stressLossPercent.map { "50 pps ICMP 壓力探測 \(Fmt.d($0, 1))%" } ?? "無 50 pps 壓力探測"
+            let controlText = "\(lc.validControlCount) 個低頻對照探測中位數 \(lc.confirmedLossPercent.map { Fmt.d($0, 2) } ?? "—")%"
+            switch lc.verdict {
+            case .confirmedLoss:
+                measured.insert(.loss)
+                let v = lc.confirmedLossPercent ?? 0
+                if v > 5 { add(.lossSevere, "已確認封包遺失 \(Fmt.d(v, 1))%（> 5%；\(controlText)，\(lc.lossyControlCount) 個探測皆遺失）", v, "%") }
+                if v > 2 { add(.lossHigh, "已確認封包遺失 \(Fmt.d(v, 1))%（\(controlText)）", v, "%") }
+            case .possibleICMPRateLimiting:
+                measured.insert(.loss)
+                add(.possibleICMPRateLimiting, "Possible ICMP rate limiting under stress：\(stressText)，但\(controlText)", lc.stressLossPercent, "%")
+                add(.lossNone, "對照探測未遺失（\(controlText)）", lc.confirmedLossPercent, "%")
+            case .noLoss:
+                measured.insert(.loss)
+                add(.lossNone, "壓力與對照探測皆未遺失（\(stressText)；\(controlText)）", lc.confirmedLossPercent, "%")
+            case .inconclusive:
+                break
+            }
+            if let d = st.recoveryDeltaMs, d > StressSummary.slowRecoveryMs {
+                add(.slowPostLoadRecovery, "負載停止後延遲仍高於負載前 \(Fmt.d(d, 0)) ms（佇列排空慢）", d, "ms")
+            }
+            for agg in [st.downloadAggregate, st.uploadAggregate].compactMap({ $0 }) where agg.values.count >= 2 {
+                measured.insert(.crossServer)
+                let dir = agg.direction == .download ? "下載" : "上傳"
+                let list = agg.values.map { "\($0.name) \(Fmt.d($0.mbps, 0))" }.joined(separator: "、")
+                if agg.largeVariance {
+                    add(.largeCrossProviderThroughputVariance, "Large cross-provider throughput variance：\(dir) CV \(Fmt.d(agg.coefficientOfVariation ?? 0, 2))（\(list) Mbps）",
+                        agg.coefficientOfVariation, "CV")
+                } else {
+                    add(.crossProviderThroughputConsistent, "跨業者\(dir)速度一致（CV \(Fmt.d(agg.coefficientOfVariation ?? 0, 2))；\(list) Mbps）",
+                        agg.coefficientOfVariation, "CV")
+                }
+            }
+            if let deg = st.throughputDegradationPercent, deg >= StressSummary.degradationPercent {
+                add(.throughputDegradationUnderLoad, "持續負載後下載下降 \(Fmt.d(deg, 0))%（第 1 輪 → 第 \(st.plan.rounds) 輪）", deg, "%")
+            }
+        } else if let loss = lossStats?.loss, loss.sent > 0 {
             measured.insert(.loss)
             let method = r.packetLossMethod.map { "，\($0)" } ?? ""
             if loss.lossPercent > 5 { add(.lossSevere, "封包遺失 \(Fmt.d(loss.lossPercent, 1))%（> 5%\(method)）", loss.lossPercent, "%") }

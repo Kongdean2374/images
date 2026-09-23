@@ -11,7 +11,11 @@ struct ResultDetailView: View {
         ScrollView {
             VStack(spacing: 16) {
                 header
-                ResultSummaryView(result: result)
+                if result.stress != nil {
+                    StressResultView(result: result)
+                } else {
+                    ResultSummaryView(result: result)
+                }
                 TechnicalDetailsView(result: result)
                 shareCard
                 RawDataCard(result: result)

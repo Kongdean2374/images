@@ -7,6 +7,9 @@ public enum ServerKind: String, Codable, Sendable, Hashable {
     /// Cloudflare's public speed endpoints (`speed.cloudflare.com/__down`, `/__up`). Used as an
     /// out-of-the-box fallback; no UDP echo, so packet loss falls back to ICMP.
     case cloudflare
+    /// Measurement Lab NDT7 (WebSocket, single stream). Machines are assigned per test by the
+    /// Locate API (`baseURL`); used only by the Extreme Stress Test, never by the HTTP engine.
+    case mlabNDT7
 }
 
 public struct ServerDescriptor: Codable, Sendable, Hashable, Identifiable {
@@ -39,6 +42,7 @@ public struct ServerDescriptor: Codable, Sendable, Hashable, Identifiable {
         switch kind {
         case .chainet: baseURL.appending(path: "ping")
         case .cloudflare: Self.withQuery(baseURL.appending(path: "__down"), [URLQueryItem(name: "bytes", value: "0")])
+        case .mlabNDT7: baseURL
         }
     }
 
@@ -46,6 +50,7 @@ public struct ServerDescriptor: Codable, Sendable, Hashable, Identifiable {
         switch kind {
         case .chainet: Self.withQuery(baseURL.appending(path: "download"), [URLQueryItem(name: "bytes", value: String(bytes))])
         case .cloudflare: Self.withQuery(baseURL.appending(path: "__down"), [URLQueryItem(name: "bytes", value: String(bytes))])
+        case .mlabNDT7: baseURL
         }
     }
 
@@ -53,6 +58,7 @@ public struct ServerDescriptor: Codable, Sendable, Hashable, Identifiable {
         switch kind {
         case .chainet: baseURL.appending(path: "upload")
         case .cloudflare: baseURL.appending(path: "__up")
+        case .mlabNDT7: baseURL
         }
     }
 
@@ -67,6 +73,10 @@ public struct ServerDescriptor: Codable, Sendable, Hashable, Identifiable {
     private static func withQuery(_ url: URL, _ items: [URLQueryItem]) -> URL {
         url.appending(queryItems: items)
     }
+
+    /// M-Lab NDT7 via the Locate API (stress test only; not listed with the HTTP servers).
+    public static let mlabNDT7 = ServerDescriptor(id: "mlab-ndt7", name: "M-Lab NDT7", location: "最近的 M-Lab 節點（Locate API）",
+                                                  kind: .mlabNDT7, baseURL: URL(string: "https://locate.measurementlab.net/v2/nearest/ndt/ndt7")!)
 
     /// Built-in servers. Replace / extend with your own ChaiNet backend deployments in Settings.
     public static let builtIn: [ServerDescriptor] = [

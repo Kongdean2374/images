@@ -27,6 +27,8 @@ final class RunViewModel {
     private(set) var latencySamples: [TestPhase: [LatencySample]] = [:]
     private(set) var streams: [TransferDirection: Int] = [:]
     private(set) var traceHops: [TracerouteHop] = []
+    /// Extreme Stress Test: current phase / round / node and running traffic.
+    private(set) var stressProgress: StressProgress?
     /// Readable live values, refreshed every 0.5 s (not every 100 ms sample) so the big number
     /// doesn't flicker.
     private(set) var displayMbps: [TransferDirection: Double] = [:]
@@ -181,6 +183,7 @@ final class RunViewModel {
         latencySamples = [:]
         streams = [:]
         traceHops = []
+        stressProgress = nil
         displayMbps = [:]
         displaySummary = [:]
         result = nil
@@ -224,6 +227,11 @@ final class RunViewModel {
             streams[d] = n
         case .traceHop(let hop):
             traceHops.append(hop)
+        case .stressProgress(let p):
+            stressProgress = p
+            // Each stress transfer starts a fresh timeline; show the current one live.
+            if p.kind == .downloadStress { downloadSamples = []; displayMbps[.download] = nil }
+            if p.kind == .uploadStress { uploadSamples = []; displayMbps[.upload] = nil }
         case .partial(let r):
             result = r
         case .completed(let r):

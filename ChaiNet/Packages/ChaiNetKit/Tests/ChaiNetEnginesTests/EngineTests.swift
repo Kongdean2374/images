@@ -171,3 +171,83 @@ final class ExtremeFullTestTests: XCTestCase {
         XCTAssertNotNil(r.dns); XCTAssertNotNil(r.traceroute); XCTAssertNotNil(r.mtu); XCTAssertNotNil(r.monitoring)
     }
 }
+
+final class StressTestRunnerTests: XCTestCase {
+    func run(_ runner: TestRunner, seconds: Double = 300) async throws -> (TestResult, [StressProgress]) {
+        let nodes = TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn)
+        var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: ServerDescriptor.builtIn,
+                                          settings: AppSettings(), onCellular: false)
+        config.stressPlan = StressTestPlan.make(totalSeconds: seconds, nodes: nodes)
+        config.stressWarnings = ["test warning"]
+        config.stressTimeScale = 0.001
+        var final: TestResult?
+        var progress: [StressProgress] = []
+        for try await e in runner.run(config) {
+            if case .completed(let r) = e { final = r }
+            if case .stressProgress(let p) = e { progress.append(p) }
+        }
+        return (try XCTUnwrap(final), progress)
+    }
+
+    func testMultiNodeRoundsAndTotals() async throws {
+        let (r, progress) = try await run(TestRunner.mock(sampleDelay: 0))
+        XCTAssertEqual(r.kind, .extremeStressTest)
+        let s = try XCTUnwrap(r.stress)
+        XCTAssertEqual(s.testMode, "extremeStressTest")
+        XCTAssertEqual(s.plan.rounds, 2)
+        // Cloudflare (HTTP x16) and M-Lab (NDT7) in both rounds, both directions.
+        XCTAssertEqual(s.transfers.count, 8)
+        XCTAssertTrue(s.transfers.contains { $0.method == "NDT7 WebSocket x1" })
+        XCTAssertTrue(s.transfers.contains { $0.method == "HTTP x16" })
+        XCTAssertEqual(s.downloadAggregate?.values.count, 2)
+        XCTAssertGreaterThan(s.totalDownloadBytes, 0)
+        XCTAssertGreaterThan(s.totalUploadBytes, 0)
+        XCTAssertEqual(s.postLoadLatency.count, 2)
+        XCTAssertNotNil(s.stressProbe)
+        XCTAssertEqual(s.stressProbe?.packetsPerSecond, 50)
+        XCTAssertGreaterThanOrEqual(s.controlProbes.count, 3, "primary ICMP + independent ICMP + QUIC")
+        XCTAssertTrue(s.controlProbes.allSatisfy { $0.packetsPerSecond == 5 })
+        XCTAssertTrue(Set(s.phases.map(\.kind)).isSuperset(of: [.healthCheck, .idleLatency, .downloadStress, .uploadStress, .postLoadRecovery,
+                                                                 .packetLossStress, .monitoring, .dnsProtocols, .ipFamilies, .crossServerValidation, .routeMTU]))
+        XCTAssertFalse(progress.isEmpty)
+        XCTAssertNotNil(r.dns); XCTAssertNotNil(r.traceroute); XCTAssertNotNil(r.monitoring); XCTAssertNotNil(r.ipFamilyComparison)
+        XCTAssertTrue(r.notes.contains("test warning"))
+        XCTAssertNotNil(s.score)
+    }
+
+    func testOneFailingEndpointDoesNotFailTheTest() async throws {
+        var runner = TestRunner.mock(sampleDelay: 0)
+        runner.stressProbes = MockStressProbeFactory(unhealthyNodeIDs: ["mlab-ndt7", "quad9-dns"])
+        let (r, _) = try await run(runner)
+        let s = try XCTUnwrap(r.stress)
+        XCTAssertEqual(s.nodes.first { $0.id == "mlab-ndt7" }?.healthy, false)
+        XCTAssertFalse(s.transfers.contains { $0.nodeID == "mlab-ndt7" })
+        XCTAssertFalse(s.transfers.isEmpty)
+        XCTAssertEqual(s.nodes.count, TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn).count, "unhealthy nodes stay in the report")
+    }
+
+    func testStressOnlyICMPLossIsRateLimiting() async throws {
+        var runner = TestRunner.mock(sampleDelay: 0)
+        runner.stressProbes = MockStressProbeFactory(controlRTTs: [15, 16], stressRTTs: [15, nil, nil, 16])
+        let (r, _) = try await run(runner, seconds: 60)
+        let s = try XCTUnwrap(r.stress)
+        XCTAssertEqual(s.lossConfirmation.verdict, .possibleICMPRateLimiting)
+        XCTAssertEqual(r.metrics.lossPercent ?? -1, 0, accuracy: 1e-9)
+        XCTAssertFalse(r.findings.contains { $0.code == .severePacketLoss || $0.code == .moderatePacketLoss })
+    }
+
+    func testCancellation() async throws {
+        let nodes = TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn)
+        var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: ServerDescriptor.builtIn,
+                                          settings: AppSettings(), onCellular: false)
+        config.stressPlan = StressTestPlan.make(totalSeconds: 900, nodes: nodes)
+        let task = Task {
+            var n = 0
+            for try await _ in TestRunner.mock(sampleDelay: 0.05).run(config) { n += 1 }
+            return n
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        do { _ = try await task.value } catch is CancellationError {} catch {}
+    }
+}

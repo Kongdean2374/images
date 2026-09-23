@@ -56,6 +56,12 @@ public struct TestRunConfiguration: Sendable {
     public var crossValidationEndpoints: [ValidationEndpoint] = ValidationEndpoint.defaults
     public var dnsResolvers: [DNSResolverDescriptor] = DNSResolverDescriptor.defaults
     public var tracerouteHost: String?
+    /// Extreme Stress Test plan (kind `.extremeStressTest`).
+    public var stressPlan: StressTestPlan?
+    /// Pre-start warnings (Low Data Mode, metered, VPN…) — recorded, never reduce intensity.
+    public var stressWarnings: [String] = []
+    /// Multiplies phase durations / probe counts (tests only; 1 in the app).
+    public var stressTimeScale: Double = 1
 
     public init(kind: TestKind, items: Set<TestItem>, candidateServers: [ServerDescriptor], fixedServer: ServerDescriptor? = nil,
                 settings: AppSettings, onCellular: Bool) {
@@ -137,6 +143,8 @@ public enum TestRunEvent: Sendable {
     case traceHop(TracerouteHop)
     case partial(TestResult)
     case completed(TestResult)
+    /// Extreme Stress Test phase / round / node and running traffic totals.
+    case stressProgress(StressProgress)
 }
 
 public protocol TestRunnerProtocol: Sendable {
@@ -165,6 +173,9 @@ public struct TestRunner: TestRunnerProtocol {
     public var probes: any LatencyProbeFactory
     public var scoreEngine: any ScoreEngineProtocol
     public var diagnostics: any DiagnosticsEngineProtocol
+    /// M-Lab NDT7 engine (stress test).
+    public var ndt7: any SpeedTestEngineProtocol
+    public var stressProbes: any StressProbeFactory
 
     public init(speed: any SpeedTestEngineProtocol = URLSessionSpeedTestEngine(),
                 dns: any DNSBenchmarkEngineProtocol = DNSBenchmarkEngine(),
@@ -178,7 +189,9 @@ public struct TestRunner: TestRunnerProtocol {
                 networkInfo: any NetworkInfoProviding = NetworkInfoProvider(),
                 probes: any LatencyProbeFactory = DefaultLatencyProbeFactory(),
                 scoreEngine: any ScoreEngineProtocol = ScoreEngine(),
-                diagnostics: any DiagnosticsEngineProtocol = DiagnosticsEngine()) {
+                diagnostics: any DiagnosticsEngineProtocol = DiagnosticsEngine(),
+                ndt7: any SpeedTestEngineProtocol = NDT7SpeedTestEngine(),
+                stressProbes: any StressProbeFactory = DefaultStressProbeFactory()) {
         self.speed = speed
         self.dns = dns
         self.protocols = protocols
@@ -192,12 +205,20 @@ public struct TestRunner: TestRunnerProtocol {
         self.probes = probes
         self.scoreEngine = scoreEngine
         self.diagnostics = diagnostics
+        self.ndt7 = ndt7
+        self.stressProbes = stressProbes
     }
 
     public func run(_ configuration: TestRunConfiguration) -> AsyncThrowingStream<TestRunEvent, Error> {
         let runner = self
         return makeCancellableStream { continuation in
-            let result = try await runner.execute(configuration) { continuation.yield($0) }
+            let emit: @Sendable (TestRunEvent) -> Void = { continuation.yield($0) }
+            let result: TestResult
+            if configuration.kind == .extremeStressTest, let plan = configuration.stressPlan {
+                result = try await runner.executeStress(configuration, plan: plan, emit: emit)
+            } else {
+                result = try await runner.execute(configuration, emit: emit)
+            }
             continuation.yield(.completed(result))
         }
     }

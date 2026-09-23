@@ -5,12 +5,12 @@ struct ToolsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                NavigationLink { FullTestView() } label: {
+                NavigationLink { StressTestView() } label: {
                     HStack {
-                        Image(systemName: "bolt.horizontal.circle.fill").font(.title2).foregroundStyle(Theme.upload)
+                        Image(systemName: "flame.fill").font(.title2).foregroundStyle(Theme.critical)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("完整測試（極限）").font(.headline).foregroundStyle(Theme.textPrimary)
-                            Text("所有項目 · 最大負載 · 自訂總時間 · 完整原始資料匯出").font(.caption).foregroundStyle(Theme.textSecondary)
+                            Text("極限壓力測試").font(.headline).foregroundStyle(Theme.textPrimary)
+                            Text("最大負載 · 多節點 · 多輪 · 只需選擇時間 · AI / Engineer 匯出").font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(Theme.textSecondary)

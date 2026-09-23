@@ -121,6 +121,67 @@ public enum RawDataExporter {
             kv("ip_family_s", n(p.ipFamilySeconds, 1)); kv("interface_compare_s", n(p.interfaceSeconds, 1))
         }
 
+        if let st = r.stress {
+            sec("stress_test")
+            kv("test_mode", st.testMode)
+            kv("configured_duration_s", n(st.configuredSeconds, 0)); kv("planned_duration_s", n(st.plan.estimatedSeconds, 0))
+            kv("actual_duration_s", n(st.actualSeconds, 1)); kv("rounds", "\(st.plan.rounds)")
+            kv("http_streams_per_transfer", "\(st.plan.streams)"); kv("ndt7_streams_per_transfer", "1")
+            kv("transfer_s_per_node_direction_round", n(st.plan.transferSeconds, 1))
+            kv("stress_packet_rate_pps", n(st.plan.stressPacketsPerSecond, 0)); kv("control_packet_rate_pps", n(st.plan.controlPacketsPerSecond, 0))
+            kv("total_download_bytes", "\(st.totalDownloadBytes)"); kv("total_upload_bytes", "\(st.totalUploadBytes)"); kv("total_bytes", "\(st.totalBytes)")
+            kv("stress_score_0_100", st.score.map(String.init) ?? "null")
+            for w in st.warnings { kv("warning", w) }
+            sec("stress_nodes")
+            o.append("node_id,name,provider,host,capabilities,throughput_capable,healthy,health_latency_ms,health_detail")
+            for node in st.nodes {
+                o.append([node.id, node.name, node.provider.rawValue, node.host, node.capabilityList, b(node.isThroughputCapable),
+                          b(node.healthy), n(node.healthLatencyMs), (node.healthDetail ?? "").replacingOccurrences(of: ",", with: ";")].joined(separator: ","))
+            }
+            sec("stress_phases")
+            o.append("phase,round,node_id,planned_s,start_offset_s,actual_s,download_bytes,upload_bytes,note")
+            for p in st.phases {
+                o.append([p.kind.rawValue, p.round.map(String.init) ?? "", p.nodeID ?? "", n(p.plannedSeconds, 1), n(p.startOffset, 2),
+                          n(p.actualSeconds, 2), "\(p.downloadBytes)", "\(p.uploadBytes)", (p.note ?? "").replacingOccurrences(of: ",", with: ";")]
+                    .joined(separator: ","))
+            }
+            sec("stress_transfers_per_server")
+            o.append("node_id,round,direction,method,bytes,avg_mbps,median_mbps,p10_mbps,p95_mbps,min_mbps,peak_mbps,stability,window_samples,sampling_artifact,loaded_median_ms,loaded_p95_ms,error")
+            for t in st.transfers {
+                let m = t.speed?.summary
+                o.append([t.nodeID, "\(t.round)", t.direction.rawValue, t.method, "\(t.bytes)", n(m?.averageMbps), n(m?.medianMbps), n(m?.p10Mbps),
+                          n(m?.p95Mbps), n(m?.minimumMbps), n(m?.peakMbps), n(m?.stability.score, 1), m?.windowSamples.map(String.init) ?? "null",
+                          b(m?.samplingArtifactDetected), n(t.loadedLatency?.rtt?.median), n(t.loadedLatency?.rtt?.p95),
+                          t.error == nil ? "none" : "yes"].joined(separator: ","))
+            }
+            for agg in [st.downloadAggregate, st.uploadAggregate].compactMap({ $0 }) {
+                sec("stress_cross_provider_\(agg.direction.rawValue)")
+                kv("nodes", agg.values.map { "\($0.nodeID)(\($0.provider.rawValue))=\(Fmt.d($0.mbps, 2))" }.joined(separator: ","))
+                kv("mean_mbps", n(agg.meanMbps)); kv("median_mbps", n(agg.medianMbps)); kv("min_mbps", n(agg.minMbps)); kv("max_mbps", n(agg.maxMbps))
+                kv("p10_mbps", n(agg.p10Mbps)); kv("p95_mbps", n(agg.p95Mbps)); kv("inter_server_variance_mbps2", n(agg.variance))
+                kv("coefficient_of_variation", n(agg.coefficientOfVariation, 4)); kv("large_cross_provider_throughput_variance", b(agg.largeVariance))
+            }
+            sec("stress_loss_probes")
+            o.append("probe_id,name,target,method,pps,role,sent,received,loss_percent,median_ms,p95_ms,jitter_ms")
+            for p in [st.stressProbe].compactMap({ $0 }) + st.controlProbes {
+                o.append([p.id, p.isStressProbe ? "High-rate ICMP stress probe" : p.name, p.target, p.method, n(p.packetsPerSecond, 0),
+                          p.isStressProbe ? "stress" : "control", "\(p.sent)", "\(p.statistics.received)", n(p.lossPercent),
+                          n(p.statistics.rtt?.median), n(p.statistics.rtt?.p95), n(p.statistics.rtt?.jitter)].joined(separator: ","))
+            }
+            let lc = st.lossConfirmation
+            kv("loss_verdict", lc.verdict.rawValue); kv("stress_loss_percent", n(lc.stressLossPercent)); kv("confirmed_loss_percent_control_median", n(lc.confirmedLossPercent))
+            kv("valid_controls", "\(lc.validControlCount)"); kv("lossy_controls", "\(lc.lossyControlCount)")
+            sec("stress_latency_recovery")
+            kv("pre_load_median_ms", n(st.preLoadLatency?.rtt?.median)); kv("pre_load_p95_ms", n(st.preLoadLatency?.rtt?.p95))
+            kv("pre_load_jitter_ms", n(st.preLoadLatency?.rtt?.jitter))
+            kv("loaded_download_median_ms", n(st.loadedLatencyMs(.download))); kv("loaded_upload_median_ms", n(st.loadedLatencyMs(.upload)))
+            kv("loaded_latency_inflation_ms", n(st.bufferbloatMs)); kv("queue_location", "unknown")
+            for (i, post) in st.postLoadLatency.enumerated() {
+                kv("post_load_round_\(i + 1)_median_ms", n(post.rtt?.median)); kv("post_load_round_\(i + 1)_p95_ms", n(post.rtt?.p95))
+            }
+            kv("post_load_recovery_delta_ms", n(st.recoveryDeltaMs)); kv("throughput_degradation_first_to_last_round_percent", n(st.throughputDegradationPercent))
+        }
+
         let net = r.network
         sec("environment")
         kv("status", net.status.rawValue); kv("interface", net.primaryInterface.rawValue); kv("network_class", NetworkClass(snapshot: net).rawValue)
@@ -295,6 +356,15 @@ public enum RawDataExporter {
         csvSamples("raw.upload_loaded_latency", r.uploadLoadedSamples)
         csvSamples("raw.packet_loss_probe", r.packetLossSamples)
         csvSamples("raw.monitoring", r.monitoring?.samples)
+        if let st = r.stress {
+            csvSamples("raw.stress.pre_load_latency", st.preLoadSamples)
+            for (i, post) in st.postLoadSamples.enumerated() { csvSamples("raw.stress.post_load_round_\(i + 1)", post) }
+            for p in [st.stressProbe].compactMap({ $0 }) + st.controlProbes { csvSamples("raw.stress.loss_probe.\(p.id)", p.samples) }
+            for t in st.transfers {
+                speedSamples("raw.stress.\(t.nodeID).round\(t.round).\(t.direction.rawValue)_samples_100ms", t.speed)
+                csvSamples("raw.stress.\(t.nodeID).round\(t.round).\(t.direction.rawValue)_loaded_latency", t.loadedSamples)
+            }
+        }
         for run in r.serverRuns ?? [] {
             speedSamples("raw.multi_server.\(run.server.id).download_samples_100ms", run.download)
             speedSamples("raw.multi_server.\(run.server.id).upload_samples_100ms", run.upload)

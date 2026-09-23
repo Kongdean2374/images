@@ -53,6 +53,8 @@ ChaiNet/
 | Bufferbloat | 閒置中位數 vs 下載時 / 上傳時中位數（另開連線同時量測） |
 | 評分 | 五種情境不同權重 + 致命指標上限（例如遺失 > 5% 遊戲最多 25 分） |
 | 根因診斷 | 證據 → 假設（log-odds 加權、上限、排除條件、缺少資料則「證據不足」）；跨伺服器 / IP 版本 / 網路類型 / 歷史基準交叉比較 |
+| 極限壓力測試 | 只選時間（1/3/5/10/15 分或自訂）；Cloudflare（HTTP ×16）+ M-Lab NDT7 + 自架伺服器做吞吐量，Google / Apple / Quad9 只做延遲 / 協定；健康檢查後略過故障節點；長測試增加輪數；50 pps ICMP 壓力探測 + 5 pps 對照探測判斷「ICMP 限速」vs 真實遺失；跨業者平均 / 中位數 / P10 / P95 / 變異數；負載前 / 中 / 後延遲 |
+| 匯出隱私 | AI 分析匯出（預設）將所有 IPv4 / IPv6（公網、區網、VPN 通道）遮蔽為 `[REDACTED]`；Engineer 匯出可選擇包含完整 IP |
 | 可取消 | 所有 engine 以 `AsyncThrowingStream` + `onTermination` 取消；停止、離開頁面、進入背景（`TaskRegistry.cancelAll()`）都會取消並保留部分結果 |
 
 ## iOS 平台限制與替代方式

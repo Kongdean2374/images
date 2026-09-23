@@ -13,6 +13,7 @@ public enum TestKind: String, Codable, Sendable, Hashable, CaseIterable {
     case monitoring
     case interfaceCompare
     case extremeFullTest
+    case extremeStressTest
 
     public var displayName: String {
         switch self {
@@ -28,6 +29,7 @@ public enum TestKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .monitoring: "連續監測"
         case .interfaceCompare: "Wi-Fi / 行動網路比較"
         case .extremeFullTest: "完整測試（極限）"
+        case .extremeStressTest: "極限壓力測試"
         }
     }
 }
@@ -141,6 +143,8 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
     public var packetLossSamples: [LatencySample]?
     /// Time plan of an extreme full test.
     public var fullTestPlan: FullTestPlan?
+    /// Extreme Stress Test: per-node, per-round results, loss confirmation, traffic totals.
+    public var stress: StressSummary?
 
     public var scores: QualityScores
     public var findings: [DiagnosticFinding]
@@ -208,6 +212,20 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
             m.ttfbMs = probe.http?.ttfbMs
         }
         m.pathMTU = mtu?.pathMTU
+        if let stress {
+            // Stress: cross-provider medians and confirmed (multi-probe) loss, never one node or the
+            // stress-only ICMP probe.
+            if let v = stress.downloadAggregate?.medianMbps { m.downloadMbps = v }
+            if let v = stress.uploadAggregate?.medianMbps { m.uploadMbps = v }
+            if let v = stress.downloadAggregate?.maxMbps { m.downloadPeakMbps = v }
+            m.downloadStability = stress.stability(.download) ?? m.downloadStability
+            m.uploadStability = stress.stability(.upload) ?? m.uploadStability
+            if let v = stress.lossConfirmation.confirmedLossPercent { m.lossPercent = v }
+            if let idle = stress.preLoadLatency?.rtt?.median {
+                m.downloadBloatMs = stress.loadedLatencyMs(.download).map { max(0, $0 - idle) } ?? m.downloadBloatMs
+                m.uploadBloatMs = stress.loadedLatencyMs(.upload).map { max(0, $0 - idle) } ?? m.uploadBloatMs
+            }
+        }
         if let monitoring {
             m.spikeCount = monitoring.spikes.count
             m.dropCount = monitoring.drops.count
@@ -242,7 +260,7 @@ public enum IPFamilyPreference: String, Codable, Sendable, Hashable, CaseIterabl
 }
 
 public enum EndpointProbeMethod: String, Codable, Sendable, Hashable {
-    case tcpConnect, udpEcho, httpPing, icmpEcho
+    case tcpConnect, udpEcho, httpPing, icmpEcho, quicHandshake
 }
 
 /// One independent endpoint measured during cross-validation.

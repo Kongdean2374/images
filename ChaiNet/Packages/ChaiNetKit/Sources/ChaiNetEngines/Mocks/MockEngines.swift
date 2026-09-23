@@ -176,6 +176,7 @@ public extension TestRunner {
         TestRunner(speed: MockSpeedTestEngine(mbps: downloadMbps, sampleDelay: sampleDelay), dns: MockDNSEngine(), protocols: MockProtocolEngine(),
                    traceroute: MockTracerouteEngine(), mtu: MockMTUEngine(), crossValidation: MockCrossValidationEngine(),
                    ipFamilies: MockIPFamilyEngine(), interfaces: MockInterfaceEngine(), servers: MockServerDirectory(),
-                   networkInfo: MockNetworkInfo(), probes: MockProbeFactory())
+                   networkInfo: MockNetworkInfo(), probes: MockProbeFactory(),
+                   ndt7: MockSpeedTestEngine(mbps: downloadMbps / 2, sampleDelay: sampleDelay), stressProbes: MockStressProbeFactory())
     }
 }
