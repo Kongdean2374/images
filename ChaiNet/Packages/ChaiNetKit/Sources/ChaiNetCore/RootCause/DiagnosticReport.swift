@@ -67,7 +67,9 @@ public protocol DiagnosticReportGenerating: Sendable {
 
 public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
     public static let schema = "chainet.diagnostic-report"
-    public static let version = 1
+    /// v2 (2.2.0): statuses supported / broadIssueUnlikely / noEvidence, evidence score + band.
+    /// v1 reports still decode (their statuses are a subset).
+    public static let version = 2
 
     public var anomalyDetector: AnomalyDetector
 
