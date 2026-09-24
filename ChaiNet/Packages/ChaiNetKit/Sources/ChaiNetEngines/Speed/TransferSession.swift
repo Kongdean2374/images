@@ -1,4 +1,5 @@
 import Foundation
+import ChaiNetCore
 
 /// Collects per-request outcomes of all streams of one transfer (for `TransferValidator`).
 final class TransferCollector: @unchecked Sendable {
