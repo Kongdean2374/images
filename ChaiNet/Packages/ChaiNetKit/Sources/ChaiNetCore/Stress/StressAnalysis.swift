@@ -34,21 +34,27 @@ public struct LossProbeResult: Codable, Sendable, Hashable, Identifiable {
 }
 
 public enum LossVerdict: String, Codable, Sendable, Hashable {
-    /// ≥ 2 independent control probes lost ≥ 1 % and their median is ≥ 1 %.
-    case confirmedLoss
-    /// Only the high-rate ICMP stress probe lost packets; low-rate controls did not.
+    /// ≥ 2 independent control targets lost ≥ 1 % and the control median is ≥ 1 %.
+    case confirmedGeneralPacketLoss
+    /// Loss toward specific target(s) while at least one independent control target stayed clean.
+    case endpointSpecificLossObserved
+    /// Only the high-rate ICMP stress probe lost packets; its own low-rate control did not.
     case possibleICMPRateLimiting
-    /// No probe lost ≥ 1 %.
-    case noLoss
-    /// A single lossy control, or no usable control probe.
+    /// No loss on any valid control: no evidence of general packet loss (not a proof of zero loss).
+    case noConfirmedGeneralPacketLoss
+    /// Every control target lost a little but below the general threshold, a single control, or
+    /// no usable control probe.
     case inconclusive
+    /// Legacy values (results before v2.2) — still decoded, never produced.
+    case confirmedLoss, noLoss
 
     public var displayName: String {
         switch self {
-        case .confirmedLoss: "已確認封包遺失（多探測一致）"
+        case .confirmedGeneralPacketLoss, .confirmedLoss: "已確認廣泛性封包遺失（多個獨立端點一致）"
+        case .endpointSpecificLossObserved: "僅特定端點觀察到遺失（其他獨立端點無遺失）"
         case .possibleICMPRateLimiting: "可能為 ICMP 限速（僅高頻壓力探測遺失）"
-        case .noLoss: "未觀察到遺失"
-        case .inconclusive: "證據不足（僅單一探測遺失或對照不足）"
+        case .noConfirmedGeneralPacketLoss, .noLoss: "無廣泛性封包遺失證據"
+        case .inconclusive: "證據不足（遺失程度低或對照不足）"
         }
     }
 }
@@ -57,39 +63,65 @@ public struct LossConfirmation: Codable, Sendable, Hashable {
     public var verdict: LossVerdict
     /// Loss of the 50 pps ICMP stress probe (may be ICMP rate limiting).
     public var stressLossPercent: Double?
-    /// Median loss of the valid low-rate control probes — the loss figure the app reports.
+    /// Median loss of the valid low-rate control probes — the general-loss figure the app reports.
     public var confirmedLossPercent: Double?
     public var validControlCount: Int
     public var lossyControlCount: Int
+    /// Targets where loss was observed (controls and / or the stress probe); nil before v2.2.
+    public var affectedTargets: [String]?
+    /// Control targets without any loss.
+    public var cleanTargets: [String]?
 
     public static let lossThresholdPercent = 1.0
     public static let minimumControlPackets = 20
 
-    /// See `LossVerdict` for the rules. Controls with fewer than 20 packets are ignored.
+    /// Rules (controls = low-rate ICMP / UDP echo with ≥ 20 packets; QUIC / TCP never count):
+    ///
+    ///     ≥ 2 control targets ≥ 1 % and median ≥ 1 %          → confirmedGeneralPacketLoss
+    ///     some control target lost, another target clean        → endpointSpecificLossObserved
+    ///     every control target lost (below the general rule)    → inconclusive
+    ///     controls clean, stress probe lost                     → possibleICMPRateLimiting
+    ///     nothing lost                                          → noConfirmedGeneralPacketLoss
+    ///     no valid control, or only one control target          → inconclusive (unless nothing lost)
     public static func evaluate(stress: LossProbeResult?, controls: [LossProbeResult]) -> LossConfirmation {
-        // Only probes that can observe packet loss count: a failed QUIC / TCP handshake is a
-        // protocol or endpoint result, not a lost packet.
         let valid = controls.filter { !$0.isStressProbe && $0.isPacketLossProbe && $0.sent >= minimumControlPackets }
         let stressLoss = stress.map(\.lossPercent)
+        let stressLost = (stress?.statistics.loss.lost ?? 0) > 0
         guard !valid.isEmpty else {
             return LossConfirmation(verdict: .inconclusive, stressLossPercent: stressLoss, confirmedLossPercent: nil,
-                                    validControlCount: 0, lossyControlCount: 0)
+                                    validControlCount: 0, lossyControlCount: 0,
+                                    affectedTargets: stressLost ? stress.map { [$0.target] } : nil, cleanTargets: [])
         }
-        let losses = valid.map(\.lossPercent)
-        let median = Descriptive.median(losses) ?? 0
-        let lossy = losses.filter { $0 >= lossThresholdPercent }.count
+        // Per target: worst loss of its controls.
+        var byTarget: [String: Double] = [:]
+        var lostByTarget: [String: Int] = [:]
+        for c in valid {
+            byTarget[c.target] = max(byTarget[c.target] ?? 0, c.lossPercent)
+            lostByTarget[c.target, default: 0] += c.statistics.loss.lost
+        }
+        let targets = byTarget.keys.sorted()
+        let affectedControls = targets.filter { (lostByTarget[$0] ?? 0) > 0 }
+        let clean = targets.filter { (lostByTarget[$0] ?? 0) == 0 }
+        let median = Descriptive.median(valid.map(\.lossPercent)) ?? 0
+        let lossyTargets = targets.filter { (byTarget[$0] ?? 0) >= lossThresholdPercent }.count
+        var affected = affectedControls
+        if stressLost, let t = stress?.target, !affected.contains(t) { affected.append(t) }
+
         let verdict: LossVerdict
-        if lossy >= 2 && median >= lossThresholdPercent {
-            verdict = .confirmedLoss
-        } else if lossy >= 1 {
+        if lossyTargets >= 2 && median >= lossThresholdPercent {
+            verdict = .confirmedGeneralPacketLoss
+        } else if !affectedControls.isEmpty && !clean.isEmpty {
+            verdict = .endpointSpecificLossObserved
+        } else if !affectedControls.isEmpty {
             verdict = .inconclusive
-        } else if let stressLoss, stressLoss >= lossThresholdPercent {
-            verdict = .possibleICMPRateLimiting
+        } else if stressLost {
+            verdict = targets.count >= 1 ? .possibleICMPRateLimiting : .inconclusive
         } else {
-            verdict = .noLoss
+            verdict = .noConfirmedGeneralPacketLoss
         }
         return LossConfirmation(verdict: verdict, stressLossPercent: stressLoss, confirmedLossPercent: median,
-                                validControlCount: valid.count, lossyControlCount: lossy)
+                                validControlCount: valid.count, lossyControlCount: valid.filter { $0.lossPercent >= lossThresholdPercent }.count,
+                                affectedTargets: affected, cleanTargets: clean)
     }
 }
 
@@ -100,13 +132,26 @@ public struct ServerThroughputValue: Codable, Sendable, Hashable, Identifiable {
     public var name: String
     public var provider: StressProvider
     public var mbps: Double
+    /// Measurement method ("HTTP x16", "NDT7 WebSocket x1"); nil before v2.2.
+    public var method: String?
+    public var streamCount: Int?
+    /// "HTTPS/TCP (URLSession)" or "WebSocket/TCP (NDT7)".
+    public var transportProtocol: String?
     public var id: String { nodeID }
 
-    public init(nodeID: String, name: String, provider: StressProvider, mbps: Double) {
+    public init(nodeID: String, name: String, provider: StressProvider, mbps: Double, method: String? = nil) {
         self.nodeID = nodeID
         self.name = name
         self.provider = provider
         self.mbps = mbps
+        self.method = method
+        self.streamCount = method.flatMap(Self.streams(in:))
+        self.transportProtocol = method.map { $0.hasPrefix("NDT7") ? "WebSocket/TCP (NDT7)" : "HTTPS/TCP (URLSession)" }
+    }
+
+    /// "HTTP x16" → 16.
+    static func streams(in method: String) -> Int? {
+        method.split(separator: "x").last.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
     }
 }
 
@@ -126,8 +171,13 @@ public struct CrossProviderAggregate: Codable, Sendable, Hashable {
     public var variance: Double
     public var coefficientOfVariation: Double?
     public var largeVariance: Bool
+    /// True only when every node was measured with the same method and stream count; then the
+    /// spread is a provider comparison. Otherwise it is method-dependent and only a range.
+    public var methodEquivalent: Bool?
 
     public static let largeCV = 0.35
+    /// max / min at which a method-dependent difference is called out (instead of just a range).
+    public static let methodDifferenceRatio = 1.3
 
     public static func make(_ direction: TransferDirection, values: [ServerThroughputValue]) -> CrossProviderAggregate? {
         let v = values.map(\.mbps).filter(\.isFinite)
@@ -136,12 +186,61 @@ public struct CrossProviderAggregate: Codable, Sendable, Hashable {
         let cv = mean > 0 ? variance.squareRoot() / mean : nil
         let lo = v.min()!, hi = v.max()!
         let large = v.count >= 2 && ((cv ?? 0) > largeCV || (lo > 0 ? hi / lo >= 2 : hi > 0))
+        let methods = Set(values.map { "\($0.method ?? "?")|\($0.streamCount ?? 0)" })
+        let equivalent = values.allSatisfy { $0.method != nil } ? methods.count <= 1 : nil
         return CrossProviderAggregate(direction: direction, values: values, meanMbps: mean, medianMbps: median, minMbps: lo, maxMbps: hi,
                                       p10Mbps: Percentile.value(0.10, in: v)!, p95Mbps: Percentile.value(0.95, in: v)!,
-                                      variance: variance, coefficientOfVariation: cv, largeVariance: large)
+                                      variance: variance, coefficientOfVariation: cv, largeVariance: large, methodEquivalent: equivalent)
     }
 
-    public var isConsistent: Bool { values.count >= 2 && !largeVariance }
+    /// Consistency is only claimable between equivalent methods.
+    public var isConsistent: Bool { values.count >= 2 && !largeVariance && methodEquivalent != false }
+    /// Provider comparison statistics (mean / median / variance / CV) are meaningful.
+    public var comparable: Bool { methodEquivalent != false }
+}
+
+// MARK: - Latency probe provenance / bufferbloat comparability
+
+public struct ProbeDescriptor: Codable, Sendable, Hashable {
+    public var target: String
+    /// "icmpEcho", "httpPing", "tcpConnect".
+    public var method: String
+    /// "ICMP", "HTTPS/TCP", "TCP".
+    public var protocolName: String
+    /// "IPv4", "IPv6" or "system" (resolver-chosen).
+    public var ipFamily: String
+
+    public init(target: String, method: String, protocolName: String, ipFamily: String) {
+        self.target = target
+        self.method = method
+        self.protocolName = protocolName
+        self.ipFamily = ipFamily
+    }
+}
+
+public enum ComparisonQuality: String, Codable, Sendable, Hashable {
+    /// Same probe method and fixed target for idle and loaded, target not itself under load.
+    case full
+    /// Mixed or loaded-server target: indicative only, never a high-confidence bufferbloat grade.
+    case limited
+}
+
+/// Idle vs loaded latency for one direction, with the provenance needed to judge comparability.
+public struct BufferbloatComparison: Codable, Sendable, Hashable {
+    public var direction: TransferDirection
+    /// "independentControlProbe" or "referenceProbe".
+    public var source: String
+    public var probe: ProbeDescriptor
+    public var idleSampleCount: Int
+    public var loadedSampleCount: Int
+    public var idleMedianMs: Double
+    public var loadedMedianMs: Double
+    public var comparisonTargetSame: Bool
+    public var comparisonMethodSame: Bool
+    public var quality: ComparisonQuality
+    public var note: String
+
+    public var increaseMs: Double { max(0, loadedMedianMs - idleMedianMs) }
 }
 
 // MARK: - Per-node / per-round results
@@ -155,6 +254,8 @@ public struct StressTransferResult: Codable, Sendable, Hashable, Identifiable {
     public var speed: SpeedResult?
     public var loadedLatency: LatencyStatistics?
     public var loadedSamples: [LatencySample]?
+    /// Same-time samples of the independent control probe (fixed target, not under load).
+    public var controlLoadedSamples: [LatencySample]?
     public var error: String?
     /// 1 = first try, 2 = retry after an invalid first attempt (nil in results before v2.1.2).
     public var attempt: Int?
@@ -186,7 +287,8 @@ public struct StressTransferResult: Codable, Sendable, Hashable, Identifiable {
     public var bytes: Int64 { speed?.summary.totalBytes ?? 0 }
     public var isValid: Bool { validity?.valid ?? (speed != nil && error == nil) }
     /// Robust rate of a valid transfer (window median, or bytes / time when batched).
-    public var rateMbps: Double? { isValid ? speed?.summary.robustMbps : nil }
+    /// Server-confirmed received bytes win over client counters (upload write-completion batching).
+    public var rateMbps: Double? { isValid ? (speed?.serverConfirmed?.averageMbps ?? speed?.summary.robustMbps) : nil }
 
     public static let minimumLoadMbps = 1.0
     /// Loaded latency / bufferbloat need a transfer that really loaded the link.
@@ -256,6 +358,14 @@ public struct StressSummary: Codable, Sendable, Hashable {
     /// Reference-path latency measured in time recycled from phases that finished early.
     public var extendedMonitoring: LatencyStatistics?
     public var extendedMonitoringSamples: [LatencySample]?
+    /// Data limits in force and whether a cap stopped throughput phases early.
+    public var dataLimits: StressDataLimits?
+    public var dataCapReached: Bool?
+    /// Independent control probe (fixed target never under load) sampled idle and during every load.
+    public var controlProbe: ProbeDescriptor?
+    public var controlIdleSamples: [LatencySample]?
+    /// Reference probe (idle / recovery / monitoring path).
+    public var referenceProbe: ProbeDescriptor?
     /// Seconds of unused phase budget that were spent on extra stress work (nil before v2.1.2).
     public var recycledSeconds: Double?
     public var totalDownloadBytes: Int64
@@ -270,7 +380,11 @@ public struct StressSummary: Codable, Sendable, Hashable {
                 phases: [StressPhaseRecord], stressProbe: LossProbeResult?, controlProbes: [LossProbeResult],
                 preLoadLatency: LatencyStatistics?, preLoadSamples: [LatencySample]?, postLoadLatency: [LatencyStatistics],
                 postLoadSamples: [[LatencySample]], warnings: [String], extendedMonitoringSamples: [LatencySample]? = nil,
-                recycledSeconds: Double = 0) {
+                recycledSeconds: Double = 0, controlProbe: ProbeDescriptor? = nil, controlIdleSamples: [LatencySample]? = nil,
+                referenceProbe: ProbeDescriptor? = nil) {
+        self.controlProbe = controlProbe
+        self.controlIdleSamples = controlIdleSamples
+        self.referenceProbe = referenceProbe
         self.plan = plan
         self.configuredSeconds = configuredSeconds
         self.actualSeconds = actualSeconds
@@ -321,8 +435,29 @@ public struct StressSummary: Codable, Sendable, Hashable {
         nodes.filter(\.isThroughputCapable).compactMap { node in
             let rates = transfers.filter { $0.nodeID == node.id && $0.direction == direction }.compactMap(\.rateMbps)
             guard let mean = Descriptive.mean(rates) else { return nil }
-            return ServerThroughputValue(nodeID: node.id, name: node.name, provider: node.provider, mbps: mean)
+            let method = transfers.first { $0.nodeID == node.id && $0.direction == direction && $0.isValid }?.method
+            return ServerThroughputValue(nodeID: node.id, name: node.name, provider: node.provider, mbps: mean, method: method)
         }
+    }
+
+    /// Primary speed test node: the first HTTP multi-stream node of the plan (validation providers
+    /// such as M-Lab NDT7 are reported separately, never averaged into the headline).
+    public var primaryNodeID: String? {
+        (plan.throughputNodes.first { $0.provider != .mlab } ?? plan.throughputNodes.first)?.id
+    }
+
+    /// Headline rate: cross-node median when all methods are equivalent, otherwise the primary
+    /// node's own result (validation providers stay separate).
+    public func headlineMbps(_ direction: TransferDirection) -> Double? {
+        guard let agg = direction == .download ? downloadAggregate : uploadAggregate else { return nil }
+        if agg.comparable { return agg.medianMbps }
+        return agg.values.first { $0.nodeID == primaryNodeID }?.mbps ?? agg.values.first?.mbps
+    }
+
+    /// "cross_provider_median" or "primary_method".
+    public func headlineScope(_ direction: TransferDirection) -> String {
+        let agg = direction == .download ? downloadAggregate : uploadAggregate
+        return agg?.comparable == false ? "primary_method" : "cross_provider_median"
     }
 
     /// Valid transfers of a direction (the only ones any statistic may use).
@@ -341,7 +476,7 @@ public struct StressSummary: Codable, Sendable, Hashable {
 
     /// Mean window stability over valid transfers whose short windows are reliable; nil when none.
     public func stability(_ direction: TransferDirection) -> Double? {
-        Descriptive.mean(transfers(direction).compactMap { $0.speed?.summary.reliableStabilityScore })
+        Descriptive.mean(transfers(direction).compactMap { $0.speed?.bestStabilityScore })
     }
 
     /// "measurementSamplingArtifact" when valid transfers exist but none has reliable short windows.
@@ -376,10 +511,52 @@ public struct StressSummary: Codable, Sendable, Hashable {
         }
     }
 
-    /// Loaded − idle median for one direction; nil (unavailable) without a valid load.
-    public func loadedLatencyIncreaseMs(_ direction: TransferDirection) -> Double? {
+    /// Control-probe samples during load-valid transfers of a direction (ramp-up excluded), resequenced.
+    public func pooledControlSamples(_ direction: TransferDirection) -> [LatencySample] {
+        var seq = 0
+        return loadValidTransfers(direction).flatMap { t in
+            (t.controlLoadedSamples ?? []).filter { $0.offset >= 1.0 }.map { s -> LatencySample in
+                defer { seq += 1 }
+                return LatencySample(sequence: seq, offset: s.offset, rttMs: s.rttMs)
+            }
+        }
+    }
+
+    /// Idle vs loaded comparison for a direction, valid loads only. Preference:
+    ///
+    ///  1. independent control probe — same method, same fixed target idle and loaded, target not
+    ///     under load → quality full
+    ///  2. reference probe — same method / target, but the target is a load server and loads came
+    ///     from several providers → quality limited (indicative only)
+    public func bufferbloatComparison(_ direction: TransferDirection) -> BufferbloatComparison? {
+        let loads = loadValidTransfers(direction)
+        guard !loads.isEmpty else { return nil }
+        if let probe = controlProbe, let idle = controlIdleSamples, !idle.isEmpty {
+            let loaded = pooledControlSamples(direction)
+            if let i = LatencyStatistics.compute(from: idle).rtt?.median, let l = LatencyStatistics.compute(from: loaded).rtt?.median, !loaded.isEmpty {
+                return BufferbloatComparison(direction: direction, source: "independentControlProbe", probe: probe,
+                                             idleSampleCount: idle.count, loadedSampleCount: loaded.count, idleMedianMs: i, loadedMedianMs: l,
+                                             comparisonTargetSame: true, comparisonMethodSame: true, quality: .full,
+                                             note: "same probe method and fixed target (not under load) for idle and loaded")
+            }
+        }
         guard let idle = preLoadLatency?.rtt?.median, let loaded = loadedLatencyMs(direction) else { return nil }
-        return max(0, loaded - idle)
+        let providers = Set(loads.map(\.nodeID))
+        let probe = referenceProbe ?? ProbeDescriptor(target: "unknown", method: "unknown", protocolName: "unknown", ipFamily: "unknown")
+        let targetIsLoaded = plan.throughputNodes.contains { $0.host == probe.target }
+        return BufferbloatComparison(direction: direction, source: "referenceProbe", probe: probe,
+                                     idleSampleCount: preLoadSamples?.count ?? preLoadLatency?.sent ?? 0,
+                                     loadedSampleCount: pooledLoadedSamples(direction).count,
+                                     idleMedianMs: idle, loadedMedianMs: loaded,
+                                     comparisonTargetSame: referenceProbe != nil, comparisonMethodSame: referenceProbe != nil, quality: .limited,
+                                     note: (targetIsLoaded ? "probe target is also a load server (server-side queueing possible); " : "")
+                                        + (providers.count > 1 ? "loads from \(providers.count) providers pooled; " : "")
+                                        + "no independent control probe — indicative only")
+    }
+
+    /// Loaded − idle median for one direction (from `bufferbloatComparison`); nil without a valid load.
+    public func loadedLatencyIncreaseMs(_ direction: TransferDirection) -> Double? {
+        bufferbloatComparison(direction)?.increaseMs
     }
 
     /// Worst loaded − idle median (queueing under load), valid loads only.
@@ -472,7 +649,7 @@ public enum StressScore {
 
     public static func compute(_ s: StressSummary) -> Int? {
         var parts: [(Double, Double)] = []
-        let dl = s.downloadAggregate?.medianMbps, ul = s.uploadAggregate?.medianMbps
+        let dl = s.headlineMbps(.download), ul = s.headlineMbps(.upload)
         let tp = [dl.map { ScoreCurve.download.score($0) }, ul.map { ScoreCurve.upload.score($0) }].compactMap { $0 }
         if let v = Descriptive.mean(tp) { parts.append((v, 0.20)) }
         if let v = Descriptive.mean([s.stability(.download), s.stability(.upload)].compactMap { $0 }) { parts.append((v, 0.15)) }
@@ -482,7 +659,9 @@ public enum StressScore {
         if let v = s.bufferbloatMs { parts.append((ScoreCurve.bufferbloat.score(v), 0.10)) }
         if let v = s.preLoadLatency?.rtt?.jitter { parts.append((ScoreCurve.jitter.score(v), 0.05)) }
         if let v = s.lossConfirmation.confirmedLossPercent { parts.append((ScoreCurve.loss.score(v), 0.15)) }
-        let cvs = [s.downloadAggregate, s.uploadAggregate].compactMap { $0 }.filter { $0.values.count >= 2 }.compactMap(\.coefficientOfVariation)
+        // Consistency only between equivalent methods (a method-dependent spread is not inconsistency).
+        let cvs = [s.downloadAggregate, s.uploadAggregate].compactMap { $0 }.filter { $0.values.count >= 2 && $0.comparable }
+            .compactMap(\.coefficientOfVariation)
         if let v = cvs.max() { parts.append((consistency.score(v), 0.10)) }
         if let v = s.recoveryDeltaMs { parts.append((recovery.score(max(0, v)), 0.05)) }
         if let v = s.throughputDegradationPercent { parts.append((degradation.score(max(0, v)), 0.05)) }

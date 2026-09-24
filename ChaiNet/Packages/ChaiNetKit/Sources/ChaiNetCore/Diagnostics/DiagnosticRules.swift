@@ -165,12 +165,16 @@ public enum DiagnosticRules {
             recommendation: "檢查路由器日誌、線路狀態或行動訊號覆蓋。")
     }
 
+    /// Scoped to the probed host: a TCP fallback of URLSession is inconclusive for HTTP/3, never
+    /// a network-wide "HTTP/3 unavailable".
     public static let http3Unavailable = ClosureRule(.http3Unavailable) { m in
         guard m.http3Supported == false else { return nil }
+        let host = m.http3ProbeHost ?? "受測端點"
+        let proto = m.negotiatedHTTP?.displayName ?? "TCP"
         let detail = m.quicReachable == true
-            ? "QUIC 交握成功（quicReachable / UDP 443 可達），但 HTTP 請求未協商出 HTTP/3（http3Negotiated = false）。通常是伺服器或系統選擇 HTTP/2，並非網路封鎖。"
-            : "未觀察到可用的 HTTP/3 (QUIC)。可能是伺服器不支援、個別端點問題，或 UDP 443 被阻擋；需多端點結果才能區分。"
-        return DiagnosticFinding(code: .http3Unavailable, severity: .info, title: "未使用 HTTP/3",
+            ? "QUIC 交握在其他端點成功（UDP 443 可達），但對 \(host) 的 HTTP 請求退回 \(proto)。iOS URLSession 可能自動退回 TCP，無法嚴格驗證 HTTP/3；此結果僅限該端點，不代表整體網路不支援 HTTP/3。"
+            : "對 \(host) 的 HTTP 請求退回 \(proto)，且未觀察到成功的 QUIC 交握。可能是伺服器不支援、個別端點問題，或 UDP 443 被阻擋；需多端點 QUIC 結果才能區分。"
+        return DiagnosticFinding(code: .http3Unavailable, severity: .info, title: "\(host) 未協商 HTTP/3",
             detail: detail,
             recommendation: "HTTP/3 無法使用時會自動退回 TCP 上的 HTTP，一般不影響使用。")
     }

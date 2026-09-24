@@ -11,7 +11,7 @@ public enum ReportConsistencyValidator {
 
         // Summary ↔ hypotheses
         if let top = analysis.mostLikely {
-            if !(top.likelihood == .likely || top.likelihood == .possible) {
+            if !(top.likelihood == .likely || top.likelihood == .possible || top.likelihood == .supported) {
                 issues.append("most likely cause \(top.cause.rawValue) has status \(top.likelihood.rawValue)")
             }
             if !report.summary.contains(top.title) { issues.append("summary does not name the most likely cause") }

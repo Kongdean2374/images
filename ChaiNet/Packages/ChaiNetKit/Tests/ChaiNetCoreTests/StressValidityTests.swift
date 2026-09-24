@@ -125,8 +125,13 @@ final class StressValidityTests: XCTestCase {
                   DiagnosticEvidence(code: .allServersNormal, statement: ""), DiagnosticEvidence(code: .serverTransferInvalid, statement: "")]
         let a = RootCauseAnalyzer().analyze(evidence: EvidenceSet(evidence: ev, measuredDimensions: Set(EvidenceDimension.allCases)))
         XCTAssertNotEqual(a.hypotheses.first { $0.cause == .serverOrRouteSpecific }?.likelihood, .ruledOut)
+        // All servers normal contradicts a server-specific cause but is not an orthogonal control
+        // that rules it out (v2.2): unlikely, never ruledOut.
         let clean = RootCauseAnalyzer().analyze(evidence: EvidenceSet(evidence: Array(ev.prefix(2)), measuredDimensions: Set(EvidenceDimension.allCases)))
-        XCTAssertEqual(clean.hypotheses.first { $0.cause == .serverOrRouteSpecific }?.likelihood, .ruledOut)
+        XCTAssertEqual(clean.hypotheses.first { $0.cause == .serverOrRouteSpecific }?.likelihood, .unlikely)
+        let anomalous = [ev[0], DiagnosticEvidence(code: .allServersAnomalous, statement: "")]
+        let all = RootCauseAnalyzer().analyze(evidence: EvidenceSet(evidence: anomalous, measuredDimensions: Set(EvidenceDimension.allCases)))
+        XCTAssertEqual(all.hypotheses.first { $0.cause == .serverOrRouteSpecific }?.likelihood, .ruledOut)
     }
 
     // MARK: Priority 2 — upload sampling artifact
@@ -167,7 +172,7 @@ final class StressValidityTests: XCTestCase {
         quic.method = "quicHandshake"
         let controls = ["cf", "google", "quad9"].map { LossConfirmationTests.probe($0, loss: 0, count: 150) } + [quic]
         let c = LossConfirmation.evaluate(stress: LossConfirmationTests.probe("stress", loss: 0, stress: true, count: 1500), controls: controls)
-        XCTAssertEqual(c.verdict, .noLoss)
+        XCTAssertEqual(c.verdict, .noConfirmedGeneralPacketLoss)
         XCTAssertEqual(c.validControlCount, 3)
         XCTAssertEqual(c.confirmedLossPercent!, 0, accuracy: 1e-9)
         XCTAssertFalse(quic.isPacketLossProbe)
@@ -197,12 +202,19 @@ final class StressValidityTests: XCTestCase {
         XCTAssertTrue(text.contains("download_grade_reason=insufficientLoad"))
         XCTAssertTrue(text.contains("download_load_valid=false"))
 
-        // ~90 ms upload inflation is a measured condition: the hypothesis can't be "unlikely".
+        // ~90 ms upload rise, but idle (reference probe) and loaded (load servers) are not one
+        // independent control: comparisonQuality=limited → indicative only, never supported / high.
+        XCTAssertEqual(s.bufferbloatComparison(.upload)?.quality, .limited)
+        XCTAssertTrue(text.contains("upload_comparison.comparison_quality=limited"))
         let session = DiagnosticSession(title: "t", tests: [SessionTest(label: "A", result: r)])
         let analysis = RootCauseAnalyzer().analyze(session: session, baselines: nil)
-        XCTAssertTrue(analysis.evidence.codes.contains(.loadedLatencyInflationObserved))
+        XCTAssertTrue(analysis.evidence.codes.contains(.loadedLatencyRiseLimitedComparison))
+        XCTAssertFalse(analysis.evidence.codes.contains(.loadedLatencyInflationObserved))
+        XCTAssertFalse(analysis.evidence.codes.contains(.uploadBufferbloat))
         let h = analysis.hypotheses.first { $0.cause == .loadedLatencyInflation }!
-        XCTAssertTrue([.possible, .likely].contains(h.likelihood), "\(h.likelihood)")
+        XCTAssertNotEqual(h.likelihood, .supported)
+        XCTAssertNotEqual(h.likelihood, .ruledOut)
+        XCTAssertNotEqual(h.confidenceBand, .high)
     }
 
     // MARK: Priority 5 — DNS scoping

@@ -80,6 +80,10 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case lossNone, lossHigh, lossSevere, lossBursty, lossRandom
     /// High-rate ICMP stress probe lost packets while low-rate / other probes did not.
     case possibleICMPRateLimiting
+    /// Loss seen only toward specific endpoint(s) while independent controls were clean.
+    case endpointSpecificLossObserved
+    /// Independent low-rate controls clean: no evidence of general loss (scoped replacement for lossNone).
+    case noConfirmedGeneralLoss
     case latencySpikesFrequent
     // Bufferbloat
     case downloadBufferbloat, uploadBufferbloat, noBufferbloat
@@ -87,6 +91,9 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case slowPostLoadRecovery
     /// Measured condition: loaded − idle latency ≥ 30 ms on a valid load (cause / location separate).
     case loadedLatencyInflationObserved
+    /// Loaded latency rose, but idle and loaded were not measured comparably (different target /
+    /// method, or a loaded-server target): indicative only (comparisonQuality=limited).
+    case loadedLatencyRiseLimitedComparison
     // Application / protocol
     case dnsSlow, dnsFailures, dnsHealthy
     /// Median fine but P95 ≥ 200 ms and ≥ 3 × median (occasional very slow lookups).
@@ -94,11 +101,21 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     /// Scoped DNS facts: the *system* resolver's median is fine (says nothing about its tail or
     /// other resolvers); tail latency seen on the system resolver; an alternate IPv6 resolver degraded.
     case systemDNSHealthy, dnsHighTailLatencyObserved, alternateIPv6ResolverDegraded
+    /// One domain slow on several resolvers (cold authoritative lookup), not a resolver problem.
+    case dnsDomainSpecificOutlier
+    /// Every resolver of one transport (UDP / DoH) degraded while the others were fine.
+    case dnsTransportSpecificIssue
     case tcpConnectSlow, tlsSlow, ttfbSlow
     case http3Negotiated, quicBlocked, quicEndpointFailure, quicImplementationFailure
     /// A QUIC handshake succeeded (UDP 443 reachable) — says nothing about HTTP/3 negotiation.
     case quicReachable
+    /// QUIC handshake failed to a specific endpoint while other endpoints succeeded.
+    case endpointQuicHandshakeFailed
+    /// An HTTP/3-capable request fell back to TCP (HTTP/1.1 or HTTP/2) — inconclusive for HTTP/3.
+    case http3FallbackObserved
     case mtuReduced, mtuNormal
+    /// Path MTU observed on the tested path only (replaces the over-general `mtuNormal`).
+    case pathMTUObserved
     // Environment
     case onWiFi, onCellular, on5G, onLTE, noCellularTests, no5GTests
     case vpnActive, vpnInactive
@@ -113,6 +130,8 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case largeCrossProviderThroughputVariance, crossProviderThroughputConsistent
     /// Every node answered its pre-test health check (says nothing about throughput).
     case allServerHealthChecksPassed
+    /// Nodes measured with non-equivalent methods (provider / protocol / streams): only a range.
+    case crossProviderObservedRange, methodDependentThroughputDifference
     /// A throughput transfer to a server returned an invalid response (error page, tiny body, 429…) even after retry.
     case serverTransferInvalid
     // Route
@@ -137,19 +156,20 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
             .throughput
         case .idleLatencyLow, .idleLatencyHigh, .jitterHigh, .jitterLow, .latencySpikesFrequent:
             .latency
-        case .lossNone, .lossHigh, .lossSevere, .lossBursty, .lossRandom, .possibleICMPRateLimiting:
+        case .lossNone, .lossHigh, .lossSevere, .lossBursty, .lossRandom, .possibleICMPRateLimiting, .endpointSpecificLossObserved, .noConfirmedGeneralLoss:
             .loss
-        case .downloadBufferbloat, .uploadBufferbloat, .noBufferbloat, .slowPostLoadRecovery, .loadedLatencyInflationObserved:
+        case .downloadBufferbloat, .uploadBufferbloat, .noBufferbloat, .slowPostLoadRecovery, .loadedLatencyInflationObserved,
+             .loadedLatencyRiseLimitedComparison:
             .bufferbloat
         case .dnsSlow, .dnsFailures, .dnsHealthy, .dnsHighTailLatency, .systemDNSHealthy, .dnsHighTailLatencyObserved,
-             .alternateIPv6ResolverDegraded:
+             .alternateIPv6ResolverDegraded, .dnsDomainSpecificOutlier, .dnsTransportSpecificIssue:
             .dns
         case .tcpConnectSlow, .tlsSlow, .ttfbSlow, .http3Negotiated, .quicBlocked, .quicEndpointFailure, .quicImplementationFailure,
-             .quicReachable:
+             .quicReachable, .endpointQuicHandshakeFailed, .http3FallbackObserved:
             .protocols
         case .routeLatencyStep, .intermediateHopICMPDeprioritized:
             .route
-        case .mtuReduced, .mtuNormal:
+        case .mtuReduced, .mtuNormal, .pathMTUObserved:
             .mtu
         case .onWiFi, .onCellular, .on5G, .onLTE, .noCellularTests, .no5GTests, .vpnActive, .vpnInactive, .lowDataMode,
              .notConstrained, .serverUnhealthy, .serverHealthy, .cellularRadioMetricsUnavailable:
@@ -158,7 +178,8 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
             .stabilityMonitoring
         case .singleServerAnomalous, .multipleServersAnomalous, .allServersAnomalous, .allServersNormal, .regionSpecificAnomaly,
              .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers,
-             .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent, .allServerHealthChecksPassed, .serverTransferInvalid:
+             .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent, .allServerHealthChecksPassed, .serverTransferInvalid,
+             .crossProviderObservedRange, .methodDependentThroughputDifference:
             .crossServer
         case .ipv6DegradedOnly, .ipv4DegradedOnly, .ipFamiliesEquivalent, .ipv6Unavailable:
             .ipFamily
@@ -197,7 +218,8 @@ public enum EvidenceKind: String, Codable, Sendable, Hashable {
 extension EvidenceCode {
     public var kind: EvidenceKind {
         switch self {
-        case .vpnActive, .vpnInactive, .possibleICMPRateLimiting, .intermediateHopICMPDeprioritized: .heuristic
+        case .vpnActive, .vpnInactive, .possibleICMPRateLimiting, .intermediateHopICMPDeprioritized,
+             .loadedLatencyRiseLimitedComparison: .heuristic
         case .noCellularTests, .no5GTests, .cellularRadioMetricsUnavailable, .noBaseline, .interfaceProbeUnavailable: .notTested
         case .allServerHealthChecksPassed, .serverTransferInvalid: .measured
         default:

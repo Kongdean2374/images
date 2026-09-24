@@ -12,11 +12,63 @@ public struct RawDataExport: Codable, Sendable {
     public var analysis: RootCauseAnalysis?
     /// "aiSafe; ip_addresses=[REDACTED] …" or "engineer; ip_addresses=full …".
     public var privacy: String?
+    /// v2: values derived from the raw data (spike summary, bufferbloat comparability, DNS rows…),
+    /// so JSON consumers do not have to re-implement the analysis. Absent in v1 exports.
+    public var derived: RawDataDerived?
+}
+
+/// Schema v2 derived section (all optional; v1 readers ignore it).
+public struct RawDataDerived: Codable, Sendable {
+    public var monitoringSpikes: SpikeSummary?
+    public var bufferbloatComparisons: [BufferbloatComparison]?
+    public var dnsLookups: [DNSLookupRow]?
+    public var dnsFindings: [DNSFinding]?
+    /// Per direction: "cross_provider_median" or "primary_method".
+    public var headlineScope: [String: String]?
+    public var headlineMbps: [String: Double]?
+    public var claimTypes: [String: String]?
+}
+
+extension EvidenceKind {
+    /// Export claim type: measured fact / derived observation / heuristic inference / not measured.
+    public var claimType: String {
+        switch self {
+        case .measured: return "measured_fact"
+        case .derived: return "derived_observation"
+        case .heuristic: return "heuristic_inference"
+        case .notTested: return "not_measured"
+        }
+    }
 }
 
 public enum RawDataExporter {
     public static let schema = "chainet.raw-export"
-    public static let version = 1
+    /// v2 (ChaiNet 2.2.0): bufferbloat comparability, method-aware cross-provider statistics,
+    /// scoped loss verdicts, evidence scores instead of probability-like confidence, spike
+    /// definition, per-lookup DNS rows, per-endpoint HTTP/3 status, scoped MTU, traceroute
+    /// analysis, upload measurement source, data limits. Every v1 key is still written.
+    public static let version = 2
+
+    public static func derived(for r: TestResult) -> RawDataDerived {
+        var d = RawDataDerived()
+        d.monitoringSpikes = r.monitoringSpikeSummary
+        if let st = r.stress {
+            d.bufferbloatComparisons = TransferDirection.allCases.compactMap { st.bufferbloatComparison($0) }
+            var scope: [String: String] = [:], mbps: [String: Double] = [:]
+            for dir in TransferDirection.allCases {
+                scope[dir.rawValue] = st.headlineScope(dir)
+                if let v = st.headlineMbps(dir) { mbps[dir.rawValue] = v }
+            }
+            d.headlineScope = scope
+            d.headlineMbps = mbps
+        }
+        if let dns = r.dns {
+            d.dnsLookups = DNSAnalyzer.rows(dns)
+            d.dnsFindings = DNSAnalyzer.analyze(dns)
+        }
+        d.claimTypes = Dictionary(uniqueKeysWithValues: [EvidenceKind.measured, .derived, .heuristic, .notTested].map { ($0.rawValue, $0.claimType) })
+        return d
+    }
 
     /// Single-test root-cause analysis for the export.
     public static func analysis(for result: TestResult, baselines: BaselineStore? = nil) -> RootCauseAnalysis {
@@ -30,7 +82,7 @@ public enum RawDataExporter {
         var r = result
         if !includeLocation { r.location = nil }
         let export = RawDataExport(schema: schema, version: version, generatedAt: Date(), appVersion: appVersion, platform: platform,
-                                   result: r, analysis: analysis, privacy: privacy.summary)
+                                   result: r, analysis: analysis, privacy: privacy.summary, derived: derived(for: r))
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -85,7 +137,14 @@ public enum RawDataExporter {
             kv("valid", b(s.isValid))
             if let v = s.validity, !v.valid { kv("error", v.reason?.rawValue ?? "invalid"); kv("error_detail", v.detail ?? "") }
             kv("avg_mbps_time_weighted", n(m.averageMbps)); kv("peak_mbps", reliable(m.peakMbps)); kv("min_mbps", reliable(m.minimumMbps))
-            kv("median_mbps", n(m.medianMbps)); kv("p95_mbps", n(m.p95Mbps)); kv("p10_mbps_sustained", reliable(m.p10Mbps))
+            kv("median_mbps", reliable(m.medianMbps)); kv("p95_mbps", reliable(m.p95Mbps)); kv("p10_mbps_sustained", reliable(m.p10Mbps))
+            kv("measurement_source", s.measurementSource ?? "clientCounters")
+            if let sc = s.serverConfirmed {
+                kv("server_confirmed_source", sc.source); kv("server_confirmed_avg_mbps", n(sc.averageMbps))
+                kv("server_confirmed_median_1s_mbps", n(sc.medianMbps)); kv("server_confirmed_p10_1s_mbps", n(sc.p10Mbps))
+                kv("server_confirmed_stability_0_100", n(sc.stabilityScore, 1))
+                kv("server_confirmed_windows_1s_mbps", sc.windowMbps.map { Fmt.d($0, 2) }.joined(separator: ","))
+            }
             kv("sampling_artifact", b(m.samplingArtifactDetected ?? false))
             if m.shortWindowReliable {
                 kv("stability_score_0_100", n(m.stability.score, 1)); kv("stability_cv", n(m.stability.coefficientOfVariation, 4))
@@ -123,9 +182,11 @@ public enum RawDataExporter {
         o.append("ChaiNet Raw Data Export v\(version)")
         o.append("# Plain-text, English, explicit units. Every raw sample follows the summaries. Intended for engineers / AI analysis.")
         o.append("# Values the iOS platform does not expose are written as 'unavailable' (never simulated).")
+        o.append("# schema_version 2: v1 keys are kept; new keys are additive. claim_type = measured_fact | derived_observation | heuristic_inference | not_measured.")
+        o.append("# evidence_score_0_100 / confidence_band are uncalibrated evidence strength, NOT probabilities.")
 
         sec("meta")
-        kv("schema", schema); kv("generated_at", iso.string(from: Date())); kv("app_version", appVersion); kv("platform", platform)
+        kv("schema", schema); kv("schema_version", "\(version)"); kv("generated_at", iso.string(from: Date())); kv("app_version", appVersion); kv("platform", platform)
         kv("test_id", r.id.uuidString); kv("test_date", iso.string(from: r.date)); kv("test_kind", r.kind.rawValue); kv("cancelled", b(r.wasCancelled))
         kv("ip_family_preference", r.ipFamilyPreference.rawValue)
         kv("export_privacy", privacy.summary)
@@ -153,6 +214,12 @@ public enum RawDataExporter {
             kv("score_confidence", st.scoreConfidence?.rawValue ?? "null")
             kv("excluded_invalid_metrics", (st.excludedInvalidMetrics ?? []).joined(separator: " | "))
             kv("recycled_budget_s", n(st.recycledSeconds, 1)); kv("extended_monitoring_median_ms", n(st.extendedMonitoring?.rtt?.median))
+            let lim = st.dataLimits ?? .unlimited
+            func cap(_ v: Int64?) -> String { v.map(String.init) ?? "unlimited" }
+            kv("data_warning_bytes", cap(lim.warningBytes)); kv("data_hard_cap_bytes", cap(lim.hardCapBytes))
+            kv("data_download_cap_bytes", cap(lim.downloadCapBytes)); kv("data_upload_cap_bytes", cap(lim.uploadCapBytes))
+            kv("data_cap_reached", b(st.dataCapReached ?? false))
+            if st.dataCapReached == true { o.append("# Throughput phases after the cap were skipped (phase note 'skipped: dataCapReached'); low-data diagnostics still ran.") }
             for w in st.warnings { kv("warning", w) }
             sec("stress_nodes")
             o.append("node_id,name,provider,host,capabilities,throughput_capable,healthy,health_latency_ms,health_detail")
@@ -168,7 +235,7 @@ public enum RawDataExporter {
                     .joined(separator: ","))
             }
             sec("stress_transfers_per_server")
-            o.append("node_id,round,attempt,direction,method,valid,error,load_valid,bytes,duration_s,avg_mbps,median_mbps,p10_mbps,p95_mbps,min_mbps,peak_mbps,stability,stability_reason,window_samples,sampling_artifact,loaded_median_ms,loaded_p95_ms,http_status_counts,tiny_responses,per_stream_bytes")
+            o.append("node_id,round,attempt,direction,method,valid,error,load_valid,bytes,duration_s,avg_mbps,median_mbps,p10_mbps,p95_mbps,min_mbps,peak_mbps,stability,stability_reason,window_samples,sampling_artifact,loaded_median_ms,loaded_p95_ms,http_status_counts,tiny_responses,per_stream_bytes,measurement_source,server_confirmed_mbps")
             for t in st.transfers {
                 let m = t.speed?.summary
                 let rel = m?.shortWindowReliable ?? false
@@ -177,7 +244,7 @@ public enum RawDataExporter {
                 let error: String = t.isValid ? "none" : (t.validity?.reason?.rawValue ?? "endpointFailure")
                 let ident: [String] = [t.nodeID, "\(t.round)", "\(t.attempt ?? 1)", t.direction.rawValue, t.method, b(t.isValid), error,
                                        b(t.loadValid), "\(t.bytes)"]
-                let rates: [String] = [n(m?.duration, 2), n(m?.averageMbps), n(m?.medianMbps), sw(m?.p10Mbps), n(m?.p95Mbps),
+                let rates: [String] = [n(m?.duration, 2), n(m?.averageMbps), sw(m?.medianMbps), sw(m?.p10Mbps), sw(m?.p95Mbps),
                                        sw(m?.minimumMbps), sw(m?.peakMbps)]
                 let stabilityText: String = rel ? n(m?.stability.score, 1) : "unavailable"
                 let window: String = m?.windowSamples.map { String($0) } ?? "null"
@@ -188,7 +255,9 @@ public enum RawDataExporter {
                 let statusText: String = counts.keys.sorted().map { "\($0):\(counts[$0] ?? 0)" }.joined(separator: "|")
                 let tiny: String = d.map { "\($0.tinyResponses)" } ?? ""
                 let perStream: String = (d?.perStreamBytes ?? []).map { String($0) }.joined(separator: "|")
-                let row: [String] = ident + rates + stab + [loadedMedian, loadedP95, statusText, tiny, perStream]
+                let source: String = t.speed?.measurementSource ?? "clientCounters"
+                let confirmed: String = n(t.speed?.serverConfirmed?.averageMbps)
+                let row: [String] = ident + rates + stab + [loadedMedian, loadedP95, statusText, tiny, perStream, source, confirmed]
                 o.append(row.joined(separator: ","))
             }
             let invalid = st.invalidTransfers()
@@ -202,9 +271,27 @@ public enum RawDataExporter {
             for agg in [st.downloadAggregate, st.uploadAggregate].compactMap({ $0 }) {
                 sec("stress_cross_provider_\(agg.direction.rawValue)")
                 kv("nodes", agg.values.map { "\($0.nodeID)(\($0.provider.rawValue))=\(Fmt.d($0.mbps, 2))" }.joined(separator: ","))
-                kv("mean_mbps", n(agg.meanMbps)); kv("median_mbps", n(agg.medianMbps)); kv("min_mbps", n(agg.minMbps)); kv("max_mbps", n(agg.maxMbps))
-                kv("p10_mbps", n(agg.p10Mbps)); kv("p95_mbps", n(agg.p95Mbps)); kv("inter_server_variance_mbps2", n(agg.variance))
-                kv("coefficient_of_variation", n(agg.coefficientOfVariation, 4)); kv("large_cross_provider_throughput_variance", b(agg.largeVariance))
+                o.append("node_id,role,method,stream_count,transport_protocol,mbps")
+                for v in agg.values {
+                    o.append([v.nodeID, v.nodeID == st.primaryNodeID ? "primary" : "validation", v.method ?? "unknown",
+                              v.streamCount.map(String.init) ?? "unknown", v.transportProtocol ?? "unknown", n(v.mbps, 2)].joined(separator: ","))
+                }
+                kv("comparison_method_equivalent", b(agg.methodEquivalent))
+                kv("headline_scope", st.headlineScope(agg.direction)); kv("primary_node", st.primaryNodeID ?? "null")
+                kv("headline_mbps", n(st.headlineMbps(agg.direction)))
+                kv("validation_nodes", agg.values.filter { $0.nodeID != st.primaryNodeID }.map(\.nodeID).joined(separator: ","))
+                kv("min_mbps", n(agg.minMbps)); kv("max_mbps", n(agg.maxMbps))
+                if agg.comparable {
+                    kv("mean_mbps", n(agg.meanMbps)); kv("median_mbps", n(agg.medianMbps))
+                    kv("p10_mbps", n(agg.p10Mbps)); kv("p95_mbps", n(agg.p95Mbps)); kv("inter_server_variance_mbps2", n(agg.variance))
+                    kv("coefficient_of_variation", n(agg.coefficientOfVariation, 4)); kv("large_cross_provider_throughput_variance", b(agg.largeVariance))
+                    kv("cross_provider_consistent", b(agg.isConsistent))
+                } else {
+                    for k in ["mean_mbps", "median_mbps", "p10_mbps", "p95_mbps", "inter_server_variance_mbps2", "coefficient_of_variation"] { kv(k, "not_comparable") }
+                    kv("large_cross_provider_throughput_variance", "not_comparable"); kv("cross_provider_consistent", "not_comparable")
+                    kv("observed_range_mbps", "\(n(agg.minMbps, 2))-\(n(agg.maxMbps, 2))")
+                    o.append("# Methods differ (protocol / stream count): values are a method-dependent observed range, not a provider comparison; not averaged into the headline.")
+                }
             }
             sec("stress_loss_probes")
             o.append("probe_id,name,target,method,pps,role,counts_for_loss_verdict,sent,received,loss_percent,median_ms,p95_ms,jitter_ms")
@@ -216,6 +303,8 @@ public enum RawDataExporter {
             let lc = st.lossConfirmation
             kv("loss_verdict", lc.verdict.rawValue); kv("stress_loss_percent", n(lc.stressLossPercent)); kv("confirmed_loss_percent_control_median", n(lc.confirmedLossPercent))
             kv("valid_controls", "\(lc.validControlCount)"); kv("lossy_controls", "\(lc.lossyControlCount)")
+            kv("affected_targets", (lc.affectedTargets ?? []).joined(separator: ",")); kv("clean_targets", (lc.cleanTargets ?? []).joined(separator: ","))
+            kv("loss_verdict_values", "confirmedGeneralPacketLoss|endpointSpecificLossObserved|possibleICMPRateLimiting|noConfirmedGeneralPacketLoss|inconclusive")
             sec("stress_latency_recovery")
             kv("pre_load_median_ms", n(st.preLoadLatency?.rtt?.median)); kv("pre_load_p95_ms", n(st.preLoadLatency?.rtt?.p95))
             kv("pre_load_jitter_ms", n(st.preLoadLatency?.rtt?.jitter))
@@ -227,6 +316,15 @@ public enum RawDataExporter {
                 if !valid { kv("\(d.rawValue)_grade", "unavailable"); kv("\(d.rawValue)_grade_reason", "insufficientLoad") }
             }
             kv("loaded_latency_inflation_ms", n(st.bufferbloatMs)); kv("queue_location", "unknown")
+            for c in TransferDirection.allCases.compactMap({ st.bufferbloatComparison($0) }) {
+                let p = "\(c.direction.rawValue)_comparison"
+                kv("\(p).source", c.source); kv("\(p).probe_target", c.probe.target); kv("\(p).probe_method", c.probe.method)
+                kv("\(p).probe_protocol", c.probe.protocolName); kv("\(p).probe_ip_family", c.probe.ipFamily)
+                kv("\(p).idle_sample_count", "\(c.idleSampleCount)"); kv("\(p).loaded_sample_count", "\(c.loadedSampleCount)")
+                kv("\(p).idle_median_ms", n(c.idleMedianMs)); kv("\(p).loaded_median_ms", n(c.loadedMedianMs)); kv("\(p).increase_ms", n(c.increaseMs))
+                kv("\(p).comparison_target_same", b(c.comparisonTargetSame)); kv("\(p).comparison_method_same", b(c.comparisonMethodSame))
+                kv("\(p).comparison_quality", c.quality.rawValue); kv("\(p).note", c.note)
+            }
             for (i, post) in st.postLoadLatency.enumerated() {
                 kv("post_load_round_\(i + 1)_median_ms", n(post.rtt?.median)); kv("post_load_round_\(i + 1)_p95_ms", n(post.rtt?.p95))
             }
@@ -273,7 +371,10 @@ public enum RawDataExporter {
                 sec(agg.0.rawValue)
                 kv("scope", "stress_aggregate_of_valid_transfers (per-node / per-round detail: [stress_transfers_per_server])")
                 kv("valid_transfers", "\(st.transfers(agg.0).count)"); kv("invalid_transfers", "\(st.invalidTransfers().filter { $0.direction == agg.0 }.count)")
-                kv("median_across_nodes_mbps", n(agg.1?.medianMbps)); kv("mean_across_nodes_mbps", n(agg.1?.meanMbps))
+                kv("headline_scope", st.headlineScope(agg.0)); kv("headline_mbps", n(st.headlineMbps(agg.0)))
+                let comparable = agg.1?.comparable ?? true
+                kv("median_across_nodes_mbps", comparable ? n(agg.1?.medianMbps) : "not_comparable")
+                kv("mean_across_nodes_mbps", comparable ? n(agg.1?.meanMbps) : "not_comparable")
                 kv("max_node_mbps", n(agg.1?.maxMbps)); kv("min_node_mbps", n(agg.1?.minMbps))
                 if let score = st.stability(agg.0) { kv("stability_score_0_100", n(score, 1)) }
                 else { kv("stability", "unavailable"); kv("stability_reason", st.stabilityUnavailableReason(agg.0) ?? "unavailable") }
@@ -304,6 +405,11 @@ public enum RawDataExporter {
             kv("upload_loaded_median_ms", n(bb.uploadLoadedMedianMs)); kv("upload_increase_ms", n(bb.uploadIncreaseMs))
             kv("upload_grade", bb.uploadGrade?.rawValue ?? "unavailable")
             if bb.uploadGrade == nil { kv("upload_grade_reason", "insufficientLoad") }
+            if let st = r.stress {
+                let q = TransferDirection.allCases.compactMap { st.bufferbloatComparison($0)?.quality }
+                kv("comparison_quality", q.isEmpty ? "unavailable" : (q.contains(.limited) ? "limited" : "full"))
+                if q.contains(.limited) { o.append("# comparison_quality=limited: idle / loaded not from one independent fixed control probe; indicative only, not a high-confidence grade.") }
+            }
             kv("interpretation", "loadedLatencyInflation / networkPathQueueing")
             kv("queue_location", "unknown")
             kv("possible_queue_locations", "device_or_modem_queue,radio_scheduler,access_network,carrier_or_core_network,router,remote_path")
@@ -338,6 +444,16 @@ public enum RawDataExporter {
                 kv("resolver.\(res.resolver.id)", "transport=\(res.resolver.transport.rawValue) endpoint=\(res.resolver.endpoint) median_ms=\(n(res.statistics.rtt?.median)) p95_ms=\(n(res.statistics.rtt?.p95)) failures=\(res.statistics.loss.lost)/\(res.statistics.sent)")
                 o.append("  samples_ms=" + res.samples.map { $0.rttMs.map { Fmt.d($0, 2) } ?? "fail" }.joined(separator: ","))
             }
+            for f in DNSAnalyzer.analyze(d) { kv("dns_finding", "\(f.kind.rawValue) subject=\(f.subject)") }
+            kv("dns_outlier_domains", DNSAnalyzer.outlierDomains(d).joined(separator: ","))
+            if let ex = DNSAnalyzer.systemStatsExcludingOutliers(d)?.rtt {
+                kv("system_median_ms_excluding_outlier_domains", n(ex.median)); kv("system_p95_ms_excluding_outlier_domains", n(ex.p95))
+            }
+            sec("dns_lookups")
+            o.append("domain,transport,resolver,latency_ms,status,cached_or_unknown")
+            for row in DNSAnalyzer.rows(d) {
+                o.append([row.domain, row.transport.rawValue, row.resolverID, row.latencyMs.map { Fmt.d($0, 2) } ?? "", row.status, row.cached].joined(separator: ","))
+            }
         }
         if let p = r.protocolProbe {
             sec("protocols")
@@ -350,7 +466,17 @@ public enum RawDataExporter {
             kv("quic_assessment", (p.quicAssessment ?? .notTested).rawValue)
             for q in p.quicProbes ?? [] {
                 kv("quic.\(q.host)", "handshake_ms=\(n(q.handshakeMs)) failure=\(q.failure?.rawValue ?? "none") tcp443=\(b(q.tcpReachable))")
+                kv("quic_reachable.\(q.host)", b(q.handshakeMs != nil && q.failure == nil))
             }
+            let probes = p.quicProbes ?? []
+            kv("general_quic_reachable", probes.isEmpty ? "notTested" : b(probes.contains { $0.handshakeMs != nil && $0.failure == nil }))
+            if let h3 = p.http3Attempt {
+                let proto = h3.negotiatedProtocol
+                kv("http3_status.\(p.host)", proto == .http3 ? "negotiated" : "fallback:\(proto.rawValue)")
+            } else {
+                kv("http3_status.\(p.host)", "notTested")
+            }
+            kv("strict_http3_verification", "http3_status is per endpoint; a fallback to h2 only means this endpoint / attempt did not negotiate HTTP/3 (Alt-Svc cache, server choice), not that HTTP/3 is unavailable on the network")
             kv("tcp_connect_median_ms", n(p.tcpConnect?.rtt?.median)); kv("tcp_tls_ready_median_ms", n(p.tlsConnect?.rtt?.median))
             kv("http_warm_latency_median_ms", n(p.httpLatency?.rtt?.median))
             kv("ipv4_tcp_connect_ms", avail(p.ipv4Reachable) { n($0) }); kv("ipv6_tcp_connect_ms", avail(p.ipv6Reachable) { n($0) })
@@ -382,6 +508,10 @@ public enum RawDataExporter {
         if let mtu = r.mtu {
             sec("mtu")
             kv("target", mtu.target); kv("path_mtu_bytes", mtu.pathMTU.map(String.init) ?? "null"); kv("scope", "tested IPv4 path only")
+            kv("observed_path_mtu_ipv4_bytes", mtu.pathMTU.map(String.init) ?? "null")
+            let failedBelow = mtu.pathMTU.map { m in mtu.probes.contains { !$0.succeeded && $0.packetSize <= m } } ?? false
+            kv("mtu_blackhole_evidence", mtu.pathMTU == nil ? "inconclusive" : b(failedBelow))
+            kv("method", mtu.method)
             kv("probes", mtu.probes.map { "\($0.packetSize):\($0.succeeded ? "ok" : "fail")" }.joined(separator: ","))
         }
         if let tr = r.traceroute {
@@ -390,10 +520,23 @@ public enum RawDataExporter {
             for h in tr.hops {
                 o.append("hop \(h.ttl) \(h.address ?? "*") \(h.hostname ?? "-") rtt_ms=" + h.rttsMs.map { $0.map { Fmt.d($0, 2) } ?? "*" }.joined(separator: ","))
             }
+            let ta = TracerouteAnalyzer.analyze(tr.hops)
+            kv("analysis_sufficient", b(ta.sufficient)); kv("analysis_threshold_ms", n(TracerouteAnalyzer.thresholdMs, 0))
+            kv("persistent_latency_steps", ta.steps.map { "\($0.fromTTL)->\($0.toTTL):+\(Fmt.d($0.increaseMs, 1))ms" }.joined(separator: ","))
+            kv("isolated_elevated_hops", ta.isolatedHighHops.map { "\($0.ttl):+\(Fmt.d($0.excessMs, 1))ms" }.joined(separator: ","))
+            if !ta.isolatedHighHops.isEmpty { kv("isolated_elevated_hops_interpretation", "icmpDeprioritization (later hops not elevated; not path latency)") }
         }
         if let mon = r.monitoring {
             latency("monitoring", mon.statistics)
-            kv("target", mon.target); kv("interval_s", n(mon.intervalSeconds, 2)); kv("spikes", "\(mon.spikes.count)"); kv("drops", "\(mon.drops.count)")
+            let spikeSummary = r.monitoringSpikeSummary
+            kv("target", mon.target); kv("interval_s", n(mon.intervalSeconds, 2))
+            kv("spikes", "\(max(mon.spikes.count, spikeSummary?.count ?? 0))"); kv("drops", "\(mon.drops.count)")
+            kv("engine_spike_events", "\(mon.spikes.count)")
+            if let sp = spikeSummary {
+                kv("spike_threshold_ms", n(sp.thresholdMs)); kv("spike_count", "\(sp.count)"); kv("worst_spike_ms", n(sp.worstMs))
+                kv("spike_offsets", sp.offsets.map { Fmt.d($0, 2) }.joined(separator: ","))
+                kv("spike_definition", sp.definition); kv("spike_baseline_source", sp.baselineSource)
+            }
             for sp in mon.spikes { o.append("spike offset_s=\(n(sp.offset, 2)) rtt_ms=\(n(sp.rttMs)) baseline_ms=\(n(sp.baselineMs)) threshold_ms=\(n(sp.thresholdMs))") }
             for d in mon.drops { o.append("drop start_s=\(n(d.startOffset, 2)) duration_s=\(n(d.duration, 2)) lost_probes=\(d.lostProbes)") }
             for pc in mon.pathChanges { o.append("path_change offset_s=\(n(pc.offset, 2)) interface=\(pc.interface.rawValue) status=\(pc.status.rawValue)") }
@@ -404,22 +547,23 @@ public enum RawDataExporter {
 
         if let a = analysis {
             sec("root_cause_evidence")
-            o.append("code,kind,dimension,value,unit")
+            o.append("code,kind,dimension,value,unit,claim_type")
             for e in a.evidence.evidence {
-                o.append("\(e.code.rawValue),\(e.kind.rawValue),\(e.dimension.rawValue),\(e.value.map { n($0) } ?? ""),\(e.unit ?? "")")
+                o.append("\(e.code.rawValue),\(e.kind.rawValue),\(e.dimension.rawValue),\(e.value.map { n($0) } ?? ""),\(e.unit ?? ""),\(e.kind.claimType)")
             }
             kv("measured_dimensions", a.evidence.measuredDimensions.map(\.rawValue).sorted().joined(separator: ","))
             kv("attempted_dimensions", a.evidence.attemptedDimensions.map(\.rawValue).sorted().joined(separator: ","))
             sec("root_cause_hypotheses")
-            o.append("cause,status,confidence,layer,supporting,contradicting,ruling_out,missing_dimensions")
+            o.append("cause,status,evidence_score_0_100,confidence_band,claim_type,layer,supporting,contradicting,ruling_out,missing_dimensions")
             for h in a.hypotheses {
-                o.append([h.cause.rawValue, h.likelihood.rawValue, n(h.confidence), h.layer.rawValue,
+                o.append([h.cause.rawValue, h.likelihood.rawValue, "\(h.evidenceScore)", h.confidenceBand.rawValue, "heuristic_inference", h.layer.rawValue,
                           h.supportingEvidence.map(\.code.rawValue).joined(separator: "|"),
                           h.contradictingEvidence.map(\.code.rawValue).joined(separator: "|"),
                           h.rulingOutEvidence.map(\.code.rawValue).joined(separator: "|"),
                           h.missingDimensions.map(\.rawValue).joined(separator: "|")].joined(separator: ","))
             }
-            kv("most_likely", a.mostLikely.map { "\($0.cause.rawValue) (\($0.likelihood.rawValue), \(n($0.confidence)))" } ?? "none")
+            kv("most_likely", a.mostLikely.map { "\($0.cause.rawValue) (\($0.likelihood.rawValue), evidence_score_0_100=\($0.evidenceScore), confidence_band=\($0.confidenceBand.rawValue))" } ?? "none")
+            kv("score_semantics", "evidence_score_0_100 is uncalibrated evidence strength, not a probability")
             kv("recommended_next_tests", a.recommendedTests.map(\.test.rawValue).joined(separator: ","))
         }
 

@@ -16,9 +16,14 @@ public struct RootCauseAnalysis: Codable, Sendable, Hashable {
     public var recommendedTests: [PrioritizedTest]
     public var conclusion: String
 
+    /// A cause (likely / possible) is preferred; a supported *condition* is shown only when no cause qualifies.
     public var mostLikely: DiagnosticHypothesis? {
         hypotheses.first { $0.likelihood == .likely } ?? hypotheses.first { $0.likelihood == .possible }
+            ?? hypotheses.first { $0.likelihood == .supported }
     }
+    public var supported: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .supported } }
+    public var broadIssueUnlikely: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .broadIssueUnlikely } }
+    public var noEvidence: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .noEvidence } }
     public var likely: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .likely } }
     public var possible: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .possible } }
     public var unlikely: [DiagnosticHypothesis] { hypotheses.filter { $0.likelihood == .unlikely } }
@@ -80,6 +85,10 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
 
     static func sigmoid(_ x: Double) -> Double { 1 / (1 + exp(-x)) }
 
+    /// Codes produced from a limited (non-comparable) comparison, and the confidence they may reach.
+    static let limitedComparisonCodes: Set<EvidenceCode> = [.loadedLatencyRiseLimitedComparison]
+    static let limitedComparisonCap = 0.6
+
     func scoped(_ evidence: [DiagnosticEvidence], _ scope: EvidenceScope) -> [DiagnosticEvidence] {
         switch scope {
         case .all: evidence
@@ -128,10 +137,26 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
 
         let score = model.prior + codes.reduce(0.0) { $0 + (model.weights[$1] ?? 0) }
         var confidence = min(model.confidenceCap, Self.sigmoid(score))
+        // Evidence from a non-comparable baseline (e.g. bufferbloat with mixed probe sources) is
+        // indicative only: never a high band while the measured condition itself is absent.
+        if !codes.isDisjoint(with: Self.limitedComparisonCodes), model.observedCondition.map({ !codes.contains($0) }) ?? true {
+            confidence = min(confidence, Self.limitedComparisonCap)
+        }
 
         if !rulingOut.isEmpty {
+            // Controls that only cover the broad form of the cause (one target / transport) can't
+            // exclude a narrower variant.
+            if model.scopedRuleOut {
+                return make(min(confidence, 0.15), .broadIssueUnlikely, supporting: supporting, contradicting: contradicting + rulingOut,
+                            reason: "受測的控制條件使「廣泛性」問題不太可能，但不足以排除其他特定路徑 / 目標")
+            }
             return make(min(confidence, 0.05), .ruledOut, supporting: supporting, contradicting: contradicting, rulingOut: rulingOut,
-                        reason: "決定性實測證據與此原因矛盾")
+                        reason: "決定性實測證據與此原因矛盾（具正交控制）")
+        }
+        // A directly measured condition: the fact is established, its mechanism / location is not.
+        if let condition = model.observedCondition, let fact = evidence.first(where: { $0.code == condition && $0.kind == .measured }) {
+            return make(confidence, .supported, supporting: supporting.isEmpty ? [fact] : supporting, contradicting: contradicting,
+                        reason: "條件已實測成立；發生位置 / 機制仍屬推論")
         }
         // 3. Missing data.
         if !missing.isEmpty {
@@ -149,7 +174,10 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         }
         // 4. Scored classification.
         if supporting.isEmpty {
-            return make(confidence, .unlikely, contradicting: contradicting, reason: "沒有支持此原因的觀察")
+            if contradicting.isEmpty {
+                return make(confidence, .noEvidence, reason: "沒有與此原因相關的觀察（無支持亦無反向證據）")
+            }
+            return make(confidence, .unlikely, contradicting: contradicting, reason: "沒有支持此原因的觀察，且有反向證據")
         }
         let likelihood: Likelihood = confidence >= Self.likelyThreshold ? .likely : (confidence >= Self.possibleThreshold ? .possible : .unlikely)
         return make(confidence, likelihood, supporting: supporting, contradicting: contradicting)
@@ -203,7 +231,7 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
 
     func prioritizeTests(_ hypotheses: [DiagnosticHypothesis]) -> [PrioritizedTest] {
         var table: [RecommendedTest: PrioritizedTest] = [:]
-        for h in hypotheses where [.likely, .possible, .insufficientEvidence, .notTested].contains(h.likelihood) {
+        for h in hypotheses where [.supported, .likely, .possible, .insufficientEvidence, .notTested].contains(h.likelihood) {
             // Untested / inconclusive hypotheses still deserve a test, at a low priority.
             let weight = h.likelihood == .insufficientEvidence ? 0.1 : (h.likelihood == .notTested ? 0.05 : h.confidence)
             for t in h.recommendedNextTests {
@@ -216,34 +244,57 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         return table.values.sorted { $0.priority != $1.priority ? $0.priority > $1.priority : $0.test.rawValue < $1.test.rawValue }
     }
 
+    /// Conclusion text. Every line is labelled with its epistemic status so a measured fact is
+    /// never presented as a hypothesis or vice versa:
+    ///
+    ///     [實測] measured fact · [推導] derived observation · [推論] hypothesis (evidence score,
+    ///     uncalibrated — not a probability) · [未測量] dimensions without data
     func conclusion(_ hypotheses: [DiagnosticHypothesis], _ set: EvidenceSet, _ tests: [PrioritizedTest]) -> String {
         var lines: [String] = []
+        func score(_ h: DiagnosticHypothesis) -> String { "證據分數 \(h.evidenceScore)/100，信心區間：\(h.confidenceBand.displayName)" }
+        let supported = hypotheses.filter { $0.likelihood == .supported }
+        for h in supported {
+            let facts = h.supportingEvidence.filter { $0.kind == .measured }.prefix(2).map(\.statement)
+            lines.append("[實測] " + (facts.isEmpty ? h.title : facts.joined(separator: "；")) + "。")
+            lines.append("[推論] 發生位置 / 機制：\(h.title) 的位置仍未知，屬假設而非實測。")
+        }
         let likely = hypotheses.filter { $0.likelihood == .likely }
         let possible = hypotheses.filter { $0.likelihood == .possible }
         if let top = likely.first ?? possible.first {
-            lines.append("最可能原因：\(top.title)（\(top.likelihood.displayName)，信心 \(top.confidencePercent)%，位於「\(top.layer.displayName)」層）。")
-            if !top.supportingEvidence.isEmpty {
-                lines.append("主要依據：" + top.supportingEvidence.prefix(4).map(\.statement).joined(separator: "；") + "。")
-            }
+            lines.append("[推論] 最可能原因：\(top.title)（\(top.likelihood.displayName)，\(score(top))，位於「\(top.layer.displayName)」層；分數未經真實故障資料校準，不是機率）。")
+            let measured = top.supportingEvidence.filter { $0.kind == .measured }.prefix(3)
+            let derived = top.supportingEvidence.filter { $0.kind == .derived }.prefix(2)
+            let heuristic = top.supportingEvidence.filter { $0.kind == .heuristic }.prefix(2)
+            if !measured.isEmpty { lines.append("[實測] 依據：" + measured.map(\.statement).joined(separator: "；") + "。") }
+            if !derived.isEmpty { lines.append("[推導] 依據：" + derived.map(\.statement).joined(separator: "；") + "。") }
+            if !heuristic.isEmpty { lines.append("[推論] 啟發式依據：" + heuristic.map(\.statement).joined(separator: "；") + "。") }
             if !top.contradictingEvidence.isEmpty {
                 lines.append("反向證據：" + top.contradictingEvidence.prefix(3).map(\.statement).joined(separator: "；") + "。")
             }
             let others = (likely + possible).dropFirst().prefix(3)
             if !others.isEmpty {
-                lines.append("其他可能：" + others.map { "\($0.title)（\($0.confidencePercent)%）" }.joined(separator: "、") + "。")
+                lines.append("[推論] 其他可能：" + others.map { "\($0.title)（\($0.evidenceScore)/100）" }.joined(separator: "、") + "。")
             }
         } else if set.evidence.isEmpty {
             lines.append("尚無足夠的測試資料可供診斷。")
-        } else {
-            lines.append("目前沒有任何原因達到「有可能」以上的信心；若仍有症狀，請依建議補做測試。")
+        } else if supported.isEmpty {
+            lines.append("目前沒有任何原因達到「有可能」以上；若仍有症狀，請依建議補做測試。")
         }
         let ruled = hypotheses.filter { $0.likelihood == .ruledOut }
         if !ruled.isEmpty {
-            lines.append("已排除（有決定性實測證據）：" + ruled.prefix(6).map(\.title).joined(separator: "、") + "。")
+            lines.append("已排除（有正交控制的實測證據）：" + ruled.prefix(6).map(\.title).joined(separator: "、") + "。")
+        }
+        let broad = hypotheses.filter { $0.likelihood == .broadIssueUnlikely }
+        if !broad.isEmpty {
+            lines.append("廣泛性問題不太可能（未排除特定路徑 / 目標）：" + broad.prefix(6).map(\.title).joined(separator: "、") + "。")
         }
         let untested = hypotheses.filter { $0.likelihood == .notTested }
         if !untested.isEmpty {
             lines.append("未測試（不代表已排除）：" + untested.prefix(6).map(\.title).joined(separator: "、") + "。")
+        }
+        let unmeasured = EvidenceDimension.allCases.filter { !set.measuredDimensions.contains($0) }
+        if !unmeasured.isEmpty && !set.evidence.isEmpty {
+            lines.append("[未測量] " + unmeasured.map(\.displayName).joined(separator: "、") + "。")
         }
         if let next = tests.first {
             lines.append("建議下一步：\(next.test.title)。")

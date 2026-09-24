@@ -17,6 +17,9 @@ public enum RootCause: String, Codable, Sendable, Hashable, CaseIterable {
     case routingTransit
     case ipv6RoutingIssue
     case ipv4RoutingIssue
+    /// A specific IPv6 path / transport (e.g. one IPv6 DNS resolver over UDP) misbehaves while a
+    /// broad IPv6 problem is unlikely.
+    case ipv6SpecificPathIssue
     case dnsResolverIssue
     case vpnOverhead
     case lowDataModeThrottling
@@ -35,12 +38,24 @@ public enum RootCause: String, Codable, Sendable, Hashable, CaseIterable {
 ///   (e.g. no 5G test → a 5G-specific cause is *not tested*, never *ruled out*)
 /// - `unlikely`: measured evidence points away from it, but nothing decisive
 /// - `ruledOut`: a decisive, directly measured fact contradicts it
+/// Status of a hypothesis. Ordered from strongest support to strongest exclusion.
+///
+/// * `supported` — the hypothesis restates a directly measured condition (e.g. latency rises
+///   under load); only its *location / mechanism* remains open.
+/// * `noEvidence` — nothing observed for or against it.
+/// * `broadIssueUnlikely` — the controls that were run make a *general* problem unlikely, but they
+///   were not orthogonal enough to exclude a narrower one (another IPv6 route, another endpoint).
+/// * `ruledOut` — only with sufficient orthogonal controls (authoritative flag, ≥ 2 independent
+///   successful endpoints, etc.).
 public enum Likelihood: String, Codable, Sendable, Hashable, CaseIterable, Comparable {
+    case supported
     case likely
     case possible
     case insufficientEvidence
     case notTested
+    case noEvidence
     case unlikely
+    case broadIssueUnlikely
     case ruledOut
 
     private var rank: Int { Self.allCases.firstIndex(of: self)! }
@@ -48,11 +63,14 @@ public enum Likelihood: String, Codable, Sendable, Hashable, CaseIterable, Compa
 
     public var displayName: String {
         switch self {
+        case .supported: "實測支持（Supported）"
         case .likely: "可能性高（Likely）"
         case .possible: "有可能（Possible）"
         case .insufficientEvidence: "證據不足（Insufficient evidence）"
         case .notTested: "未測試（Not tested）"
+        case .noEvidence: "無相關證據（No evidence）"
         case .unlikely: "可能性低（Unlikely）"
+        case .broadIssueUnlikely: "廣泛性問題不太可能（Broad issue unlikely）"
         case .ruledOut: "已排除（Ruled out）"
         }
     }
@@ -155,4 +173,25 @@ public struct DiagnosticHypothesis: Codable, Sendable, Hashable, Identifiable {
 
     public var id: RootCause { cause }
     public var confidencePercent: Int { Int((confidence * 100).rounded()) }
+    /// `confidence` is a log-odds evidence score, **not a calibrated probability** (the model has
+    /// not been fitted to labelled fault data). Reports show it as a 0–100 score plus a band.
+    public var evidenceScore: Int { confidencePercent }
+    public var confidenceBand: ConfidenceBand { ConfidenceBand(score: confidence) }
+}
+
+/// Coarse band for an uncalibrated evidence score: low < 0.40 ≤ medium < 0.70 ≤ high.
+public enum ConfidenceBand: String, Codable, Sendable, Hashable {
+    case low, medium, high
+
+    public init(score: Double) {
+        self = score >= 0.70 ? .high : (score >= 0.40 ? .medium : .low)
+    }
+
+    public var displayName: String {
+        switch self {
+        case .low: "低"
+        case .medium: "中"
+        case .high: "高"
+        }
+    }
 }

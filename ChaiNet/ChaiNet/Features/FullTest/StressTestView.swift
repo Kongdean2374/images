@@ -11,6 +11,19 @@ struct StressTestView: View {
     @State private var preset: Double? = 300
     @State private var customMinutes = 20
     @State private var confirming = false
+    @State private var cellularConfirming = false
+    /// Mobile-data safety caps in GB (nil = no limit). A 10 GB hard cap is preselected on cellular.
+    @State private var hardCapGB: Int?
+    @State private var downloadCapGB: Int?
+    @State private var uploadCapGB: Int?
+    @State private var capsInitialized = false
+
+    private var dataLimits: StressDataLimits {
+        let gb = StressDataLimits.gigabyte
+        let hard = hardCapGB.map { Int64($0) * gb }
+        return StressDataLimits(warningBytes: hard.map { $0 * 8 / 10 }, hardCapBytes: hard,
+                                downloadCapBytes: downloadCapGB.map { Int64($0) * gb }, uploadCapBytes: uploadCapGB.map { Int64($0) * gb })
+    }
 
     private var totalSeconds: Double { preset ?? Double(customMinutes * 60) }
     private var nodes: [StressNode] { TestRunner.defaultStressNodes(servers: settings.allServers) }
@@ -24,7 +37,8 @@ struct StressTestView: View {
                     case .idle:
                         setup(vm)
                     case .running:
-                        StressProgressHeader(vm: vm, estimated: vm.configuration?.stressPlan?.estimatedSeconds ?? plan.estimatedSeconds)
+                        StressProgressHeader(vm: vm, estimated: vm.configuration?.stressPlan?.estimatedSeconds ?? plan.estimatedSeconds,
+                                             limits: vm.configuration?.stressDataLimits ?? .unlimited)
                         LiveRunView(vm: vm)
                         Button(role: .destructive) { vm.stop() } label: { Label("停止（保留已測資料）", systemImage: "stop.fill").frame(maxWidth: .infinity) }
                             .buttonStyle(.bordered)
@@ -47,7 +61,13 @@ struct StressTestView: View {
         .screenBackground()
         .navigationTitle("極限壓力測試")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { if vm == nil { vm = app.makeRunViewModel() } }
+        .onAppear {
+            if vm == nil { vm = app.makeRunViewModel() }
+            if !capsInitialized {
+                capsInitialized = true
+                if app.onCellular { hardCapGB = 10 }
+            }
+        }
         .onDisappear { vm?.stop() }
     }
 
@@ -100,12 +120,15 @@ struct StressTestView: View {
             KeyValueRow(key: "下載", value: Format.bytes(traffic.downloadBytes))
             KeyValueRow(key: "上傳", value: Format.bytes(traffic.uploadBytes))
             KeyValueRow(key: "合計", value: Format.bytes(traffic.totalBytes), valueColor: Theme.critical)
+            KeyValueRow(key: "預估範圍", value: "\(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes))", valueColor: Theme.critical)
             Text(rates.fromHistory
                  ? "依此網路類型最近結果（下載 \(Format.number(rates.download, digits: 0)) / 上傳 \(Format.number(rates.upload, digits: 0)) Mbps）估算；實際流量依網路速度而定。"
                  : "尚無此網路類型的紀錄，以典型速度（下載 \(Format.number(rates.download, digits: 0)) / 上傳 \(Format.number(rates.upload, digits: 0)) Mbps）估算；實際可能更多。")
                 .font(.caption2).foregroundStyle(Theme.textSecondary)
         }
         .cardStyle()
+
+        dataLimitCard(traffic: traffic)
 
         VStack(alignment: .leading, spacing: 6) {
             Text("網路與節點").font(.headline)
@@ -136,9 +159,18 @@ struct StressTestView: View {
         PrimaryButton(title: "開始極限壓力測試", symbol: "flame.fill") { confirming = true }
             .alert("開始極限壓力測試？", isPresented: $confirming) {
                 Button("取消", role: .cancel) {}
-                Button("我了解，開始", role: .destructive) { start(vm, plan: plan) }
+                Button("我了解，開始", role: .destructive) {
+                    if app.onCellular { cellularConfirming = true } else { start(vm, plan: plan) }
+                }
             } message: {
-                Text(StressTestPlan.confirmationWarning + "\n預估流量 \(Format.bytes(traffic.totalBytes))，約 \(StressProgressHeader.mmss(plan.estimatedSeconds))。")
+                Text(StressTestPlan.confirmationWarning + "\n預估流量 \(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes))，約 \(StressProgressHeader.mmss(plan.estimatedSeconds))。")
+            }
+            .alert("正在使用行動數據", isPresented: $cellularConfirming) {
+                Button("取消", role: .cancel) {}
+                Button("確認使用行動數據", role: .destructive) { start(vm, plan: plan) }
+            } message: {
+                Text("極限壓力測試在行動網路下預估使用 \(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes))，可能產生額外費用或觸發降速。"
+                     + (hardCapGB.map { "\n硬上限 \($0) GB：達到後自動停止吞吐量階段，其餘低流量診斷照常完成。" } ?? "\n未設定硬上限。"))
             }
         Text("測試期間請保持 App 在前景；進入背景會停止並保留已完成的部分。").font(.caption2).foregroundStyle(Theme.textSecondary)
     }
@@ -150,7 +182,47 @@ struct StressTestView: View {
                                           settings: s, onCellular: app.onCellular)
         config.stressPlan = plan
         config.stressWarnings = app.currentNetwork.map(StressTestPlan.warnings(for:)) ?? []
+        config.stressDataLimits = dataLimits
         vm.start(config)
+    }
+
+    @ViewBuilder
+    private func dataLimitCard(traffic: TrafficEstimate) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("流量上限").font(.headline)
+                Spacer()
+                if app.onCellular {
+                    Label("行動數據", systemImage: "antenna.radiowaves.left.and.right").font(.caption).foregroundStyle(Theme.warning)
+                }
+            }
+            capPicker("總量硬上限", selection: $hardCapGB)
+            capPicker("下載上限", selection: $downloadCapGB)
+            capPicker("上傳上限", selection: $uploadCapGB)
+            let limits = dataLimits
+            if let w = limits.warningBytes {
+                KeyValueRow(key: "警告門檻", value: Format.bytes(w) + "（硬上限 80%）", valueColor: Theme.warning)
+            }
+            if let h = limits.hardCapBytes, h < traffic.highBytes {
+                Text("硬上限低於預估流量上緣：部分吞吐量階段可能被略過，結果會標示 dataCapReached。")
+                    .font(.caption2).foregroundStyle(Theme.warning)
+            }
+            Text("達到上限時自動停止吞吐量（下載 / 上傳）階段；延遲、遺失、DNS、協定、IP 版本、路由與 MTU 等低流量診斷仍會完成。")
+                .font(.caption2).foregroundStyle(Theme.textSecondary)
+        }
+        .cardStyle()
+    }
+
+    private func capPicker(_ title: String, selection: Binding<Int?>) -> some View {
+        HStack {
+            Text(title).font(.subheadline)
+            Spacer()
+            Picker(title, selection: selection) {
+                Text("不限").tag(Int?.none)
+                ForEach(StressDataLimits.capPresetsGB, id: \.self) { Text("\($0) GB").tag(Int?.some($0)) }
+            }
+            .pickerStyle(.menu)
+        }
     }
 }
 
@@ -159,6 +231,7 @@ struct StressTestView: View {
 private struct StressProgressHeader: View {
     let vm: RunViewModel
     let estimated: Double
+    let limits: StressDataLimits
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -173,9 +246,32 @@ private struct StressProgressHeader: View {
                 if let p = vm.stressProgress {
                     Text("階段 \(p.phaseIndex) / \(p.phaseCount) · 已用流量 ↓ \(Format.bytes(p.downloadBytes)) ↑ \(Format.bytes(p.uploadBytes))")
                         .font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                    usage(down: p.downloadBytes, up: p.uploadBytes)
                 }
             }
             .cardStyle()
+        }
+    }
+
+    @ViewBuilder
+    private func usage(down: Int64, up: Int64) -> some View {
+        let used = down + up
+        if let cap = limits.hardCapBytes {
+            let reached = used >= cap
+            let warn = limits.warningBytes.map { used >= $0 } ?? false
+            let color = reached ? Theme.critical : (warn ? Theme.warning : Theme.textSecondary)
+            ProgressView(value: min(Double(used) / Double(max(cap, 1)), 1)).tint(reached ? Theme.critical : (warn ? Theme.warning : Theme.accent))
+            Text(reached ? "已達流量硬上限 \(Format.bytes(cap))：吞吐量階段已停止，繼續完成低流量診斷"
+                         : "已用 \(Format.bytes(used)) / 上限 \(Format.bytes(cap))\(warn ? "（已超過警告門檻）" : "")")
+                .font(.caption2.monospacedDigit()).foregroundStyle(color)
+        }
+        if let d = limits.downloadCapBytes {
+            Text("下載 \(Format.bytes(down)) / \(Format.bytes(d))").font(.caption2.monospacedDigit())
+                .foregroundStyle(down >= d ? Theme.critical : Theme.textSecondary)
+        }
+        if let u = limits.uploadCapBytes {
+            Text("上傳 \(Format.bytes(up)) / \(Format.bytes(u))").font(.caption2.monospacedDigit())
+                .foregroundStyle(up >= u ? Theme.critical : Theme.textSecondary)
         }
     }
 
@@ -254,13 +350,14 @@ struct StressResultView: View {
 
     @ViewBuilder
     private func tiles(_ s: StressSummary) -> some View {
-        let dl = Format.speedParts(s.downloadAggregate?.medianMbps, settings: settings.settings)
-        let ul = Format.speedParts(s.uploadAggregate?.medianMbps, settings: settings.settings)
+        let dl = Format.speedParts(s.headlineMbps(.download), settings: settings.settings)
+        let ul = Format.speedParts(s.headlineMbps(.upload), settings: settings.settings)
+        let comparable = [s.downloadAggregate, s.uploadAggregate].compactMap { $0 }.allSatisfy(\.comparable)
         let loaded = [s.loadedLatencyMs(.download), s.loadedLatencyMs(.upload)].compactMap { $0 }.max()
-        let cv = [s.downloadAggregate, s.uploadAggregate].compactMap { $0 }.filter { $0.values.count >= 2 }.compactMap(\.coefficientOfVariation).max()
+        let cv = [s.downloadAggregate, s.uploadAggregate].compactMap { $0 }.filter { $0.values.count >= 2 && $0.comparable }.compactMap(\.coefficientOfVariation).max()
         let large = s.downloadAggregate?.largeVariance == true || s.uploadAggregate?.largeVariance == true
-        MetricTile(title: "持續下載", value: dl.value, unit: dl.unit, caption: "跨節點中位數", symbol: "arrow.down.circle", tint: Theme.download)
-        MetricTile(title: "持續上傳", value: ul.value, unit: ul.unit, caption: "跨節點中位數", symbol: "arrow.up.circle", tint: Theme.upload)
+        MetricTile(title: "持續下載", value: dl.value, unit: dl.unit, caption: Self.headlineCaption(s, .download), symbol: "arrow.down.circle", tint: Theme.download)
+        MetricTile(title: "持續上傳", value: ul.value, unit: ul.unit, caption: Self.headlineCaption(s, .upload), symbol: "arrow.up.circle", tint: Theme.upload)
         MetricTile(title: "下載穩定度", value: Format.number(s.stability(.download), digits: 0), unit: "%",
                    caption: Self.stabilityCaption(s.stabilityUnavailableReason(.download)), symbol: "waveform.path", tint: Theme.download)
         MetricTile(title: "上傳穩定度", value: Format.number(s.stability(.upload), digits: 0), unit: "%",
@@ -273,16 +370,32 @@ struct StressResultView: View {
         MetricTile(title: "僅壓力 ICMP 遺失", value: Format.number(s.lossConfirmation.stressLossPercent, digits: 2), unit: "%",
                    caption: s.lossConfirmation.verdict == .possibleICMPRateLimiting ? "可能為 ICMP 限速" : "50 pps 壓力探測",
                    symbol: "bolt.badge.clock", tint: Theme.warning)
+        let limitedBloat = [s.bufferbloatComparison(.download), s.bufferbloatComparison(.upload)].compactMap { $0 }.contains { $0.quality == .limited }
         MetricTile(title: "Bufferbloat", value: Format.number(s.bufferbloatMs, digits: 0), unit: "ms",
-                   caption: s.bufferbloatMs == nil ? "無有效負載（insufficientLoad）" : "負載 − 閒置（佇列位置未知）",
+                   caption: s.bufferbloatMs == nil ? "無有效負載（insufficientLoad）"
+                       : (limitedBloat ? "比較基準有限（僅供參考）" : "獨立對照探測 · 負載 − 閒置"),
                    symbol: "tray.full", tint: Theme.warning)
-        MetricTile(title: "跨節點一致性", value: cv.map { large ? "差異大" : ($0 < 0.2 ? "一致" : "尚可") } ?? Format.dash,
-                   caption: cv.map { "CV \(Format.number($0, digits: 2))" }, symbol: "square.stack.3d.up", tint: large ? Theme.critical : Theme.accent)
+        if comparable {
+            MetricTile(title: "跨節點一致性", value: cv.map { large ? "差異大" : ($0 < 0.2 ? "一致" : "尚可") } ?? Format.dash,
+                       caption: cv.map { "CV \(Format.number($0, digits: 2))" }, symbol: "square.stack.3d.up", tint: large ? Theme.critical : Theme.accent)
+        } else {
+            let range = s.downloadAggregate.map { "\(Format.number($0.minMbps, digits: 0))–\(Format.number($0.maxMbps, digits: 0))" }
+            MetricTile(title: "跨節點觀察範圍", value: range ?? Format.dash, unit: "Mbps",
+                       caption: "方法不同（HTTP ×16 / NDT7 ×1），不比較一致性", symbol: "square.stack.3d.up", tint: Theme.accent)
+        }
         MetricTile(title: "壓力分數", value: Format.score(s.score), unit: "/100", symbol: "flame", tint: Theme.critical)
         MetricTile(title: "總時間", value: StressProgressHeader.mmss(s.actualSeconds), caption: "設定 \(StressProgressHeader.mmss(s.configuredSeconds))",
                    symbol: "clock", tint: Theme.info)
         MetricTile(title: "總流量", value: Format.bytes(s.totalBytes), caption: "↓ \(Format.bytes(s.totalDownloadBytes)) ↑ \(Format.bytes(s.totalUploadBytes))",
                    symbol: "externaldrive", tint: Theme.info)
+    }
+
+    /// Headline scope: a cross-provider median only when every node used the same method; otherwise
+    /// the primary speed test alone (validation providers are listed in the technical view).
+    static func headlineCaption(_ s: StressSummary, _ direction: TransferDirection) -> String {
+        guard s.headlineScope(direction) == "primary_method" else { return "跨節點中位數" }
+        let name = s.plan.throughputNodes.first { $0.id == s.primaryNodeID }?.name ?? "主要節點"
+        return "主要測速：\(name)"
     }
 
     static func stabilityCaption(_ reason: String?) -> String? {
@@ -339,14 +452,44 @@ struct StressTechnicalView: View {
                     }
                     ForEach([s.downloadAggregate, s.uploadAggregate].compactMap { $0 }, id: \.direction) { a in
                         section("跨業者彙整（\(a.direction == .download ? "下載" : "上傳")）") {
-                            KeyValueRow(key: "平均 / 中位數", value: "\(Format.number(a.meanMbps, digits: 1)) / \(Format.number(a.medianMbps, digits: 1)) Mbps")
+                            KeyValueRow(key: "主要結果", value: "\(Format.number(s.headlineMbps(a.direction), digits: 1)) Mbps（\(s.headlineScope(a.direction))）")
+                            ForEach(a.values, id: \.nodeID) { v in
+                                KeyValueRow(key: "\(v.name)\(v.nodeID == s.primaryNodeID ? "（主要）" : "（驗證）")",
+                                            value: "\(Format.number(v.mbps, digits: 1)) Mbps · \(v.transportProtocol ?? "?") ×\(v.streamCount.map(String.init) ?? "?")")
+                            }
                             KeyValueRow(key: "最小 / 最大", value: "\(Format.number(a.minMbps, digits: 1)) / \(Format.number(a.maxMbps, digits: 1)) Mbps")
-                            KeyValueRow(key: "P10 / P95", value: "\(Format.number(a.p10Mbps, digits: 1)) / \(Format.number(a.p95Mbps, digits: 1)) Mbps")
-                            KeyValueRow(key: "節點間變異數 / CV", value: "\(Format.number(a.variance, digits: 1)) / \(Format.number(a.coefficientOfVariation, digits: 2))")
-                            if a.largeVariance {
+                            if a.comparable {
+                                KeyValueRow(key: "平均 / 中位數", value: "\(Format.number(a.meanMbps, digits: 1)) / \(Format.number(a.medianMbps, digits: 1)) Mbps")
+                                KeyValueRow(key: "P10 / P95", value: "\(Format.number(a.p10Mbps, digits: 1)) / \(Format.number(a.p95Mbps, digits: 1)) Mbps")
+                                KeyValueRow(key: "節點間變異數 / CV", value: "\(Format.number(a.variance, digits: 1)) / \(Format.number(a.coefficientOfVariation, digits: 2))")
+                            } else {
+                                Text("量測方法不同（串流數 / 協定不同），僅列出觀察範圍，不計算跨業者平均、變異與一致性。")
+                                    .font(.caption2).foregroundStyle(Theme.textSecondary)
+                            }
+                            if a.largeVariance && a.comparable {
                                 Text("Large cross-provider throughput variance：不同業者節點速度差異大，可能是路由 / 互連或個別節點容量，而非你的網路上限。")
                                     .font(.caption2).foregroundStyle(Theme.warning)
                             }
+                        }
+                    }
+                    let comparisons = [s.bufferbloatComparison(.download), s.bufferbloatComparison(.upload)].compactMap { $0 }
+                    if !comparisons.isEmpty {
+                        section("Bufferbloat 比較基準") {
+                            ForEach(comparisons, id: \.direction) { c in
+                                KeyValueRow(key: c.direction == .download ? "下載" : "上傳",
+                                            value: "閒置 \(Format.ms(c.idleMedianMs)) → 負載 \(Format.ms(c.loadedMedianMs))（+\(Format.number(c.increaseMs, digits: 0)) ms）")
+                                KeyValueRow(key: "探測", value: "\(c.probe.method) · \(c.probe.protocolName) · \(c.probe.ipFamily) · 樣本 \(c.idleSampleCount)/\(c.loadedSampleCount)")
+                                KeyValueRow(key: "比較品質", value: c.quality == .full ? "full（同方法、同目標、目標未負載）" : "limited（僅供參考）",
+                                            valueColor: c.quality == .full ? Theme.textPrimary : Theme.warning)
+                            }
+                        }
+                    }
+                    if let limits = s.dataLimits, limits.isLimited {
+                        section("流量上限") {
+                            KeyValueRow(key: "硬上限", value: limits.hardCapBytes.map(Format.bytes) ?? "不限")
+                            KeyValueRow(key: "下載 / 上傳上限", value: "\(limits.downloadCapBytes.map(Format.bytes) ?? "不限") / \(limits.uploadCapBytes.map(Format.bytes) ?? "不限")")
+                            KeyValueRow(key: "是否達到上限", value: s.dataCapReached == true ? "是（吞吐量階段已停止）" : "否",
+                                        valueColor: s.dataCapReached == true ? Theme.warning : Theme.textPrimary)
                         }
                     }
                     section("封包遺失（壓力 vs 對照）") {

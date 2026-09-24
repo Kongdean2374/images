@@ -111,7 +111,7 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
         let timeline = tests.flatMap { anomalyDetector.timelineEvents($0.result) }
         let anomalies = analysis.evidence.baselineComparisons.flatMap(\.anomalies)
         let top = analysis.mostLikely
-        let summary = top.map { "\(session.tests.count) 項測試。最可能原因：\($0.title)（信心 \($0.confidencePercent)%）。" }
+        let summary = top.map { "\(session.tests.count) 項測試。最可能原因（推論）：\($0.title)（證據分數 \($0.evidenceScore)/100，信心區間 \($0.confidenceBand.displayName)；非機率）。" }
             ?? "\(session.tests.count) 項測試。未找到信心足夠的單一原因。"
 
         return DiagnosticReport(
@@ -304,12 +304,12 @@ public struct DiagnosticReportGenerator: DiagnosticReportGenerating {
             .map(\.rawValue).sorted().joined(separator: ", "))
 
         h("9. Diagnostic hypotheses")
-        for group in [Likelihood.likely, .possible, .insufficientEvidence, .notTested, .unlikely] {
+        for group in [Likelihood.supported, .likely, .possible, .insufficientEvidence, .notTested, .noEvidence, .unlikely, .broadIssueUnlikely] {
             let hs = report.analysis.hypotheses.filter { $0.likelihood == group }
             guard !hs.isEmpty else { continue }
             out.append("### \(group.displayName)")
             for hyp in hs {
-                out.append("* \(hyp.title) — status: \(hyp.likelihood.rawValue) — confidence \(hyp.confidencePercent)% — layer: \(hyp.layer.displayName)")
+                out.append("* \(hyp.title) — status: \(hyp.likelihood.rawValue) — claim_type: hypothesis — evidence_score_0_100: \(hyp.evidenceScore) — confidence_band: \(hyp.confidenceBand.rawValue) (uncalibrated, not a probability) — layer: \(hyp.layer.displayName)")
                 if let reason = hyp.statusReason { out.append("  status reason: \(reason)") }
                 out.append("  why: \(hyp.explanation)")
                 for e in hyp.supportingEvidence { out.append("  + \(e.statement)") }

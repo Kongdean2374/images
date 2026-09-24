@@ -55,6 +55,25 @@ public struct NDT7SpeedTestEngine: SpeedTestEngineProtocol {
         throw EngineError.server("M-Lab Locate 沒有可用節點")
     }
 
+    struct Measurement: Decodable {
+        struct App: Decodable { var NumBytes: Int64?; var ElapsedTime: Int64? }
+        struct TCP: Decodable { var BytesReceived: Int64?; var ElapsedTime: Int64? }
+        var AppInfo: App?
+        var TCPInfo: TCP?
+    }
+
+    /// Receiver-side progress from an NDT7 measurement message (ElapsedTime in µs).
+    public static func serverSample(from text: String) -> ServerByteSample? {
+        guard let m = try? JSONDecoder().decode(Measurement.self, from: Data(text.utf8)) else { return nil }
+        if let bytes = m.AppInfo?.NumBytes, let us = m.AppInfo?.ElapsedTime {
+            return ServerByteSample(offset: Double(us) / 1_000_000, bytes: bytes)
+        }
+        if let bytes = m.TCPInfo?.BytesReceived, let us = m.TCPInfo?.ElapsedTime {
+            return ServerByteSample(offset: Double(us) / 1_000_000, bytes: bytes)
+        }
+        return nil
+    }
+
     public func run(_ c: SpeedTestConfiguration) -> AsyncThrowingStream<SpeedTestEvent, Error> {
         makeCancellableStream { continuation in
             let target = try await Self.locate(c.server.baseURL)
@@ -68,6 +87,7 @@ public struct NDT7SpeedTestEngine: SpeedTestEngineProtocol {
             ws.resume()
 
             let counter = ByteCounter()
+            let serverSamples = LockedValue<[ServerByteSample]>([])
             let finished = LockedValue<Error?>(nil)
             let ioDone = LockedValue(false)
             let direction = c.direction
@@ -83,7 +103,16 @@ public struct NDT7SpeedTestEngine: SpeedTestEngineProtocol {
                         }
                     } else {
                         // Drain server measurement messages so they never back up.
-                        let drain = Task { while !Task.isCancelled { _ = try? await ws.receive() } }
+                        // Server measurement messages carry receiver-side byte counts (AppInfo.NumBytes):
+                        // record them — they are not affected by client write-completion batching.
+                        let drain = Task {
+                            while !Task.isCancelled {
+                                guard let message = try? await ws.receive() else { break }
+                                if case .string(let text) = message, let sample = NDT7SpeedTestEngine.serverSample(from: text) {
+                                    serverSamples.withLock { $0.append(sample) }
+                                }
+                            }
+                        }
                         defer { drain.cancel() }
                         let payload = UploadPayload.make(bytes: 1 << 20)
                         var size = 1 << 13
@@ -142,6 +171,13 @@ public struct NDT7SpeedTestEngine: SpeedTestEngineProtocol {
             }
             d.perStreamBytes = [counter.total]
             result.diagnostics = d
+            if c.direction == .upload {
+                result.measurementSource = "client_write_completion (WebSocket send)"
+                result.serverConfirmed = ServerConfirmedThroughput.make(source: "ndt7_server_measurement (AppInfo.NumBytes / TCPInfo.BytesReceived)",
+                                                                        samples: serverSamples.current)
+            } else {
+                result.measurementSource = "client_bytes_received (WebSocket)"
+            }
             result.validity = TransferValidator.evaluate(result)
             continuation.yield(.completed(result))
         }

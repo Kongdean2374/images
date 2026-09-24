@@ -173,13 +173,14 @@ final class ExtremeFullTestTests: XCTestCase {
 }
 
 final class StressTestRunnerTests: XCTestCase {
-    func run(_ runner: TestRunner, seconds: Double = 300) async throws -> (TestResult, [StressProgress]) {
+    func run(_ runner: TestRunner, seconds: Double = 300, limits: StressDataLimits = .unlimited) async throws -> (TestResult, [StressProgress]) {
         let nodes = TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn)
         var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: ServerDescriptor.builtIn,
                                           settings: AppSettings(), onCellular: false)
         config.stressPlan = StressTestPlan.make(totalSeconds: seconds, nodes: nodes)
         config.stressWarnings = ["test warning"]
         config.stressTimeScale = 0.001
+        config.stressDataLimits = limits
         var final: TestResult?
         var progress: [StressProgress] = []
         for try await e in runner.run(config) {
@@ -237,6 +238,37 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertEqual(s.lossConfirmation.verdict, .possibleICMPRateLimiting)
         XCTAssertEqual(r.metrics.lossPercent ?? -1, 0, accuracy: 1e-9)
         XCTAssertFalse(r.findings.contains { $0.code == .severePacketLoss || $0.code == .moderatePacketLoss })
+    }
+
+    /// Mobile-data hard cap: throughput phases stop, low-data diagnostics still complete.
+    func testHardCapStopsThroughputButFinishesDiagnostics() async throws {
+        let (r, _) = try await run(TestRunner.mock(sampleDelay: 0), limits: StressDataLimits(warningBytes: 1, hardCapBytes: 1))
+        let s = try XCTUnwrap(r.stress)
+        XCTAssertEqual(s.dataCapReached, true)
+        XCTAssertEqual(s.dataLimits?.hardCapBytes, 1)
+        XCTAssertLessThan(s.transfers.count, 8, "transfers after the cap are skipped")
+        XCTAssertTrue(s.phases.contains { $0.note == "skipped: dataCapReached" })
+        XCTAssertNotNil(r.dns); XCTAssertNotNil(r.traceroute); XCTAssertNotNil(r.monitoring)
+        XCTAssertTrue(Set(s.phases.map(\.kind)).isSuperset(of: [.packetLossStress, .dnsProtocols, .ipFamilies, .routeMTU]))
+        XCTAssertTrue(r.notes.contains { $0.contains("已達流量上限") })
+        let text = RawDataExporter.text(r, analysis: nil, appVersion: "2.2.0", platform: "iOS")
+        XCTAssertTrue(text.contains("data_cap_reached=true"))
+        XCTAssertTrue(text.contains("data_hard_cap_bytes=1"))
+    }
+
+    func testUnlimitedRunNeverReportsCap() async throws {
+        let (r, _) = try await run(TestRunner.mock(sampleDelay: 0), seconds: 60)
+        XCTAssertNotEqual(r.stress?.dataCapReached, true)
+    }
+
+    func testNDT7ServerSampleParsing() {
+        let s = NDT7SpeedTestEngine.serverSample(from: #"{"AppInfo":{"NumBytes":1250000,"ElapsedTime":2000000},"Origin":"server"}"#)
+        XCTAssertEqual(s?.bytes, 1_250_000)
+        XCTAssertEqual(s?.offset ?? 0, 2, accuracy: 1e-9)
+        let tcp = NDT7SpeedTestEngine.serverSample(from: #"{"TCPInfo":{"BytesReceived":500,"ElapsedTime":500000}}"#)
+        XCTAssertEqual(tcp?.bytes, 500)
+        XCTAssertNil(NDT7SpeedTestEngine.serverSample(from: "not json"))
+        XCTAssertNil(NDT7SpeedTestEngine.serverSample(from: #"{"ConnectionInfo":{}}"#))
     }
 
     func testCancellation() async throws {

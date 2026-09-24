@@ -84,14 +84,15 @@ final class RootCauseRuleTests: XCTestCase {
     func testIPv6OnlyDegradationIsIPv6Routing() {
         let a = analyze([.onWiFi, .ipv6DegradedOnly], interface: .wifi)
         XCTAssertEqual(hyp(a, .ipv6RoutingIssue).likelihood, .likely)
-        XCTAssertEqual(hyp(a, .ipv4RoutingIssue).likelihood, .ruledOut)
+        // One IPv4 comparison only covers the broad form: never ruledOut.
+        XCTAssertEqual(hyp(a, .ipv4RoutingIssue).likelihood, .broadIssueUnlikely)
         XCTAssertEqual(a.mostLikely?.cause, .ipv6RoutingIssue)
     }
 
     func testEquivalentFamiliesRuleOutBoth() {
         let a = analyze([.onWiFi, .ipFamiliesEquivalent], interface: .wifi)
-        XCTAssertEqual(hyp(a, .ipv6RoutingIssue).likelihood, .ruledOut)
-        XCTAssertEqual(hyp(a, .ipv4RoutingIssue).likelihood, .ruledOut)
+        XCTAssertEqual(hyp(a, .ipv6RoutingIssue).likelihood, .broadIssueUnlikely)
+        XCTAssertEqual(hyp(a, .ipv4RoutingIssue).likelihood, .broadIssueUnlikely)
     }
 
     func testWiFiNormalCellularDegradedLowersDeviceAndWiFi() {
@@ -161,9 +162,9 @@ final class RootCauseRuleTests: XCTestCase {
     func testBufferbloat() {
         // The extractor always emits the measured condition together with the > 100 ms code.
         let a = analyze([.onWiFi, .loadedLatencyInflationObserved, .uploadBufferbloat, .idleLatencyLow], interface: .wifi)
-        XCTAssertEqual(hyp(a, .loadedLatencyInflation).likelihood, .likely)
+        XCTAssertEqual(hyp(a, .loadedLatencyInflation).likelihood, .supported)
         let moderate = analyze([.onWiFi, .loadedLatencyInflationObserved], interface: .wifi)
-        XCTAssertEqual(hyp(moderate, .loadedLatencyInflation).likelihood, .possible, "a measured ~90 ms rise is never 'unlikely'")
+        XCTAssertEqual(hyp(moderate, .loadedLatencyInflation).likelihood, .supported, "a measured ~90 ms rise is an observed condition")
     }
 
     func testDNS() {
@@ -194,6 +195,8 @@ final class RootCauseRuleTests: XCTestCase {
     func testMTU() {
         // One normal IPv4 path = "no issue observed on the tested path", not a global exclusion.
         XCTAssertEqual(hyp(analyze([.onWiFi, .mtuNormal], interface: .wifi), .mtuTunnelIssue).likelihood, .unlikely)
+        XCTAssertEqual(hyp(analyze([.onWiFi, .pathMTUObserved], interface: .wifi), .mtuTunnelIssue).likelihood, .unlikely)
+        XCTAssertNotEqual(hyp(analyze([.onWiFi, .pathMTUObserved], interface: .wifi), .mtuTunnelIssue).likelihood, .ruledOut)
         XCTAssertNotEqual(hyp(analyze([.onWiFi, .mtuReduced], interface: .wifi), .mtuTunnelIssue).likelihood, .ruledOut)
     }
 
@@ -423,7 +426,7 @@ final class EvidenceExtractorTests: XCTestCase {
         let c = codes(Fixture.result(.wifi, latency: 11, jitter: 137, loss: 8, burst: true))
         XCTAssertTrue(c.isSuperset(of: [.idleLatencyLow, .jitterHigh, .lossHigh, .lossSevere, .lossBursty]))
         let clean = codes(Fixture.result(.wifi, latency: 150, jitter: 1, loss: 0))
-        XCTAssertTrue(clean.isSuperset(of: [.idleLatencyHigh, .jitterLow, .lossNone]))
+        XCTAssertTrue(clean.isSuperset(of: [.idleLatencyHigh, .jitterLow, .noConfirmedGeneralLoss]))
     }
 
     func testBufferbloatEvidence() {

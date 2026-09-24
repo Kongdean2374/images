@@ -163,6 +163,15 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
         self.ipFamilyPreference = .automatic
     }
 
+    /// Whole-series spike analysis of the monitoring samples. The pre-load idle baseline is used
+    /// only when it was measured with the same probe and target (stress test reference path);
+    /// otherwise the series is its own baseline (never compare different probe methods).
+    public var monitoringSpikeSummary: SpikeSummary? {
+        guard let monitoring else { return nil }
+        let sameProbe = kind == .extremeStressTest
+        return SpikeAnalyzer.analyze(monitoring.samples, baseline: sameProbe ? idleLatency : nil)
+    }
+
     /// Flattens the result for the Score / Diagnostics engines.
     public var metrics: MetricSnapshot {
         var m = MetricSnapshot()
@@ -212,6 +221,7 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
             m.negotiatedHTTP = probe.http?.negotiatedProtocol
             m.http3Supported = probe.http3Negotiated
             m.quicReachable = probe.quicReachable
+            m.http3ProbeHost = probe.host
             m.tlsHandshakeMs = probe.http?.tlsMs
             m.ttfbMs = probe.http?.ttfbMs
         }
@@ -219,8 +229,8 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
         if let stress {
             // Stress: cross-provider medians of valid transfers, reliable stability only, confirmed
             // (multi-probe) loss and loaded latency from transfers that really loaded the link.
-            m.downloadMbps = stress.downloadAggregate?.medianMbps
-            m.uploadMbps = stress.uploadAggregate?.medianMbps
+            m.downloadMbps = stress.headlineMbps(.download)
+            m.uploadMbps = stress.headlineMbps(.upload)
             m.downloadPeakMbps = stress.downloadAggregate?.maxMbps
             m.downloadStability = stress.stability(.download)
             m.uploadStability = stress.stability(.upload)
@@ -229,7 +239,7 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
             m.uploadBloatMs = stress.loadedLatencyIncreaseMs(.upload)
         }
         if let monitoring {
-            m.spikeCount = monitoring.spikes.count
+            m.spikeCount = max(monitoring.spikes.count, monitoringSpikeSummary?.count ?? 0)
             m.dropCount = monitoring.drops.count
             m.sampleDurationSeconds = monitoring.samples.last?.offset
         } else if let gaming {

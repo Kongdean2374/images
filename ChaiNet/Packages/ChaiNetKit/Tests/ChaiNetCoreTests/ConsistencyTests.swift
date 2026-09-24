@@ -101,7 +101,11 @@ final class ReportConsistencyTests: XCTestCase {
         let r = report(scenarios()[1])
         let mtu = r.analysis.hypotheses.first { $0.cause == .mtuTunnelIssue }!
         XCTAssertNotEqual(mtu.likelihood, .ruledOut)
-        XCTAssertTrue(r.analysis.evidence.evidence.first { $0.code == .mtuNormal }!.statement.contains("noIssueObservedOnTestedPath"))
+        // v2.2: no global "mtuNormal"; the observation is scoped to the tested IPv4 path.
+        XCTAssertFalse(r.analysis.evidence.codes.contains(.mtuNormal))
+        let observed = r.analysis.evidence.evidence.first { $0.code == .pathMTUObserved }!
+        XCTAssertTrue(observed.statement.contains("observed_path_mtu_ipv4="))
+        XCTAssertTrue(observed.statement.contains("mtu_blackhole_evidence=false"))
     }
 
     func testUnavailableInterfaceIsListedAsNotTested() {

@@ -195,7 +195,7 @@ final class RawDataExporterTests: XCTestCase {
     func testTextContainsEveryRawSampleAndIsEnglish() {
         let r = sample()
         let text = RawDataExporter.text(r, analysis: RawDataExporter.analysis(for: r), appVersion: "2.0.0", platform: "iOS 26")
-        XCTAssertTrue(text.hasPrefix("ChaiNet Raw Data Export v1"))
+        XCTAssertTrue(text.hasPrefix("ChaiNet Raw Data Export v2"))
         for section in ["[meta]", "[full_test_plan]", "[environment]", "[download]", "[upload]", "[latency_idle]", "[root_cause_hypotheses]",
                         "[raw.download_samples_100ms]", "[raw.upload_samples_100ms]", "[raw.idle_latency]", "[raw.packet_loss_probe]"] {
             XCTAssertTrue(text.contains(section), section)

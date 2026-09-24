@@ -99,13 +99,15 @@ final class LossConfirmationTests: XCTestCase {
 
     func testMultiProbeLossIsConfirmed() {
         let c = LossConfirmation.evaluate(stress: Self.probe("s", loss: 6, stress: true), controls: [Self.probe("a", loss: 4), Self.probe("b", loss: 5), Self.probe("c", loss: 0)])
-        XCTAssertEqual(c.verdict, .confirmedLoss)
+        XCTAssertEqual(c.verdict, .confirmedGeneralPacketLoss)
         XCTAssertEqual(c.confirmedLossPercent!, 4, accuracy: 1e-9, "median of controls")
     }
 
-    func testSingleLossyControlIsInconclusive() {
+    func testSingleLossyControlIsEndpointSpecific() {
         let c = LossConfirmation.evaluate(stress: Self.probe("s", loss: 0, stress: true), controls: [Self.probe("a", loss: 10), Self.probe("b", loss: 0), Self.probe("c", loss: 0)])
-        XCTAssertEqual(c.verdict, .inconclusive)
+        XCTAssertEqual(c.verdict, .endpointSpecificLossObserved)
+        XCTAssertEqual(c.affectedTargets, ["a"])
+        XCTAssertEqual(c.cleanTargets, ["b", "c"])
         XCTAssertEqual(c.confirmedLossPercent!, 0, accuracy: 1e-9)
     }
 
@@ -116,7 +118,7 @@ final class LossConfirmationTests: XCTestCase {
     }
 
     func testNoLoss() {
-        XCTAssertEqual(LossConfirmation.evaluate(stress: Self.probe("s", loss: 0, stress: true), controls: [Self.probe("a", loss: 0), Self.probe("b", loss: 0)]).verdict, .noLoss)
+        XCTAssertEqual(LossConfirmation.evaluate(stress: Self.probe("s", loss: 0, stress: true), controls: [Self.probe("a", loss: 0), Self.probe("b", loss: 0)]).verdict, .noConfirmedGeneralPacketLoss)
     }
 }
 

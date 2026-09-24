@@ -166,6 +166,8 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
         let summary = SpeedCalculator.summarize(samples: samples, streamChanges: changes, warmupDuration: c.warmupDuration)
         var result = SpeedResult(direction: c.direction, samples: samples, summary: summary, streamChanges: changes, wasCancelled: false)
         result.diagnostics = collector.snapshot(perStreamBytes: streams.current.map(\.bytes))
+        result.measurementSource = c.direction == .download
+            ? "client_bytes_received (URLSessionDataDelegate)" : "client_write_completion (URLSessionTaskDelegate didSendBodyData)"
         result.validity = TransferValidator.evaluate(result)
         return result
     }

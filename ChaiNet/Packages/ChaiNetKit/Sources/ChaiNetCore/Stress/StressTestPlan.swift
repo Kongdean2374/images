@@ -147,6 +147,44 @@ public struct TrafficEstimate: Codable, Sendable, Hashable {
     public var assumedDownloadMbps: Double
     public var assumedUploadMbps: Double
     public var totalBytes: Int64 { downloadBytes + uploadBytes }
+    /// Range shown to the user: real rates vary, so ±30 % around the point estimate.
+    public var lowBytes: Int64 { Int64(Double(totalBytes) * 0.7) }
+    public var highBytes: Int64 { Int64(Double(totalBytes) * 1.3) }
+}
+
+/// Mobile-data safety limits for the stress test (all optional; nil = no limit).
+///
+/// * `warningBytes` — UI turns amber past this total.
+/// * `hardCapBytes` — once reached, remaining throughput phases are skipped (the running transfer
+///   is capped via `byteCap`); low-data diagnostics (latency, loss, DNS, protocols, route) still run.
+/// * `downloadCapBytes` / `uploadCapBytes` — the same per direction.
+public struct StressDataLimits: Codable, Sendable, Hashable {
+    public var warningBytes: Int64?
+    public var hardCapBytes: Int64?
+    public var downloadCapBytes: Int64?
+    public var uploadCapBytes: Int64?
+
+    public init(warningBytes: Int64? = nil, hardCapBytes: Int64? = nil, downloadCapBytes: Int64? = nil, uploadCapBytes: Int64? = nil) {
+        self.warningBytes = warningBytes
+        self.hardCapBytes = hardCapBytes
+        self.downloadCapBytes = downloadCapBytes
+        self.uploadCapBytes = uploadCapBytes
+    }
+
+    public static let unlimited = StressDataLimits()
+    public static let gigabyte: Int64 = 1_000_000_000
+    public static let capPresetsGB: [Int] = [2, 5, 10, 20, 50]
+
+    /// Remaining bytes a transfer in `direction` may use; nil = unlimited, ≤ 0 = cap reached.
+    public func remaining(_ direction: TransferDirection, down: Int64, up: Int64) -> Int64? {
+        var caps: [Int64] = []
+        if let h = hardCapBytes { caps.append(h - down - up) }
+        if direction == .download, let d = downloadCapBytes { caps.append(d - down) }
+        if direction == .upload, let u = uploadCapBytes { caps.append(u - up) }
+        return caps.min()
+    }
+
+    public var isLimited: Bool { hardCapBytes != nil || downloadCapBytes != nil || uploadCapBytes != nil }
 }
 
 /// Extreme Stress Test plan. The user only picks the total duration; intensity never changes.

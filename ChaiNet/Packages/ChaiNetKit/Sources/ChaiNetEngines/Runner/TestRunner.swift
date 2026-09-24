@@ -60,6 +60,8 @@ public struct TestRunConfiguration: Sendable {
     public var stressPlan: StressTestPlan?
     /// Pre-start warnings (Low Data Mode, metered, VPN…) — recorded, never reduce intensity.
     public var stressWarnings: [String] = []
+    /// Mobile-data safety limits (hard cap / per-direction caps / warning).
+    public var stressDataLimits: StressDataLimits = .unlimited
     /// Multiplies phase durations / probe counts (tests only; 1 in the app).
     public var stressTimeScale: Double = 1
 

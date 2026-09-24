@@ -50,6 +50,12 @@ public struct HypothesisModel: Sendable {
     /// While any of these is present the hypothesis can't be ruled out (e.g. an unexplained
     /// invalid server transfer keeps "server / route specific" open whatever other checks say).
     public var ruleOutBlockedBy: Set<EvidenceCode> = []
+    /// The ruling-out controls only cover the *broad* form of this cause (one target / one
+    /// transport): ruling-out evidence yields `.broadIssueUnlikely`, never `.ruledOut`.
+    public var scopedRuleOut: Bool = false
+    /// When this measured condition is present the hypothesis is `.supported` (the condition is a
+    /// fact; its mechanism / location stays a hypothesis).
+    public var observedCondition: EvidenceCode?
 
     public static let incompleteCap = 0.6
     public static let defaultPrior = -1.5
@@ -66,7 +72,7 @@ public enum HypothesisCatalog {
             prior: HypothesisModel.defaultPrior,
             weights: [.jitterHigh: 0.8, .lossRandom: 0.8, .lossHigh: 0.4, .possibleICMPRateLimiting: -0.3, .latencySpikesFrequent: 0.7, .downloadUnstable: 0.5,
                       .uploadUnstable: 0.3, .cellularNormalWifiDegraded: 2.0, .allServersAnomalous: 0.4, .multipleServersAnomalous: 0.3,
-                      .singleServerAnomalous: -1.5, .jitterLow: -1.0, .lossNone: -0.6, .deviatesFromBaseline: 0.4, .matchesBaseline: -0.4],
+                      .singleServerAnomalous: -1.5, .jitterLow: -1.0, .lossNone: -0.6, .noConfirmedGeneralLoss: -0.6, .deviatesFromBaseline: 0.4, .matchesBaseline: -0.4],
             ruledOutBy: [.wifiNormalCellularDegraded], requiresAny: [.onWiFi], notApplicableWhen: [], requirement: "Wi-Fi 測試",
             scope: .fixed, requiredDimensions: [.latency, .loss], confidenceCap: 0.85,
             verificationTests: [.moveCloserToRouter, .repeatOnCellular, .runContinuousMonitor], limitations: [noWiFiRSSI]),
@@ -88,12 +94,13 @@ public enum HypothesisCatalog {
             prior: HypothesisModel.defaultPrior,
             // The measured condition (≥ 30 ms rise on a valid load) carries the weight; > 100 ms codes are
             // the same measurement, so they only add a severity increment (no double counting).
-            weights: [.loadedLatencyInflationObserved: 2.0, .downloadBufferbloat: 0.3, .uploadBufferbloat: 0.3, .idleLatencyLow: 0.3,
+            weights: [.loadedLatencyInflationObserved: 2.0, .loadedLatencyRiseLimitedComparison: 1.2, .downloadBufferbloat: 0.3, .uploadBufferbloat: 0.3, .idleLatencyLow: 0.3,
                       .jitterHigh: 0.3, .slowPostLoadRecovery: 0.5],
             ruledOutBy: [.noBufferbloat], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.bufferbloat], confidenceCap: 0.95,
             verificationTests: [.runBufferbloatTest, .repeatOnWiFi, .repeatOnCellular, .repeatAtDifferentTime],
-            limitations: ["iPhone 端無法確認佇列位於哪一跳（device/modem、radio scheduler、access、carrier/core、router、remote path 皆有可能）；需以不同網路 / 不同時段比較來縮小範圍。"]),
+            limitations: ["iPhone 端無法確認佇列位於哪一跳（device/modem、radio scheduler、access、carrier/core、router、remote path 皆有可能）；需以不同網路 / 不同時段比較來縮小範圍。"],
+            observedCondition: .loadedLatencyInflationObserved),
 
         HypothesisModel(
             cause: .fixedLineUplinkCongestion, layer: .accessLink, title: "固網上行壅塞",
@@ -110,7 +117,7 @@ public enum HypothesisCatalog {
             cause: .asymmetricPlanLimit, layer: .accessLink, title: "方案上行頻寬限制（正常現象）",
             explanation: "上行穩定但遠低於下行，且沒有遺失或排隊延遲，較符合 ISP 方案本身的上下行不對稱，而不是故障。",
             prior: HypothesisModel.defaultPrior,
-            weights: [.asymmetricRatio: 1.0, .uploadStable: 1.5, .lossNone: 0.5, .noBufferbloat: 0.3, .onCellular: -0.5,
+            weights: [.asymmetricRatio: 1.0, .uploadStable: 1.5, .lossNone: 0.5, .noConfirmedGeneralLoss: 0.5, .noBufferbloat: 0.3, .onCellular: -0.5,
                       .uploadUnstable: -1.5, .lossHigh: -1.0, .uploadBufferbloat: -0.5, .deviatesFromBaseline: -1.0, .matchesBaseline: 0.5],
             ruledOutBy: [], requiresAny: [.asymmetricRatio, .uploadLow, .uploadVeryLow], notApplicableWhen: [.uploadNormal],
             requirement: "上傳頻寬測試",
@@ -137,7 +144,7 @@ public enum HypothesisCatalog {
             prior: HypothesisModel.defaultPrior,
             weights: [.uploadVeryLow: 1.0, .uploadUnstable: 0.8, .downloadUnstable: 0.5, .lossHigh: 0.7, .lossBursty: 0.5,
                       .jitterHigh: 0.5, .allServersAnomalous: 0.5, .wifiNormalCellularDegraded: 0.7, .downloadLow: 0.5,
-                      .singleServerAnomalous: -1.5, .uploadStable: -0.8, .lossNone: -0.8, .cellularNormalWifiDegraded: -2.5],
+                      .singleServerAnomalous: -1.5, .uploadStable: -0.8, .lossNone: -0.8, .noConfirmedGeneralLoss: -0.8, .cellularNormalWifiDegraded: -2.5],
             ruledOutBy: [], requiresAny: [.onCellular], notApplicableWhen: [], requirement: "行動網路測試",
             scope: .cellular, requiredDimensions: [.throughput, .loss], confidenceCap: 0.65,
             verificationTests: [.repeatOnLTE, .restartDeviceNetwork], limitations: [noRadioMetrics]),
@@ -178,9 +185,12 @@ public enum HypothesisCatalog {
             cause: .serverOrRouteSpecific, layer: .server, title: "特定伺服器或其路由異常",
             explanation: "只有單一伺服器異常而其他獨立端點正常，問題位於該伺服器或通往它的路徑，而不是你的網路。",
             prior: HypothesisModel.defaultPrior,
+            // Normal latency on some servers can't exclude one endpoint / path: allServersNormal only
+            // lowers the score. Every server anomalous (a general problem) is the orthogonal control.
             weights: [.singleServerAnomalous: 2.5, .regionSpecificAnomaly: 1.0, .serverUnhealthy: 1.5, .ttfbSlow: 0.5,
-                      .serverTransferInvalid: 1.5, .multipleServersAnomalous: -1.0, .serverHealthy: -0.3],
-            ruledOutBy: [.allServersAnomalous, .allServersNormal], requiresAny: [], notApplicableWhen: [],
+                      .serverTransferInvalid: 1.5, .endpointSpecificLossObserved: 1.2, .multipleServersAnomalous: -1.0,
+                      .serverHealthy: -0.3, .allServersNormal: -1.5],
+            ruledOutBy: [.allServersAnomalous], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.crossServer], confidenceCap: 0.9,
             verificationTests: [.testAlternateServers, .runTraceroute], limitations: [],
             ruleOutBlockedBy: [.serverTransferInvalid]),
@@ -213,7 +223,17 @@ public enum HypothesisCatalog {
             weights: [.ipv6DegradedOnly: 3.0, .alternateIPv6ResolverDegraded: 0.6],
             ruledOutBy: [.ipFamiliesEquivalent, .ipv4DegradedOnly], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.ipFamily], confidenceCap: 0.9,
-            verificationTests: [.compareIPFamilies, .runTraceroute, .contactProvider], limitations: ["路由追蹤目前僅支援 IPv4。"]),
+            verificationTests: [.compareIPFamilies, .runTraceroute, .contactProvider], limitations: ["路由追蹤目前僅支援 IPv4。"],
+            scopedRuleOut: true),
+
+        HypothesisModel(
+            cause: .ipv6SpecificPathIssue, layer: .routing, title: "特定 IPv6 路徑 / 傳輸異常（例如某 IPv6 DNS 解析器）",
+            explanation: "單一 IPv6 目標或傳輸（例如 UDP 53 到某 IPv6 解析器）出現失敗或高延遲，但其他 IPv6 目標正常；問題侷限於該路徑而非整體 IPv6。",
+            prior: HypothesisModel.defaultPrior,
+            weights: [.alternateIPv6ResolverDegraded: 2.0, .ipv6DegradedOnly: 1.0, .ipv6Unavailable: 0.5],
+            ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
+            scope: .all, requiredDimensions: [], confidenceCap: 0.8,
+            verificationTests: [.runDNSBenchmark, .compareIPFamilies], limitations: ["只測到少數 IPv6 目標；無法代表所有 IPv6 路徑。"]),
 
         HypothesisModel(
             cause: .ipv4RoutingIssue, layer: .routing, title: "IPv4 路徑異常（CGNAT / IPv4 路由）",
@@ -222,7 +242,8 @@ public enum HypothesisCatalog {
             weights: [.ipv4DegradedOnly: 3.0],
             ruledOutBy: [.ipFamiliesEquivalent, .ipv6DegradedOnly], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.ipFamily], confidenceCap: 0.9,
-            verificationTests: [.compareIPFamilies, .runTraceroute], limitations: []),
+            verificationTests: [.compareIPFamilies, .runTraceroute], limitations: ["IPv4 / IPv6 比較只針對單一目標。"],
+            scopedRuleOut: true),
 
         HypothesisModel(
             cause: .dnsResolverIssue, layer: .application, title: "DNS 解析器緩慢或失敗",
@@ -231,7 +252,8 @@ public enum HypothesisCatalog {
             // One healthy system-resolver median never rules DNS out globally: it lowers confidence,
             // while tail latency and degraded alternate resolvers keep the question open.
             weights: [.dnsSlow: 2.0, .dnsFailures: 2.5, .dnsHighTailLatency: 0.8, .dnsHighTailLatencyObserved: 0.8,
-                      .alternateIPv6ResolverDegraded: 0.3, .systemDNSHealthy: -1.5, .dnsHealthy: -1.5],
+                      .alternateIPv6ResolverDegraded: 0.3, .dnsTransportSpecificIssue: 0.8, .dnsDomainSpecificOutlier: -0.3,
+                      .systemDNSHealthy: -1.5, .dnsHealthy: -1.5],
             ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.dns], confidenceCap: 0.9,
             verificationTests: [.runDNSBenchmark], limitations: []),
@@ -259,7 +281,7 @@ public enum HypothesisCatalog {
             cause: .mtuTunnelIssue, layer: .accessLink, title: "MTU / 通道封裝問題",
             explanation: "路徑 MTU 偏小（VPN、PPPoE、行動網路通道）可能導致大封包遺失或 TLS 交握異常。",
             prior: HypothesisModel.defaultPrior,
-            weights: [.mtuReduced: 1.5, .tlsSlow: 0.5, .vpnActive: 0.3, .mtuNormal: -2.0],
+            weights: [.mtuReduced: 1.5, .tlsSlow: 0.5, .vpnActive: 0.3, .mtuNormal: -2.0, .pathMTUObserved: -1.0],
             ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.mtu], confidenceCap: 0.8,
             verificationTests: [.runMTUTest], limitations: ["MTU 測試僅支援 IPv4 ICMP、僅代表受測路徑；其他目的地或 IPv6 路徑可能不同。"]),

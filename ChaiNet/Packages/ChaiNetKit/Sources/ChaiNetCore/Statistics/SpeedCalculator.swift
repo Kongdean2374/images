@@ -94,6 +94,8 @@ public struct SpeedSummary: Codable, Sendable, Hashable {
     public var reliableMinimumMbps: Double? { shortWindowReliable ? minimumMbps : nil }
     public var reliablePeakMbps: Double? { shortWindowReliable ? peakMbps : nil }
     public var reliableStabilityScore: Double? { shortWindowReliable ? stability.score : nil }
+    public var reliableP95Mbps: Double? { shortWindowReliable ? p95Mbps : nil }
+    public var reliableMedianMbps: Double? { shortWindowReliable ? medianMbps : nil }
     public var reliableDropCount: Int? { shortWindowReliable ? stability.dropCount : nil }
     /// "measurementSamplingArtifact" when stability is unavailable because of batching.
     public var stabilityUnavailableReason: String? { shortWindowReliable ? nil : "measurementSamplingArtifact" }
@@ -126,8 +128,17 @@ public struct SpeedResult: Codable, Sendable, Hashable {
     public var diagnostics: TransferDiagnostics?
     /// Whether this transfer produced a real, usable measurement (nil = not validated, treated valid).
     public var validity: TransferValidity?
+    /// Where the byte counts come from, e.g. "client_write_completion" (upload progress callbacks) or
+    /// "client_bytes_received"; nil in older results.
+    public var measurementSource: String?
+    /// Receiver-side byte counts reported by the server (NDT7 measurement messages), when available.
+    public var serverConfirmed: ServerConfirmedThroughput?
 
     public var isValid: Bool { validity?.valid ?? true }
+    /// Best available average: server-confirmed received bytes when present, else client bytes / time.
+    public var bestAverageMbps: Double { serverConfirmed?.averageMbps ?? summary.averageMbps }
+    /// Stability from reliable short windows, else from server-confirmed 1 s windows.
+    public var bestStabilityScore: Double? { summary.reliableStabilityScore ?? serverConfirmed?.stabilityScore }
 
     public init(direction: TransferDirection, samples: [SpeedSample], summary: SpeedSummary, streamChanges: [StreamChange], wasCancelled: Bool) {
         self.direction = direction

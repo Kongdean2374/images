@@ -181,9 +181,10 @@ extension DiagnosticSeverity {
 extension Likelihood {
     var color: Color {
         switch self {
+        case .supported: Theme.critical
         case .likely: Theme.critical
         case .possible: Theme.warning
-        case .unlikely: Theme.info
+        case .unlikely, .noEvidence, .broadIssueUnlikely: Theme.info
         case .insufficientEvidence: Theme.textSecondary
         case .notTested: Theme.textSecondary.opacity(0.8)
         case .ruledOut: Theme.good
@@ -191,9 +192,12 @@ extension Likelihood {
     }
     var shortName: String {
         switch self {
+        case .supported: "實測支持"
         case .likely: "可能性高"
         case .possible: "有可能"
         case .unlikely: "可能性低"
+        case .noEvidence: "無證據"
+        case .broadIssueUnlikely: "廣泛問題不太可能"
         case .insufficientEvidence: "證據不足"
         case .notTested: "未測試"
         case .ruledOut: "已排除"

@@ -9,7 +9,8 @@ import Foundation
 ///     floor[i]  = min(best RTT of responsive hops at TTL ≥ i)        (non-decreasing)
 ///     step      : floor[i] − floor[previous responsive hop] ≥ 30 ms, confirmed by at least one
 ///                 later responsive hop or by i being the destination
-///     isolated  : best[i] − floor[i] ≥ 30 ms (later hops are faster)  → ICMP deprioritised
+///     isolated  : median[i] − floor[i] ≥ 30 ms (later hops are faster) → ICMP reply
+///                 deprioritisation / rate limiting, never "congestion"
 public enum TracerouteAnalyzer {
     public static let thresholdMs = 30.0
 
@@ -45,7 +46,10 @@ public enum TracerouteAnalyzer {
         var steps: [Step] = []
         var isolated: [IsolatedHop] = []
         for i in responsive.indices {
-            let excess = responsive[i].best - floors[i]
+            // Isolated elevation uses the hop's median reply (one fast reply among slow ones — e.g.
+            // 132 / 200 / 9.9 ms — is still ICMP slow-path handling, not path latency).
+            let median = Descriptive.median(responsive[i].hop.rttsMs.compactMap { $0 }) ?? responsive[i].best
+            let excess = median - floors[i]
             if excess >= thresholdMs { isolated.append(IsolatedHop(ttl: responsive[i].hop.ttl, excessMs: excess)) }
             guard i > 0 else { continue }
             let increase = floors[i] - floors[i - 1]

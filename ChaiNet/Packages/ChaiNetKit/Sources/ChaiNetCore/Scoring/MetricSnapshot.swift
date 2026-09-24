@@ -33,6 +33,8 @@ public struct MetricSnapshot: Codable, Sendable, Hashable {
     public var http3Supported: Bool?
     /// QUIC handshake / UDP 443 reachable.
     public var quicReachable: Bool?
+    /// Host the HTTP / HTTP-3 probe targeted (findings are scoped to it).
+    public var http3ProbeHost: String?
     public var tlsHandshakeMs: Double?
     public var ttfbMs: Double?
     public var pathMTU: Int?

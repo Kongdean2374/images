@@ -34,7 +34,7 @@ public struct EvidenceSet: Codable, Sendable, Hashable {
 /// | *Unstable / *Stable    | stability score < 50 / ≥ 80                                 |
 /// | idleLatencyLow / High  | median < 30 / > 100 ms                                      |
 /// | jitterHigh / Low       | > 30 / < 10 ms                                              |
-/// | lossNone               | < 0.5 % with ≥ 20 probes                                    |
+/// | noConfirmedGeneralLoss | < 0.5 % with ≥ 20 probes (scoped to the probed target)      |
 /// | lossHigh / Severe      | > 2 % / > 5 %                                               |
 /// | lossBursty / Random    | pattern burst|mixed with burst loss ≥ 0.5 % / pattern random |
 /// | latencySpikesFrequent  | ≥ 3 spikes                                                  |
@@ -235,8 +235,10 @@ public struct EvidenceExtractor: Sendable {
             let lc = st.lossConfirmation
             let stressText = lc.stressLossPercent.map { "50 pps ICMP 壓力探測 \(Fmt.d($0, 1))%" } ?? "無 50 pps 壓力探測"
             let controlText = "\(lc.validControlCount) 個低頻對照探測中位數 \(lc.confirmedLossPercent.map { Fmt.d($0, 2) } ?? "—")%"
+            let affected = (lc.affectedTargets ?? []).joined(separator: "、")
+            let clean = (lc.cleanTargets ?? []).joined(separator: "、")
             switch lc.verdict {
-            case .confirmedLoss:
+            case .confirmedLoss, .confirmedGeneralPacketLoss:
                 measured.insert(.loss)
                 let v = lc.confirmedLossPercent ?? 0
                 if v > 5 { add(.lossSevere, "已確認封包遺失 \(Fmt.d(v, 1))%（> 5%；\(controlText)，\(lc.lossyControlCount) 個探測皆遺失）", v, "%") }
@@ -244,10 +246,16 @@ public struct EvidenceExtractor: Sendable {
             case .possibleICMPRateLimiting:
                 measured.insert(.loss)
                 add(.possibleICMPRateLimiting, "Possible ICMP rate limiting under stress：\(stressText)，但\(controlText)", lc.stressLossPercent, "%")
-                add(.lossNone, "對照探測未遺失（\(controlText)）", lc.confirmedLossPercent, "%")
-            case .noLoss:
+                add(.noConfirmedGeneralLoss, "低頻對照探測未遺失：無廣泛性封包遺失證據（\(controlText)）", lc.confirmedLossPercent, "%")
+            case .endpointSpecificLossObserved:
                 measured.insert(.loss)
-                add(.lossNone, "壓力與對照探測皆未遺失（\(stressText)；\(controlText)）", lc.confirmedLossPercent, "%")
+                let worst = st.controlProbes.filter { (lc.affectedTargets ?? []).contains($0.target) }.map(\.lossPercent).max()
+                add(.endpointSpecificLossObserved, "僅 \(affected) 觀察到封包遺失（\(stressText)）；獨立對照端點 \(clean) 無遺失 — 端點特定，非廣泛性遺失；高頻 ICMP 遺失可能包含 ICMP 限速",
+                    worst ?? lc.stressLossPercent, "%")
+                add(.noConfirmedGeneralLoss, "獨立對照端點 \(clean) 無遺失：無廣泛性封包遺失證據（\(controlText)）", lc.confirmedLossPercent, "%")
+            case .noLoss, .noConfirmedGeneralPacketLoss:
+                measured.insert(.loss)
+                add(.noConfirmedGeneralLoss, "壓力與對照探測皆未觀察到遺失：無廣泛性封包遺失證據（\(stressText)；\(controlText)）", lc.confirmedLossPercent, "%")
             case .inconclusive:
                 break
             }
@@ -258,7 +266,16 @@ public struct EvidenceExtractor: Sendable {
                 measured.insert(.crossServer)
                 let dir = agg.direction == .download ? "下載" : "上傳"
                 let list = agg.values.map { "\($0.name) \(Fmt.d($0.mbps, 0))" }.joined(separator: "、")
-                if agg.largeVariance {
+                if !agg.comparable {
+                    // Different provider / protocol / stream count: only a range, never "consistent".
+                    let methods = agg.values.map { "\($0.name) \(Fmt.d($0.mbps, 0)) Mbps（\($0.method ?? "?")）" }.joined(separator: "、")
+                    if agg.minMbps > 0 && agg.maxMbps / agg.minMbps >= CrossProviderAggregate.methodDifferenceRatio {
+                        add(.methodDependentThroughputDifference, "\(dir)速度差異取決於測試方法（不同業者 / 協定 / 連線數，不可直接比較）：\(methods)",
+                            agg.maxMbps / agg.minMbps, "×")
+                    } else {
+                        add(.crossProviderObservedRange, "\(dir)觀察範圍 \(Fmt.d(agg.minMbps, 0))–\(Fmt.d(agg.maxMbps, 0)) Mbps（方法不等價，僅供參考）：\(methods)")
+                    }
+                } else if agg.largeVariance {
                     add(.largeCrossProviderThroughputVariance, "Large cross-provider throughput variance：\(dir) CV \(Fmt.d(agg.coefficientOfVariation ?? 0, 2))（\(list) Mbps）",
                         agg.coefficientOfVariation, "CV")
                 } else {
@@ -274,7 +291,10 @@ public struct EvidenceExtractor: Sendable {
             let method = r.packetLossMethod.map { "，\($0)" } ?? ""
             if loss.lossPercent > 5 { add(.lossSevere, "封包遺失 \(Fmt.d(loss.lossPercent, 1))%（> 5%\(method)）", loss.lossPercent, "%") }
             if loss.lossPercent > 2 { add(.lossHigh, "封包遺失 \(Fmt.d(loss.lossPercent, 1))%（\(loss.lost)/\(loss.sent)\(method)）", loss.lossPercent, "%") }
-            if loss.lossPercent < 0.5 && loss.sent >= 20 { add(.lossNone, "封包遺失 \(Fmt.d(loss.lossPercent, 2))%（\(loss.sent) 個探測）", loss.lossPercent, "%") }
+            if loss.lossPercent < 0.5 && loss.sent >= 20 {
+                // One probe target clean ≠ "no loss anywhere": scoped to the probed path.
+                add(.noConfirmedGeneralLoss, "受測路徑封包遺失 \(Fmt.d(loss.lossPercent, 2))%（\(loss.sent) 個探測；僅代表此目標，未確認其他路徑）", loss.lossPercent, "%")
+            }
             if (loss.pattern == .burst || loss.pattern == .mixed) && loss.burstLossPercent >= 0.5 {
                 add(.lossBursty, "連續遺失 \(loss.burstEvents) 次，最長 \(loss.longestBurst) 個封包（burst \(Fmt.d(loss.burstLossPercent, 1))%）", loss.burstLossPercent, "%")
             } else if loss.pattern == .random {
@@ -282,21 +302,30 @@ public struct EvidenceExtractor: Sendable {
             }
         }
 
-        // Bufferbloat
+        // Bufferbloat — only a comparable idle / loaded pair (same probe method, fixed target not
+        // under load) is a measured condition; anything else is indicative (comparisonQuality=limited).
         let dlBloat = m.downloadBloatMs, ulBloat = m.uploadBloatMs
+        let comparisons = r.stress.map { st in TransferDirection.allCases.compactMap { st.bufferbloatComparison($0) } } ?? []
+        let limited = comparisons.contains { $0.quality == .limited }
         if dlBloat != nil || ulBloat != nil {
             measured.insert(.bufferbloat)
-            if let v = dlBloat, v > 100 { add(.downloadBufferbloat, "下載時延遲增加 \(Fmt.d(v, 0)) ms", v, "ms") }
-            if let v = ulBloat, v > 100 { add(.uploadBufferbloat, "上傳時延遲增加 \(Fmt.d(v, 0)) ms", v, "ms") }
-            // The measured condition (latency rises under a valid load) is separate from any hypothesis
-            // about where the queue is (queue_location=unknown).
             let worst = [dlBloat, ulBloat].compactMap { $0 }.max() ?? 0
-            if worst >= Self.loadedInflationThresholdMs {
-                let parts = [dlBloat.map { "下載 +\(Fmt.d($0, 0))" }, ulBloat.map { "上傳 +\(Fmt.d($0, 0))" }].compactMap { $0 }.joined(separator: " / ")
-                add(.loadedLatencyInflationObserved, "負載時延遲上升（\(parts) ms，queue_location=unknown）", worst, "ms")
-            }
-            if [dlBloat, ulBloat].compactMap({ $0 }).allSatisfy({ $0 < 30 }) {
-                add(.noBufferbloat, "滿載時延遲增加 < 30 ms（下載 \(dlBloat.map { Fmt.d($0, 0) } ?? "—") / 上傳 \(ulBloat.map { Fmt.d($0, 0) } ?? "—") ms）")
+            let parts = [dlBloat.map { "下載 +\(Fmt.d($0, 0))" }, ulBloat.map { "上傳 +\(Fmt.d($0, 0))" }].compactMap { $0 }.joined(separator: " / ")
+            if limited {
+                if worst >= Self.loadedInflationThresholdMs {
+                    let why = comparisons.first { $0.quality == .limited }?.note ?? "comparisonQuality=limited"
+                    add(.loadedLatencyRiseLimitedComparison, "負載時延遲上升（\(parts) ms），但閒置與負載量測不可完全比較：\(why)", worst, "ms")
+                }
+            } else {
+                let probe = comparisons.first.map { "；探測 \($0.probe.method) → \($0.probe.target)" } ?? ""
+                if let v = dlBloat, v > 100 { add(.downloadBufferbloat, "下載時延遲增加 \(Fmt.d(v, 0)) ms", v, "ms") }
+                if let v = ulBloat, v > 100 { add(.uploadBufferbloat, "上傳時延遲增加 \(Fmt.d(v, 0)) ms", v, "ms") }
+                if worst >= Self.loadedInflationThresholdMs {
+                    add(.loadedLatencyInflationObserved, "負載時延遲上升（\(parts) ms，queue_location=unknown\(probe)）", worst, "ms")
+                }
+                if [dlBloat, ulBloat].compactMap({ $0 }).allSatisfy({ $0 < 30 }) {
+                    add(.noBufferbloat, "滿載時延遲增加 < 30 ms（下載 \(dlBloat.map { Fmt.d($0, 0) } ?? "—") / 上傳 \(ulBloat.map { Fmt.d($0, 0) } ?? "—") ms\(probe)）")
+                }
             }
         }
 
@@ -309,7 +338,10 @@ public struct EvidenceExtractor: Sendable {
             }
             if let rtt = system.statistics.rtt {
                 let sys = rtt.median
-                if DNSTail.isHigh(median: sys, p95: rtt.p95) {
+                // A tail caused by domains that were slow on several resolvers is a domain-specific cold
+                // lookup, not resolver tail latency.
+                let adjusted = DNSAnalyzer.systemStatsExcludingOutliers(dns)?.rtt
+                if DNSTail.isHigh(median: sys, p95: rtt.p95) && adjusted.map({ DNSTail.isHigh(median: $0.median, p95: $0.p95) }) != false {
                     add(.dnsHighTailLatencyObserved, "系統 DNS P95 \(Fmt.d(rtt.p95, 0)) ms（中位數 \(Fmt.d(sys, 0)) ms）：dnsHighTailLatencyObserved，偶有查詢特別慢",
                         rtt.p95, "ms")
                 }
@@ -318,6 +350,15 @@ public struct EvidenceExtractor: Sendable {
                 } else if failureRate < 20 {
                     // Scoped: only the system resolver's median, only this path — not "DNS is fine".
                     add(.systemDNSHealthy, "系統 DNS 解析器中位數 \(Fmt.d(sys, 0)) ms、P95 \(Fmt.d(rtt.p95, 0)) ms，失敗率 \(Fmt.d(failureRate, 0))%（僅代表系統解析器）", sys, "ms")
+                }
+            }
+        }
+        if let dns = r.dns {
+            for f in DNSAnalyzer.analyze(dns) {
+                switch f.kind {
+                case .domainSpecificOutlier: add(.dnsDomainSpecificOutlier, f.detail)
+                case .transportSpecificIssue: add(.dnsTransportSpecificIssue, f.detail)
+                case .resolverWideDegradation, .ipv6DNSPathIssue: break   // covered by dnsSlow / dnsFailures / alternateIPv6ResolverDegraded
                 }
             }
         }
@@ -350,12 +391,19 @@ public struct EvidenceExtractor: Sendable {
             // quicReachable (UDP 443 + QUIC handshake) and http3Negotiated (an HTTP response over h3)
             // are separate facts: a handshake alone never claims HTTP/3.
             if probe.http3Negotiated {
-                add(.http3Negotiated, "HTTP 請求實際協商為 HTTP/3（http3Negotiated）")
+                add(.http3Negotiated, "\(probe.host)：HTTP 請求實際協商為 HTTP/3（http3Negotiated）")
+            } else if let fallback = probe.http3Attempt?.negotiatedProtocol {
+                // URLSession may silently fall back to TCP: a non-h3 answer is inconclusive for HTTP/3.
+                add(.http3FallbackObserved, "\(probe.host)：HTTP/3 請求退回 \(fallback.displayName)（TCP）— 無法據此判定 HTTP/3 成功或失敗")
+            }
+            let quicOK = (probe.quicProbes ?? []).filter { $0.handshakeMs != nil }
+            let quicFailed = (probe.quicProbes ?? []).filter { $0.handshakeMs == nil }
+            if !quicOK.isEmpty && !quicFailed.isEmpty {
+                add(.endpointQuicHandshakeFailed, "QUIC 交握僅在特定端點失敗：\(quicFailed.map { "\($0.host)（\($0.failure?.rawValue ?? "failed")）" }.joined(separator: "、"))；"
+                    + "其他端點成功：\(quicOK.map(\.host).joined(separator: "、"))（端點特定，非 UDP 封鎖）")
             }
             if probe.quicReachable {
-                let ok = (probe.quicProbes ?? []).filter { $0.handshakeMs != nil }.map(\.host)
-                add(.quicReachable, "QUIC 交握成功（quicReachable / udp443Reachable）\(ok.isEmpty ? "" : "：\(ok.joined(separator: "、"))")"
-                    + (probe.http3Negotiated ? "" : "；HTTP 請求未協商 HTTP/3（\(httpProto)）"))
+                add(.quicReachable, "QUIC 交握成功（generalQuicReachable / udp443Reachable）\(quicOK.isEmpty ? "" : "：\(quicOK.map(\.host).joined(separator: "、"))")")
             } else if !probe.http3Negotiated, let assessment {
                 let hosts = (probe.quicProbes ?? []).map { "\($0.host)（\($0.failure?.rawValue ?? "ok")，TCP \($0.tcpReachable == true ? "可連" : "不可連")）" }
                     .joined(separator: "、")
@@ -377,7 +425,10 @@ public struct EvidenceExtractor: Sendable {
             measured.insert(.mtu)
             let target = r.mtu?.target ?? "目標"
             if mtu < 1400 { add(.mtuReduced, "IPv4 → \(target) 路徑 MTU \(mtu) bytes", Double(mtu), "bytes") }
-            else { add(.mtuNormal, "IPv4 → \(target) 路徑 MTU \(mtu) bytes：受測路徑未觀察到 MTU 問題（noIssueObservedOnTestedPath，不代表其他路徑）", Double(mtu), "bytes") }
+            else {
+                add(.pathMTUObserved, "observed_path_mtu_ipv4=\(mtu) bytes（僅 IPv4 → \(target) 這條路徑；mtu_blackhole_evidence=false；不代表其他目的地或 IPv6 路徑）",
+                    Double(mtu), "bytes")
+            }
         }
 
         // Route — an isolated slow hop is ICMP deprioritisation, only a persistent step is a path fact.

@@ -114,12 +114,16 @@ extension TestRunner {
         var transfers: [StressTransferResult] = []
         var phaseIndex = 0
         let bytes = LockedValue<(down: Int64, up: Int64)>((0, 0))
+        // Last progress event, re-emitted with fresh byte counters during transfers (live data usage).
+        let lastProgress = LockedValue<StressProgress?>(nil)
 
         func begin(_ kind: StressPhaseKind, round: Int? = nil, node: String? = nil, total: Int) -> (Double, Int64, Int64) {
             phaseIndex += 1
             let b = bytes.current
-            emit(.stressProgress(StressProgress(kind: kind, round: round, nodeName: node, phaseIndex: phaseIndex, phaseCount: total,
-                                                elapsed: clock.elapsed, downloadBytes: b.down, uploadBytes: b.up)))
+            let p = StressProgress(kind: kind, round: round, nodeName: node, phaseIndex: phaseIndex, phaseCount: total,
+                                   elapsed: clock.elapsed, downloadBytes: b.down, uploadBytes: b.up)
+            lastProgress.withLock { $0 = p }
+            emit(.stressProgress(p))
             return (clock.elapsed, b.down, b.up)
         }
         func end(_ kind: StressPhaseKind, _ start: (Double, Int64, Int64), planned: Double, round: Int? = nil, node: String? = nil, note: String? = nil) {
@@ -172,6 +176,16 @@ extension TestRunner {
             result.server = primary
             emit(.serverSelected(primary))
         }
+        // Independent control probe for bufferbloat: fixed target that is never under load, same
+        // method idle and loaded (ICMP to the first latency-only loss-capable node, e.g. 8.8.8.8).
+        let controlNode = plan.latencyOnlyNodes.first { $0.capabilities.contains(.loss) && stressProbes.icmp(host: $0.host, packetsPerSecond: 4) != nil }
+        func controlProbe() -> (any LatencyProbe)? {
+            controlNode.flatMap { stressProbes.icmp(host: $0.host, packetsPerSecond: 4) }
+        }
+        let controlDescriptor = controlNode.map { ProbeDescriptor(target: $0.host, method: "icmpEcho", protocolName: "ICMP", ipFamily: "IPv4") }
+        let referenceDescriptor = ProbeDescriptor(target: primary?.host ?? latencyNode?.host ?? "1.1.1.1",
+                                                  method: primary != nil ? "httpPing" : "tcpConnect",
+                                                  protocolName: primary != nil ? "HTTPS/TCP" : "TCP", ipFamily: "system")
         func sampleReference(seconds: Double, phase: TestPhase) async -> [LatencySample] {
             let probe = referenceProbe()
             defer { Task { await probe.close() } }
@@ -190,26 +204,50 @@ extension TestRunner {
         emit(.phase(.idleLatency))
         let idlePlanned = plan.phases.first { $0.kind == .idleLatency }?.seconds ?? 5
         hc = begin(.idleLatency, total: total)
+        let idleControlProbe = controlProbe()
+        let controlCount = count(idlePlanned, pps: 4, minimum: 5), controlInterval = interval(0.25)
+        let controlIdleTask = Task { () -> [LatencySample] in
+            guard let probe = idleControlProbe else { return [] }
+            do { try await probe.prepare() } catch { return [] }
+            let samples = await LatencySampler.collect(probe: probe, count: controlCount, interval: controlInterval, timeout: 2)
+            await probe.close()
+            return samples
+        }
         let preSamples = await sampleReference(seconds: idlePlanned, phase: .idleLatency)
+        let controlIdleSamples = await controlIdleTask.value
         try Task.checkCancellation()
         result.idleSamples = preSamples
         result.idleLatency = LatencyStatistics.compute(from: preSamples)
         end(.idleLatency, hc, planned: idlePlanned)
         emit(.partial(result))
 
+        var dataCapReached = false
         // One node × direction transfer; an invalid result (error page, tiny body, 429…) is retried
         // once after a short pause. Every attempt is kept; only valid ones reach statistics.
         func runTransfer(_ node: StressNode, _ server: ServerDescriptor, _ direction: TransferDirection, round: Int,
                          seconds: Double, kind: StressPhaseKind, note: String? = nil) async throws {
             let ndt7 = node.provider == .mlab
             for attempt in 1...2 {
+                // Mobile-data safety: never start a transfer past a cap; cap the running one.
+                let used = bytes.current
+                let remaining = c.stressDataLimits.remaining(direction, down: used.down, up: used.up)
+                if let remaining, remaining <= 0 {
+                    if !dataCapReached {
+                        dataCapReached = true
+                        result.notes.append("已達流量上限（\(ByteCountFormatter.string(fromByteCount: used.down + used.up, countStyle: .decimal))），停止其餘吞吐量階段；低流量診斷繼續執行。")
+                    }
+                    records.append(StressPhaseRecord(kind: kind, round: round, nodeID: node.id, plannedSeconds: seconds, startOffset: clock.elapsed,
+                                                     actualSeconds: 0, note: "skipped: dataCapReached"))
+                    return
+                }
                 emit(.phase(direction == .download ? .download : .upload))
                 hc = begin(kind, round: round, node: attempt == 1 ? node.name : "\(node.name)（重試）", total: total)
                 let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, seconds * scale),
-                                                    autoDuration: nil, fixedStreams: ndt7 ? nil : plan.streams, byteCap: nil)
+                                                    autoDuration: nil, fixedStreams: ndt7 ? nil : plan.streams, byteCap: remaining)
                 let t = try await stressTransfer(config, engine: ndt7 ? self.ndt7 : self.speed, node: node, round: round,
                                                  method: ndt7 ? "NDT7 WebSocket x1" : "HTTP x\(plan.streams)",
-                                                 loadedProbe: referenceProbe(), bytes: bytes, attempt: attempt, emit: emit)
+                                                 loadedProbe: referenceProbe(), controlProbe: controlProbe(), bytes: bytes,
+                                                 attempt: attempt, progress: lastProgress, emit: emit)
                 transfers.append(t)
                 let why = t.validity.flatMap { $0.valid ? nil : "\($0.reason?.rawValue ?? "invalid")：\($0.detail ?? "")" }
                 end(kind, hc, planned: seconds, round: round, node: node.id,
@@ -339,6 +377,9 @@ extension TestRunner {
             try Task.checkCancellation()
             switch StressBudget.next(remaining: deadline - clock.elapsed, roundCost: template.isEmpty ? 0 : roundCost,
                                      extraRoundsDone: extraRounds) {
+            case .extraRound where dataCapReached:
+                // No more throughput once a data cap is hit: spend the time on low-data monitoring.
+                extraRounds = StressBudget.maxExtraRounds
             case .extraRound:
                 extraRounds += 1
                 let round = plan.rounds + extraRounds
@@ -371,18 +412,30 @@ extension TestRunner {
                                     transfers: transfers, phases: records, stressProbe: stressProbe, controlProbes: controls,
                                     preLoadLatency: result.idleLatency, preLoadSamples: preSamples, postLoadLatency: postStats,
                                     postLoadSamples: postSamples, warnings: c.stressWarnings,
-                                    extendedMonitoringSamples: extendedSamples, recycledSeconds: recycled)
-        result.stress = summary
+                                    extendedMonitoringSamples: extendedSamples, recycledSeconds: recycled,
+                                    controlProbe: controlIdleSamples.isEmpty ? nil : controlDescriptor,
+                                    controlIdleSamples: controlIdleSamples.isEmpty ? nil : controlIdleSamples,
+                                    referenceProbe: referenceDescriptor)
+        var finalSummary = summary
+        finalSummary.dataLimits = c.stressDataLimits.isLimited || c.stressDataLimits.warningBytes != nil ? c.stressDataLimits : nil
+        finalSummary.dataCapReached = dataCapReached
+        result.stress = finalSummary
         // Generic sections describe the stress aggregate, never one node's last transfer: no single
         // download / upload timeline; loaded latency = pooled samples of load-valid transfers only.
         result.download = nil
         result.upload = nil
-        let pooledDL = summary.pooledLoadedSamples(.download), pooledUL = summary.pooledLoadedSamples(.upload)
+        // Bufferbloat and the generic loaded-latency sections use ONE comparable source: the independent
+        // control probe when it has data (same method + fixed target idle and loaded), else the reference.
+        let useControl = summary.bufferbloatComparison(.download)?.source == "independentControlProbe"
+            || summary.bufferbloatComparison(.upload)?.source == "independentControlProbe"
+        let pooledDL = useControl ? summary.pooledControlSamples(.download) : summary.pooledLoadedSamples(.download)
+        let pooledUL = useControl ? summary.pooledControlSamples(.upload) : summary.pooledLoadedSamples(.upload)
         result.downloadLoadedSamples = pooledDL.isEmpty ? nil : pooledDL
         result.downloadLoadedLatency = pooledDL.isEmpty ? nil : LatencyStatistics.compute(from: pooledDL)
         result.uploadLoadedSamples = pooledUL.isEmpty ? nil : pooledUL
         result.uploadLoadedLatency = pooledUL.isEmpty ? nil : LatencyStatistics.compute(from: pooledUL)
-        if let idle = result.idleLatency {
+        let bufferbloatIdle = useControl ? LatencyStatistics.compute(from: controlIdleSamples) : result.idleLatency
+        if let idle = bufferbloatIdle {
             result.bufferbloat = BufferbloatCalculator.evaluate(idle: idle, downloadLoaded: result.downloadLoadedLatency,
                                                                 uploadLoaded: result.uploadLoadedLatency)
         }
@@ -425,11 +478,21 @@ extension TestRunner {
 
     /// One transfer with loaded latency on a separate connection. Endpoint errors are returned, not thrown.
     func stressTransfer(_ config: SpeedTestConfiguration, engine: any SpeedTestEngineProtocol, node: StressNode, round: Int, method: String,
-                        loadedProbe: any LatencyProbe, bytes: LockedValue<(down: Int64, up: Int64)>, attempt: Int = 1,
+                        loadedProbe: any LatencyProbe, controlProbe: (any LatencyProbe)? = nil,
+                        bytes: LockedValue<(down: Int64, up: Int64)>, attempt: Int = 1,
+                        progress: LockedValue<StressProgress?>? = nil,
                         emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> StressTransferResult {
         let direction = config.direction
         let phase: TestPhase = direction == .download ? .download : .upload
         try? await loadedProbe.prepare()
+        if let controlProbe { try? await controlProbe.prepare() }
+        let controlTask: Task<[LatencySample], Never>? = controlProbe.map { probe in
+            Task {
+                var out: [LatencySample] = []
+                for await s in LatencySampler.stream(probe: probe, count: nil, interval: 0.25, timeout: 2) { out.append(s) }
+                return out
+            }
+        }
         let loadedTask = Task {
             var out: [LatencySample] = []
             for await s in LatencySampler.stream(probe: loadedProbe, count: nil, interval: 0.25, timeout: 3) {
@@ -441,6 +504,7 @@ extension TestRunner {
         var speedResult: SpeedResult?
         var failure: String?
         var last: Int64 = 0
+        var lastUsageEmit = Date.distantPast
         do {
             for try await event in engine.run(config) {
                 switch event {
@@ -449,26 +513,43 @@ extension TestRunner {
                     let delta = s.cumulativeBytes - last
                     last = s.cumulativeBytes
                     bytes.withLock { if direction == .download { $0.down += delta } else { $0.up += delta } }
+                    if let progress, Date().timeIntervalSince(lastUsageEmit) >= 1 {
+                        lastUsageEmit = Date()
+                        let b = bytes.current
+                        let updated: StressProgress? = progress.withLock { (p: inout StressProgress?) -> StressProgress? in
+                            p?.downloadBytes = b.down
+                            p?.uploadBytes = b.up
+                            return p
+                        }
+                        if let updated { emit(.stressProgress(updated)) }
+                    }
                 case .streamsChanged(let n): emit(.streams(direction, n))
                 case .completed(let r): speedResult = r
                 }
             }
         } catch is CancellationError {
             loadedTask.cancel()
+            controlTask?.cancel()
             await loadedProbe.close()
+            await controlProbe?.close()
             throw CancellationError()
         } catch {
             failure = error.localizedDescription
         }
         loadedTask.cancel()
+        controlTask?.cancel()
         let all = await loadedTask.value
+        let control = await controlTask?.value
         await loadedProbe.close()
+        await controlProbe?.close()
         try Task.checkCancellation()
         let ramped = all.filter { $0.offset >= 1.0 }
         let loaded = ramped.isEmpty ? all : ramped
-        return StressTransferResult(nodeID: node.id, round: round, direction: direction, method: method, speed: speedResult,
-                                    loadedLatency: loaded.isEmpty ? nil : LatencyStatistics.compute(from: loaded), loadedSamples: all,
-                                    error: failure ?? (speedResult == nil ? "未完成" : nil), attempt: attempt)
+        var t = StressTransferResult(nodeID: node.id, round: round, direction: direction, method: method, speed: speedResult,
+                                     loadedLatency: loaded.isEmpty ? nil : LatencyStatistics.compute(from: loaded), loadedSamples: all,
+                                     error: failure ?? (speedResult == nil ? "未完成" : nil), attempt: attempt)
+        t.controlLoadedSamples = control
+        return t
     }
 
     /// 50 pps ICMP stress probe plus independent low-rate controls, all at the same time:

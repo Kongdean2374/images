@@ -161,7 +161,10 @@ struct HypothesisCard: View {
                         }
                     }
                     Spacer()
-                    Text("\(hypothesis.confidencePercent)%").font(.headline.monospacedDigit()).foregroundStyle(hypothesis.likelihood.color)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("\(hypothesis.evidenceScore)").font(.headline.monospacedDigit()).foregroundStyle(hypothesis.likelihood.color)
+                        Text("證據分數 · \(hypothesis.confidenceBand.displayName)").font(.caption2).foregroundStyle(Theme.textSecondary)
+                    }
                 }
             }
             .buttonStyle(.plain)
