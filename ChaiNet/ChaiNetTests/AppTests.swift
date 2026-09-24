@@ -65,7 +65,7 @@ final class AppTests: XCTestCase {
         XCTAssertEqual(vm.analysis?.hypotheses.count, RootCause.allCases.count)
         XCTAssertEqual(app.history.sessions().count, 1, "session persisted")
         let report = try XCTUnwrap(vm.makeReport())
-        XCTAssertTrue(DiagnosticReportGenerator().text(report).hasPrefix("ChaiNet Diagnostic Report v1"))
+        XCTAssertTrue(DiagnosticReportGenerator().text(report).hasPrefix("ChaiNet Diagnostic Report v2"))
     }
 
     func testHistoryStoreRetentionAndDelete() throws {
