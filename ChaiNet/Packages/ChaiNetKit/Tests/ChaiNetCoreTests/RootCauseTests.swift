@@ -159,8 +159,11 @@ final class RootCauseRuleTests: XCTestCase {
     }
 
     func testBufferbloat() {
-        let a = analyze([.onWiFi, .uploadBufferbloat, .idleLatencyLow], interface: .wifi)
+        // The extractor always emits the measured condition together with the > 100 ms code.
+        let a = analyze([.onWiFi, .loadedLatencyInflationObserved, .uploadBufferbloat, .idleLatencyLow], interface: .wifi)
         XCTAssertEqual(hyp(a, .loadedLatencyInflation).likelihood, .likely)
+        let moderate = analyze([.onWiFi, .loadedLatencyInflationObserved], interface: .wifi)
+        XCTAssertEqual(hyp(moderate, .loadedLatencyInflation).likelihood, .possible, "a measured ~90 ms rise is never 'unlikely'")
     }
 
     func testDNS() {

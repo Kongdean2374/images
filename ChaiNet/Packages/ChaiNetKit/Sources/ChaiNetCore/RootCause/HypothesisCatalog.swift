@@ -86,7 +86,9 @@ public enum HypothesisCatalog {
             cause: .loadedLatencyInflation, layer: .pathQueueing, title: "負載延遲上升（網路路徑佇列，位置未知）",
             explanation: "滿載時延遲明顯上升，代表封包在路徑上某處排隊（queue_location=unknown）。可能位置：裝置 / 數據機佇列、無線電排程器、接取網路、電信商 / 核心網路、路由器、遠端路徑。沒有額外證據時不指定實體位置。",
             prior: HypothesisModel.defaultPrior,
-            weights: [.loadedLatencyInflationObserved: 2.0, .downloadBufferbloat: 2.3, .uploadBufferbloat: 2.3, .idleLatencyLow: 0.3,
+            // The measured condition (≥ 30 ms rise on a valid load) carries the weight; > 100 ms codes are
+            // the same measurement, so they only add a severity increment (no double counting).
+            weights: [.loadedLatencyInflationObserved: 2.0, .downloadBufferbloat: 0.3, .uploadBufferbloat: 0.3, .idleLatencyLow: 0.3,
                       .jitterHigh: 0.3, .slowPostLoadRecovery: 0.5],
             ruledOutBy: [.noBufferbloat], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.bufferbloat], confidenceCap: 0.95,
