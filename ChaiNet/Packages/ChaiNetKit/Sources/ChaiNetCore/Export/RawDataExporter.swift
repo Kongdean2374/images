@@ -174,14 +174,22 @@ public enum RawDataExporter {
                 let rel = m?.shortWindowReliable ?? false
                 func sw(_ v: Double?, _ d: Int = 3) -> String { rel ? n(v, d) : "unavailable" }
                 let d = t.speed?.diagnostics
-                o.append([t.nodeID, "\(t.round)", "\(t.attempt ?? 1)", t.direction.rawValue, t.method, b(t.isValid),
-                          t.isValid ? "none" : (t.validity?.reason?.rawValue ?? "endpointFailure"), b(t.loadValid), "\(t.bytes)",
-                          n(m?.duration, 2), n(m?.averageMbps), n(m?.medianMbps), sw(m?.p10Mbps), n(m?.p95Mbps), sw(m?.minimumMbps), sw(m?.peakMbps),
-                          rel ? n(m?.stability.score, 1) : "unavailable", m?.stabilityUnavailableReason ?? "",
-                          m?.windowSamples.map(String.init) ?? "null", b(m?.samplingArtifactDetected ?? false),
-                          t.loadValid ? n(t.loadedLatency?.rtt?.median) : "unavailable", t.loadValid ? n(t.loadedLatency?.rtt?.p95) : "unavailable",
-                          (d?.statusCounts ?? [:]).keys.sorted().map { "\($0):\(d!.statusCounts[$0]!)" }.joined(separator: "|"),
-                          d.map { "\($0.tinyResponses)" } ?? "", (d?.perStreamBytes ?? []).map(String.init).joined(separator: "|")].joined(separator: ","))
+                let error: String = t.isValid ? "none" : (t.validity?.reason?.rawValue ?? "endpointFailure")
+                let ident: [String] = [t.nodeID, "\(t.round)", "\(t.attempt ?? 1)", t.direction.rawValue, t.method, b(t.isValid), error,
+                                       b(t.loadValid), "\(t.bytes)"]
+                let rates: [String] = [n(m?.duration, 2), n(m?.averageMbps), n(m?.medianMbps), sw(m?.p10Mbps), n(m?.p95Mbps),
+                                       sw(m?.minimumMbps), sw(m?.peakMbps)]
+                let stabilityText: String = rel ? n(m?.stability.score, 1) : "unavailable"
+                let window: String = m?.windowSamples.map { String($0) } ?? "null"
+                let stab: [String] = [stabilityText, m?.stabilityUnavailableReason ?? "", window, b(m?.samplingArtifactDetected ?? false)]
+                let loadedMedian: String = t.loadValid ? n(t.loadedLatency?.rtt?.median) : "unavailable"
+                let loadedP95: String = t.loadValid ? n(t.loadedLatency?.rtt?.p95) : "unavailable"
+                let counts: [String: Int] = d?.statusCounts ?? [:]
+                let statusText: String = counts.keys.sorted().map { "\($0):\(counts[$0] ?? 0)" }.joined(separator: "|")
+                let tiny: String = d.map { "\($0.tinyResponses)" } ?? ""
+                let perStream: String = (d?.perStreamBytes ?? []).map { String($0) }.joined(separator: "|")
+                let row: [String] = ident + rates + stab + [loadedMedian, loadedP95, statusText, tiny, perStream]
+                o.append(row.joined(separator: ","))
             }
             let invalid = st.invalidTransfers()
             if !invalid.isEmpty {
