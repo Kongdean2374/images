@@ -35,6 +35,11 @@ public struct MetricSnapshot: Codable, Sendable, Hashable {
     public var quicReachable: Bool?
     /// Host the HTTP / HTTP-3 probe targeted (findings are scoped to it).
     public var http3ProbeHost: String?
+    /// Protocol the strict HTTP/3 attempt actually used when it did not negotiate h3.
+    public var http3FallbackProtocol: HTTPProtocolVersion?
+    /// Independent endpoints with a strict HTTP/3 attempt, and how many of them failed.
+    public var strictHTTP3EndpointsAttempted: Int?
+    public var strictHTTP3EndpointsFailed: Int?
     public var tlsHandshakeMs: Double?
     public var ttfbMs: Double?
     public var pathMTU: Int?

@@ -102,8 +102,22 @@ public struct Baseline: Codable, Sendable, Hashable {
     public var key: BaselineKey
     public var sampleCount: Int
     public var metrics: [MetricBaseline]
+    /// Date range of the contributing results (nil in baselines built before v2.2.1).
+    public var oldestDate: Date?
+    public var newestDate: Date?
 
     public func metric(_ m: BaselineMetric) -> MetricBaseline? { metrics.first { $0.metric == m } }
+
+    /// high ≥ 20 results · medium ≥ 10 · low otherwise.
+    public var confidenceBand: ConfidenceBand { sampleCount >= 20 ? .high : (sampleCount >= 10 ? .medium : .low) }
+
+    /// "network=nr,time_bucket=evening,region=any".
+    public var matchingCriteria: String {
+        "network=\(key.network.rawValue),time_bucket=\(key.timeBucket?.rawValue ?? "any"),region=\(key.region == nil ? "any" : "same_0.1deg_grid")"
+    }
+
+    /// Days between the newest contributing result and `date` (nil when unknown).
+    public func ageDays(at date: Date) -> Double? { newestDate.map { max(0, date.timeIntervalSince($0) / 86_400) } }
 }
 
 /// Historical latency of one cross-validation endpoint on one network type. Endpoints of
@@ -164,6 +178,7 @@ public struct BaselineEngine: Sendable {
     public func build(from history: [TestResult], now: Date = Date(), calendar: Calendar = .current) -> BaselineStore {
         let cutoff = now.addingTimeInterval(-Double(maximumAgeDays) * 86_400)
         var buckets: [BaselineKey: [MetricSnapshot]] = [:]
+        var dates: [BaselineKey: (oldest: Date, newest: Date)] = [:]
         for result in history where result.date >= cutoff && !result.wasCancelled {
             let network = NetworkClass(snapshot: result.network)
             guard network != .unknown else { continue }
@@ -176,7 +191,11 @@ public struct BaselineEngine: Sendable {
                 keys.append(BaselineKey(network: network, timeBucket: time, region: region))
                 keys.append(BaselineKey(network: network, timeBucket: nil, region: region))
             }
-            for key in keys { buckets[key, default: []].append(metrics) }
+            for key in keys {
+                buckets[key, default: []].append(metrics)
+                let d = dates[key]
+                dates[key] = (min(d?.oldest ?? result.date, result.date), max(d?.newest ?? result.date, result.date))
+            }
         }
 
         var baselines: [Baseline] = []
@@ -191,7 +210,10 @@ public struct BaselineEngine: Sendable {
                                       p10: Percentile.value(0.1, sorted: sorted)!,
                                       p90: Percentile.value(0.9, sorted: sorted)!)
             }
-            if !metrics.isEmpty { baselines.append(Baseline(key: key, sampleCount: snapshots.count, metrics: metrics)) }
+            if !metrics.isEmpty {
+                baselines.append(Baseline(key: key, sampleCount: snapshots.count, metrics: metrics,
+                                          oldestDate: dates[key]?.oldest, newestDate: dates[key]?.newest))
+            }
         }
         baselines.sort { $0.key.network.rawValue + ($0.key.timeBucket?.rawValue ?? "") < $1.key.network.rawValue + ($1.key.timeBucket?.rawValue ?? "") }
         return BaselineStore(baselines: baselines, endpoints: endpointBaselines(history, cutoff: cutoff))

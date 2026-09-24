@@ -222,6 +222,11 @@ extension TestRunner {
         emit(.partial(result))
 
         var dataCapReached = false
+        // Cellular never runs uncapped by default: no configured limits → cellularDefault (1.5 GB).
+        let dataLimits = c.stressDataLimits.effective(onCellular: c.onCellular)
+        if dataLimits.policy == "cellularDefault" {
+            result.notes.append("行動網路預設流量保護：警告 500 MB、強烈警告 750 MB、硬上限 1.5 GB（可於設定中明確選擇「不限」）。")
+        }
         // One node × direction transfer; an invalid result (error page, tiny body, 429…) is retried
         // once after a short pause. Every attempt is kept; only valid ones reach statistics.
         func runTransfer(_ node: StressNode, _ server: ServerDescriptor, _ direction: TransferDirection, round: Int,
@@ -230,7 +235,7 @@ extension TestRunner {
             for attempt in 1...2 {
                 // Mobile-data safety: never start a transfer past a cap; cap the running one.
                 let used = bytes.current
-                let remaining = c.stressDataLimits.remaining(direction, down: used.down, up: used.up)
+                let remaining = dataLimits.remaining(direction, down: used.down, up: used.up)
                 if let remaining, remaining <= 0 {
                     if !dataCapReached {
                         dataCapReached = true
@@ -417,7 +422,8 @@ extension TestRunner {
                                     controlIdleSamples: controlIdleSamples.isEmpty ? nil : controlIdleSamples,
                                     referenceProbe: referenceDescriptor)
         var finalSummary = summary
-        finalSummary.dataLimits = c.stressDataLimits.isLimited || c.stressDataLimits.warningBytes != nil ? c.stressDataLimits : nil
+        finalSummary.dataLimits = dataLimits
+        finalSummary.trafficEstimate = c.stressTrafficEstimate
         finalSummary.dataCapReached = dataCapReached
         result.stress = finalSummary
         // Generic sections describe the stress aggregate, never one node's last transfer: no single

@@ -84,6 +84,8 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case endpointSpecificLossObserved
     /// Independent low-rate controls clean: no evidence of general loss (scoped replacement for lossNone).
     case noConfirmedGeneralLoss
+    /// The endpoint(s) with loss also answer clearly slower than independent peers (same method).
+    case endpointLatencyElevatedVsPeers
     case latencySpikesFrequent
     // Bufferbloat
     case downloadBufferbloat, uploadBufferbloat, noBufferbloat
@@ -179,7 +181,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
         case .singleServerAnomalous, .multipleServersAnomalous, .allServersAnomalous, .allServersNormal, .regionSpecificAnomaly,
              .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers,
              .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent, .allServerHealthChecksPassed, .serverTransferInvalid,
-             .crossProviderObservedRange, .methodDependentThroughputDifference:
+             .crossProviderObservedRange, .methodDependentThroughputDifference, .endpointLatencyElevatedVsPeers:
             .crossServer
         case .ipv6DegradedOnly, .ipv4DegradedOnly, .ipFamiliesEquivalent, .ipv6Unavailable:
             .ipFamily

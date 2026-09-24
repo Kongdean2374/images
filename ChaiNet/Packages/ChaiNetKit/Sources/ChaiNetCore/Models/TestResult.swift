@@ -222,6 +222,11 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
             m.http3Supported = probe.http3Negotiated
             m.quicReachable = probe.quicReachable
             m.http3ProbeHost = probe.host
+            if let attempt = probe.http3Attempt {
+                m.strictHTTP3EndpointsAttempted = 1
+                m.strictHTTP3EndpointsFailed = probe.http3Negotiated ? 0 : 1
+                if !probe.http3Negotiated { m.http3FallbackProtocol = attempt.negotiatedProtocol }
+            }
             m.tlsHandshakeMs = probe.http?.tlsMs
             m.ttfbMs = probe.http?.ttfbMs
         }

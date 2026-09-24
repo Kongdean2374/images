@@ -12,17 +12,22 @@ struct StressTestView: View {
     @State private var customMinutes = 20
     @State private var confirming = false
     @State private var cellularConfirming = false
-    /// Mobile-data safety caps in GB (nil = no limit). A 10 GB hard cap is preselected on cellular.
-    @State private var hardCapGB: Int?
-    @State private var downloadCapGB: Int?
-    @State private var uploadCapGB: Int?
+    /// Mobile-data safety caps in MB (nil = no limit). On cellular a 1.5 GB hard cap is
+    /// preselected; choosing 「不限」 there is recorded as an explicit unlimited choice.
+    @State private var hardCapMB: Int?
+    @State private var downloadCapMB: Int?
+    @State private var uploadCapMB: Int?
     @State private var capsInitialized = false
 
     private var dataLimits: StressDataLimits {
-        let gb = StressDataLimits.gigabyte
-        let hard = hardCapGB.map { Int64($0) * gb }
-        return StressDataLimits(warningBytes: hard.map { $0 * 8 / 10 }, hardCapBytes: hard,
-                                downloadCapBytes: downloadCapGB.map { Int64($0) * gb }, uploadCapBytes: uploadCapGB.map { Int64($0) * gb })
+        let mb = StressDataLimits.megabyte
+        let dl = downloadCapMB.map { Int64($0) * mb }, ul = uploadCapMB.map { Int64($0) * mb }
+        if let hard = hardCapMB {
+            let policy = app.onCellular && hard == 1_500 && dl == nil && ul == nil ? "cellularDefault" : "userConfigured"
+            return .withHardCap(Int64(hard) * mb, downloadCap: dl, uploadCap: ul, policy: policy)
+        }
+        return StressDataLimits(downloadCapBytes: dl, uploadCapBytes: ul, explicitlyUnlimited: dl == nil && ul == nil ? true : nil)
+            .effective(onCellular: app.onCellular)
     }
 
     private var totalSeconds: Double { preset ?? Double(customMinutes * 60) }
@@ -38,7 +43,7 @@ struct StressTestView: View {
                         setup(vm)
                     case .running:
                         StressProgressHeader(vm: vm, estimated: vm.configuration?.stressPlan?.estimatedSeconds ?? plan.estimatedSeconds,
-                                             limits: vm.configuration?.stressDataLimits ?? .unlimited)
+                                             limits: (vm.configuration?.stressDataLimits ?? .unlimited).effective(onCellular: vm.configuration?.onCellular ?? false))
                         LiveRunView(vm: vm)
                         Button(role: .destructive) { vm.stop() } label: { Label("停止（保留已測資料）", systemImage: "stop.fill").frame(maxWidth: .infinity) }
                             .buttonStyle(.bordered)
@@ -65,7 +70,7 @@ struct StressTestView: View {
             if vm == nil { vm = app.makeRunViewModel() }
             if !capsInitialized {
                 capsInitialized = true
-                if app.onCellular { hardCapGB = 10 }
+                if app.onCellular { hardCapMB = 1_500 }
             }
         }
         .onDisappear { vm?.stop() }
@@ -109,6 +114,11 @@ struct StressTestView: View {
             }
             ForEach(plan.totalsByKind, id: \.kind) { item in
                 KeyValueRow(key: item.kind.title, value: "\(Int(item.seconds.rounded())) 秒")
+            }
+            let reason = plan.durationAdjustmentReason(configuredSeconds: totalSeconds)
+            if reason != "none" {
+                Text("設定 \(StressProgressHeader.mmss(totalSeconds))，實際預估 \(StressProgressHeader.mmss(plan.estimatedSeconds))：\(Self.durationReasonText(reason))")
+                    .font(.caption2).foregroundStyle(Theme.warning)
             }
             Text("每個節點每輪下載 / 上傳各 \(Int(plan.transferSeconds.rounded())) 秒（M-Lab NDT7 依協定上限 10 秒）；健康檢查未通過的節點會略過，不影響整體測試。")
                 .font(.caption2).foregroundStyle(Theme.textSecondary)
@@ -160,22 +170,22 @@ struct StressTestView: View {
             .alert("開始極限壓力測試？", isPresented: $confirming) {
                 Button("取消", role: .cancel) {}
                 Button("我了解，開始", role: .destructive) {
-                    if app.onCellular { cellularConfirming = true } else { start(vm, plan: plan) }
+                    if app.onCellular { cellularConfirming = true } else { start(vm, plan: plan, traffic: traffic) }
                 }
             } message: {
                 Text(StressTestPlan.confirmationWarning + "\n預估流量 \(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes))，約 \(StressProgressHeader.mmss(plan.estimatedSeconds))。")
             }
             .alert("正在使用行動數據", isPresented: $cellularConfirming) {
                 Button("取消", role: .cancel) {}
-                Button("確認使用行動數據", role: .destructive) { start(vm, plan: plan) }
+                Button("確認使用行動數據", role: .destructive) { start(vm, plan: plan, traffic: traffic) }
             } message: {
                 Text("極限壓力測試在行動網路下預估使用 \(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes))，可能產生額外費用或觸發降速。"
-                     + (hardCapGB.map { "\n硬上限 \($0) GB：達到後自動停止吞吐量階段，其餘低流量診斷照常完成。" } ?? "\n未設定硬上限。"))
+                     + (hardCapMB.map { "\n硬上限 \(Self.mbText($0))：達到後自動停止吞吐量階段，其餘低流量診斷照常完成。" } ?? "\n您已選擇「不限」：不會自動停止。"))
             }
         Text("測試期間請保持 App 在前景；進入背景會停止並保留已完成的部分。").font(.caption2).foregroundStyle(Theme.textSecondary)
     }
 
-    private func start(_ vm: RunViewModel, plan: StressTestPlan) {
+    private func start(_ vm: RunViewModel, plan: StressTestPlan, traffic: TrafficEstimate) {
         var s = settings.settings
         s.trafficUsage = .unlimited
         var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: settings.allServers,
@@ -183,6 +193,7 @@ struct StressTestView: View {
         config.stressPlan = plan
         config.stressWarnings = app.currentNetwork.map(StressTestPlan.warnings(for:)) ?? []
         config.stressDataLimits = dataLimits
+        config.stressTrafficEstimate = traffic
         vm.start(config)
     }
 
@@ -196,12 +207,22 @@ struct StressTestView: View {
                     Label("行動數據", systemImage: "antenna.radiowaves.left.and.right").font(.caption).foregroundStyle(Theme.warning)
                 }
             }
-            capPicker("總量硬上限", selection: $hardCapGB)
-            capPicker("下載上限", selection: $downloadCapGB)
-            capPicker("上傳上限", selection: $uploadCapGB)
+            if app.onCellular {
+                Text("預估將使用約 \(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes)) 行動數據")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.critical)
+            }
+            capPicker("總量硬上限", selection: $hardCapMB)
+            capPicker("下載上限", selection: $downloadCapMB)
+            capPicker("上傳上限", selection: $uploadCapMB)
             let limits = dataLimits
             if let w = limits.warningBytes {
-                KeyValueRow(key: "警告門檻", value: Format.bytes(w) + "（硬上限 80%）", valueColor: Theme.warning)
+                KeyValueRow(key: "警告門檻", value: Format.bytes(w), valueColor: Theme.warning)
+            }
+            if let w = limits.softWarningBytes {
+                KeyValueRow(key: "強烈警告", value: Format.bytes(w), valueColor: Theme.critical)
+            }
+            if app.onCellular && hardCapMB == nil {
+                Text("已明確選擇「不限」：行動網路下將不會自動停止吞吐量階段。").font(.caption2).foregroundStyle(Theme.critical)
             }
             if let h = limits.hardCapBytes, h < traffic.highBytes {
                 Text("硬上限低於預估流量上緣：部分吞吐量階段可能被略過，結果會標示 dataCapReached。")
@@ -213,13 +234,25 @@ struct StressTestView: View {
         .cardStyle()
     }
 
+    static func durationReasonText(_ reason: String) -> String {
+        switch reason {
+        case "minimumRequiredDiagnosticPhases": return "延遲、遺失、DNS、路由等診斷階段有最低時間，且吞吐量至少保留 40%，所以比設定時間長。"
+        case "minimumTransferSeconds": return "每次傳輸至少 6 秒（多節點 × 雙向 × 多輪），所以比設定時間長。"
+        case "requestedBelowMinimum": return "最短測試時間為 60 秒。"
+        case "ndt7ProtocolCap": return "M-Lab NDT7 依協定最長 10 秒，所以比設定時間短。"
+        default: return reason
+        }
+    }
+
+    static func mbText(_ mb: Int) -> String { mb >= 1_000 ? "\(Format.number(Double(mb) / 1_000, digits: mb % 1_000 == 0 ? 0 : 1)) GB" : "\(mb) MB" }
+
     private func capPicker(_ title: String, selection: Binding<Int?>) -> some View {
         HStack {
             Text(title).font(.subheadline)
             Spacer()
             Picker(title, selection: selection) {
                 Text("不限").tag(Int?.none)
-                ForEach(StressDataLimits.capPresetsGB, id: \.self) { Text("\($0) GB").tag(Int?.some($0)) }
+                ForEach(StressDataLimits.capPresetsMB, id: \.self) { Text(Self.mbText($0)).tag(Int?.some($0)) }
             }
             .pickerStyle(.menu)
         }
@@ -259,11 +292,14 @@ private struct StressProgressHeader: View {
         if let cap = limits.hardCapBytes {
             let reached = used >= cap
             let warn = limits.warningBytes.map { used >= $0 } ?? false
-            let color = reached ? Theme.critical : (warn ? Theme.warning : Theme.textSecondary)
+            let soft = limits.softWarningBytes.map { used >= $0 } ?? false
+            let color = reached || soft ? Theme.critical : (warn ? Theme.warning : Theme.textSecondary)
             ProgressView(value: min(Double(used) / Double(max(cap, 1)), 1)).tint(reached ? Theme.critical : (warn ? Theme.warning : Theme.accent))
             Text(reached ? "已達流量硬上限 \(Format.bytes(cap))：吞吐量階段已停止，繼續完成低流量診斷"
-                         : "已用 \(Format.bytes(used)) / 上限 \(Format.bytes(cap))\(warn ? "（已超過警告門檻）" : "")")
+                         : "Data used：\(Format.bytes(used)) / 上限 \(Format.bytes(cap))\(soft ? "（已超過強烈警告門檻）" : (warn ? "（已超過警告門檻）" : ""))")
                 .font(.caption2.monospacedDigit()).foregroundStyle(color)
+        } else {
+            Text("Data used：\(Format.bytes(used))（未設定上限）").font(.caption2.monospacedDigit()).foregroundStyle(Theme.textSecondary)
         }
         if let d = limits.downloadCapBytes {
             Text("下載 \(Format.bytes(down)) / \(Format.bytes(d))").font(.caption2.monospacedDigit())
@@ -484,8 +520,9 @@ struct StressTechnicalView: View {
                             }
                         }
                     }
-                    if let limits = s.dataLimits, limits.isLimited {
+                    if let limits = s.dataLimits {
                         section("流量上限") {
+                            KeyValueRow(key: "政策", value: limits.policy ?? "userConfigured")
                             KeyValueRow(key: "硬上限", value: limits.hardCapBytes.map(Format.bytes) ?? "不限")
                             KeyValueRow(key: "下載 / 上傳上限", value: "\(limits.downloadCapBytes.map(Format.bytes) ?? "不限") / \(limits.uploadCapBytes.map(Format.bytes) ?? "不限")")
                             KeyValueRow(key: "是否達到上限", value: s.dataCapReached == true ? "是（吞吐量階段已停止）" : "否",

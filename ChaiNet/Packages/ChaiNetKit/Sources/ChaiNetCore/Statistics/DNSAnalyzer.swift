@@ -17,10 +17,27 @@ public enum DNSFindingKind: String, Codable, Sendable, Hashable {
     case resolverWideDegradation
     /// One domain is slow on several resolvers (cold authoritative lookup) — not a resolver problem.
     case domainSpecificOutlier
+    /// One domain slow on the system resolver only, the same domain fast on other resolvers.
+    case domainSpecificSystemResolverOutlier
+    /// One domain slow on one (non-system) resolver only.
+    case domainSpecificResolverOutlier
     /// Every resolver of one transport (UDP / DoH) degraded while another transport was fine.
     case transportSpecificIssue
     /// An IPv6 resolver endpoint fails / is slow while the same operator's IPv4 endpoint is healthy.
     case ipv6DNSPathIssue
+}
+
+/// One robust-statistics outlier lookup with its cross-resolver validation.
+public struct DNSOutlier: Codable, Sendable, Hashable {
+    public var domain: String
+    public var resolverID: String
+    public var latencyMs: Double
+    public var kind: DNSFindingKind
+    /// Human / AI readable rule that fired, with the numbers.
+    public var reason: String
+    /// Same domain on the other resolvers: resolver id → latency (nil = failed).
+    public var comparisonResolvers: [String: Double?]
+    public var confidenceBand: ConfidenceBand
 }
 
 public struct DNSFinding: Codable, Sendable, Hashable {
@@ -61,15 +78,63 @@ public enum DNSAnalyzer {
         return false
     }
 
-    /// Domains slow on ≥ 2 resolvers relative to each resolver's own median.
-    public static func outlierDomains(_ result: DNSBenchmarkResult) -> [String] {
-        var hits: [Int: Int] = [:]
+    /// Robust per-resolver outlier rule (median / MAD — one huge value can't hide itself by
+    /// inflating the mean or P95):
+    ///
+    ///     MAD      = median(|x − median|);  σ̂ = 1.4826 × MAD
+    ///     outlier ⇔ x − median ≥ max(3.5 σ̂, 50 ms)  and  x ≥ 2 × median
+    public static let madZ = 3.5
+    public static let minimumExcessMs = 50.0
+
+    static func robustOutlierLimit(_ values: [Double]) -> (median: Double, limit: Double, sigma: Double)? {
+        guard values.count >= 4, let median = Descriptive.median(values),
+              let mad = Descriptive.median(values.map { abs($0 - median) }) else { return nil }
+        let sigma = 1.4826 * mad
+        return (median, max(median + max(madZ * sigma, minimumExcessMs), 2 * median), sigma)
+    }
+
+    /// Outlier lookups with cross-resolver validation (same domain on the other resolvers):
+    ///
+    ///     outlier on ≥ 2 resolvers                         → domainSpecificOutlier (cold authoritative)
+    ///     outlier on the system resolver only, others fast → domainSpecificSystemResolverOutlier
+    ///     outlier on one other resolver only              → domainSpecificResolverOutlier
+    ///     confidence_band: high ≥ 2 fast comparison resolvers · medium 1 · low none
+    public static func outliers(_ result: DNSBenchmarkResult) -> [DNSOutlier] {
+        var limits: [String: (median: Double, limit: Double, sigma: Double)] = [:]
+        for r in result.resolvers { limits[r.resolver.id] = robustOutlierLimit(r.samples.compactMap(\.rttMs)) }
+        func isOutlier(_ r: DNSResolverResult, _ v: Double) -> Bool { limits[r.resolver.id].map { v >= $0.limit } ?? false }
+        // Hits per domain index.
+        var hits: [Int: [(DNSResolverResult, Double)]] = [:]
         for r in result.resolvers {
-            guard let median = Descriptive.median(r.samples.compactMap(\.rttMs)) else { continue }
-            let limit = max(3 * median, median + 100)
-            for s in r.samples { if let v = s.rttMs, v > limit { hits[s.sequence, default: 0] += 1 } }
+            for s in r.samples { if let v = s.rttMs, isOutlier(r, v) { hits[s.sequence, default: []].append((r, v)) } }
         }
-        return hits.filter { $0.value >= 2 }.keys.sorted().compactMap { result.domains.indices.contains($0) ? result.domains[$0] : nil }
+        var out: [DNSOutlier] = []
+        for seq in hits.keys.sorted() {
+            guard result.domains.indices.contains(seq), let group = hits[seq] else { continue }
+            let domain = result.domains[seq]
+            let slowIDs = Set(group.map { $0.0.resolver.id })
+            for (r, v) in group {
+                var comparison: [String: Double?] = [:]
+                for other in result.resolvers where other.resolver.id != r.resolver.id {
+                    if let sample = other.samples.first(where: { $0.sequence == seq }) { comparison[other.resolver.id] = sample.rttMs }
+                }
+                let fast = comparison.filter { entry in !slowIDs.contains(entry.key) && entry.value != nil }.count
+                let kind: DNSFindingKind = slowIDs.count >= 2 ? .domainSpecificOutlier
+                    : (r.resolver.transport == .system ? .domainSpecificSystemResolverOutlier : .domainSpecificResolverOutlier)
+                let band: ConfidenceBand = slowIDs.count >= 2 ? (slowIDs.count >= 3 ? .high : .medium) : (fast >= 2 ? .high : (fast == 1 ? .medium : .low))
+                let l = limits[r.resolver.id]!
+                out.append(DNSOutlier(domain: domain, resolverID: r.resolver.id, latencyMs: v, kind: kind,
+                                      reason: "latency \(Fmt.d(v, 2)) ms ≥ limit \(Fmt.d(l.limit, 2)) ms (resolver median \(Fmt.d(l.median, 2)) ms, 1.4826×MAD \(Fmt.d(l.sigma, 2)) ms, rule max(median+max(3.5σ,50), 2×median)); slow on \(slowIDs.count) resolver(s)",
+                                      comparisonResolvers: comparison, confidenceBand: band))
+            }
+        }
+        return out
+    }
+
+    /// Domains with at least one outlier lookup (any kind), in benchmark order.
+    public static func outlierDomains(_ result: DNSBenchmarkResult) -> [String] {
+        var seen = Set<String>()
+        return outliers(result).map(\.domain).filter { seen.insert($0).inserted }
     }
 
     public static func analyze(_ result: DNSBenchmarkResult) -> [DNSFinding] {
@@ -80,8 +145,22 @@ public enum DNSAnalyzer {
             out.append(DNSFinding(kind: .resolverWideDegradation, subject: r.resolver.id,
                                   detail: "\(r.resolver.name)：失敗 \(failed)/\(r.samples.count)，中位數 \(r.statistics.rtt.map { Fmt.d($0.median, 0) } ?? "—") ms"))
         }
-        for d in outlierDomains(result) {
-            out.append(DNSFinding(kind: .domainSpecificOutlier, subject: d, detail: "\(d) 在多個解析器都特別慢（冷查詢 / 權威伺服器），非解析器問題"))
+        var reported = Set<String>()
+        for o in outliers(result) where reported.insert("\(o.kind.rawValue)|\(o.domain)").inserted {
+            let others = o.comparisonResolvers.keys.sorted().map { id -> String in
+                let latency: Double? = o.comparisonResolvers[id] ?? nil
+                return "\(id) " + (latency.map { Fmt.d($0, 0) + " ms" } ?? "失敗")
+            }.joined(separator: "、")
+            let detail: String
+            switch o.kind {
+            case .domainSpecificOutlier:
+                detail = "\(o.domain) 在多個解析器都特別慢（冷查詢 / 權威伺服器），非解析器問題"
+            case .domainSpecificSystemResolverOutlier:
+                detail = "\(o.domain) 僅在系統解析器特別慢（\(Fmt.d(o.latencyMs, 0)) ms），其他解析器正常（\(others)）：單一網域 / 快取狀態，非系統 DNS 整體故障"
+            default:
+                detail = "\(o.domain) 僅在 \(o.resolverID) 特別慢（\(Fmt.d(o.latencyMs, 0)) ms），其他解析器：\(others)"
+            }
+            out.append(DNSFinding(kind: o.kind, subject: o.domain, detail: detail))
         }
         let byTransport = Dictionary(grouping: result.resolvers.filter { $0.resolver.transport != .system }, by: \.resolver.transport)
         for (transport, rs) in byTransport where !rs.isEmpty && rs.allSatisfy({ wide.contains($0.resolver.id) }) {

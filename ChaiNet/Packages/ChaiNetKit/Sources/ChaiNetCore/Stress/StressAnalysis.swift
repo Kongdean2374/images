@@ -361,6 +361,8 @@ public struct StressSummary: Codable, Sendable, Hashable {
     /// Data limits in force and whether a cap stopped throughput phases early.
     public var dataLimits: StressDataLimits?
     public var dataCapReached: Bool?
+    /// Traffic estimate shown before the start (point estimate; range = ±30 %); nil before v2.2.1.
+    public var trafficEstimate: TrafficEstimate?
     /// Independent control probe (fixed target never under load) sampled idle and during every load.
     public var controlProbe: ProbeDescriptor?
     public var controlIdleSamples: [LatencySample]?

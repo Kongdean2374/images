@@ -62,6 +62,8 @@ public struct TestRunConfiguration: Sendable {
     public var stressWarnings: [String] = []
     /// Mobile-data safety limits (hard cap / per-direction caps / warning).
     public var stressDataLimits: StressDataLimits = .unlimited
+    /// Estimate shown to the user before the stress test (exported for traceability).
+    public var stressTrafficEstimate: TrafficEstimate?
     /// Multiplies phase durations / probe counts (tests only; 1 in the app).
     public var stressTimeScale: Double = 1
 

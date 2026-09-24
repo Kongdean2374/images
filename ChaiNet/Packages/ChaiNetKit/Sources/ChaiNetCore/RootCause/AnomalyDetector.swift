@@ -38,6 +38,14 @@ public struct BaselineComparison: Codable, Sendable, Hashable {
     public var testID: UUID
     public var baseline: Baseline?
     public var anomalies: [BaselineAnomaly]
+    /// Metrics present in both the result and the baseline (nil before v2.2.1).
+    public var comparedMetrics: [BaselineMetric]?
+    /// Values of the compared metrics in this result.
+    public var observed: [String: Double]?
+
+    /// "matches baseline" needs at least this many compared metrics.
+    public static let minimumComparedMetrics = 2
+    public var sufficientForMatch: Bool { baseline != nil && (comparedMetrics?.count ?? 0) >= Self.minimumComparedMetrics }
 }
 
 /// Detects deviation from the device's own baseline, and events inside a test's timeline.
@@ -81,8 +89,12 @@ public struct AnomalyDetector: Sendable {
         }
         let metrics = result.metrics
         var anomalies: [BaselineAnomaly] = []
+        var compared: [BaselineMetric] = []
+        var observed: [String: Double] = [:]
         for mb in baseline.metrics {
             guard let x = mb.metric.value(in: metrics) else { continue }
+            compared.append(mb.metric)
+            observed[mb.metric.rawValue] = x
             let z = robustZ(value: x, baseline: mb)
             if z > threshold {
                 anomalies.append(BaselineAnomaly(testID: result.id, metric: mb.metric, observed: x, baselineMedian: mb.median,
@@ -90,7 +102,7 @@ public struct AnomalyDetector: Sendable {
                                                  baselineDescription: "\(baseline.key.displayName)，\(mb.count) 筆紀錄"))
             }
         }
-        return BaselineComparison(testID: result.id, baseline: baseline, anomalies: anomalies)
+        return BaselineComparison(testID: result.id, baseline: baseline, anomalies: anomalies, comparedMetrics: compared, observed: observed)
     }
 
     /// Timeline events: throughput dips (≥ 3 consecutive samples below 50 % of the median),

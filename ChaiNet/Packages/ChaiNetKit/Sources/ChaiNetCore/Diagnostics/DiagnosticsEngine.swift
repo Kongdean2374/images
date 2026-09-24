@@ -38,7 +38,12 @@ public enum DiagnosticCode: String, Codable, Sendable, Hashable, CaseIterable {
     case expensiveNetwork
     case latencySpikes
     case networkDrops
+    /// Legacy (≤ v2.2.0): decoded, never produced — replaced by the two scoped codes below.
     case http3Unavailable
+    /// One endpoint's strict HTTP/3 attempt fell back to TCP (endpoint-specific, info only).
+    case http3FallbackObserved
+    /// Every one of ≥ 2 independent strict HTTP/3 endpoints failed.
+    case generalHttp3Unavailable
     case slowTLS
     case reducedMTU
     case healthy

@@ -256,6 +256,21 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertTrue(text.contains("data_hard_cap_bytes=1"))
     }
 
+    /// Cellular with nothing configured runs under the 1.5 GB default, never silently unlimited.
+    func testCellularRunUsesDefaultCap() async throws {
+        let nodes = TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn)
+        var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: ServerDescriptor.builtIn,
+                                          settings: AppSettings(), onCellular: true)
+        config.stressPlan = StressTestPlan.make(totalSeconds: 60, nodes: nodes)
+        config.stressTimeScale = 0.001
+        var final: TestResult?
+        for try await e in TestRunner.mock(sampleDelay: 0).run(config) { if case .completed(let r) = e { final = r } }
+        let r = try XCTUnwrap(final)
+        XCTAssertEqual(r.stress?.dataLimits?.policy, "cellularDefault")
+        XCTAssertEqual(r.stress?.dataLimits?.hardCapBytes, 1_500_000_000)
+        XCTAssertTrue(r.notes.contains { $0.contains("行動網路預設流量保護") })
+    }
+
     func testUnlimitedRunNeverReportsCap() async throws {
         let (r, _) = try await run(TestRunner.mock(sampleDelay: 0), seconds: 60)
         XCTAssertNotEqual(r.stress?.dataCapReached, true)

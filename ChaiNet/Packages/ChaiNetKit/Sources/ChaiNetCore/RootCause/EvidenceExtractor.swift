@@ -99,10 +99,16 @@ public struct EvidenceExtractor: Sendable {
                 if c.baseline == nil {
                     evidence.append(DiagnosticEvidence(code: .noBaseline, statement: "\(test.label)：此網路類型尚無足夠歷史資料建立基準",
                                                        testIDs: [test.id], interface: iface))
-                } else if c.anomalies.isEmpty {
-                    measured.insert(.baseline)
-                    evidence.append(DiagnosticEvidence(code: .matchesBaseline, statement: "\(test.label)：結果與此裝置歷史基準一致",
+                } else if c.anomalies.isEmpty && !c.sufficientForMatch {
+                    // A baseline that shares < 2 metrics with this test can't vouch for "normal".
+                    evidence.append(DiagnosticEvidence(code: .noBaseline, statement: "\(test.label)：歷史基準與本次測試可比較的指標不足（\(c.comparedMetrics?.count ?? 0) 項），不判定是否一致",
                                                        testIDs: [test.id], interface: iface))
+                } else if c.anomalies.isEmpty, let b = c.baseline {
+                    measured.insert(.baseline)
+                    let list = (c.comparedMetrics ?? []).map(\.rawValue).joined(separator: ",")
+                    evidence.append(DiagnosticEvidence(code: .matchesBaseline,
+                                                       statement: "\(test.label)：結果與此裝置歷史基準一致（\(b.matchingCriteria)，\(b.sampleCount) 筆，比較指標 \(list)）",
+                                                       value: Double(b.sampleCount), unit: "samples", testIDs: [test.id], interface: iface))
                 } else {
                     measured.insert(.baseline)
                     let text = c.anomalies.map(\.summary).joined(separator: "；")
@@ -253,6 +259,11 @@ public struct EvidenceExtractor: Sendable {
                 add(.endpointSpecificLossObserved, "僅 \(affected) 觀察到封包遺失（\(stressText)）；獨立對照端點 \(clean) 無遺失 — 端點特定，非廣泛性遺失；高頻 ICMP 遺失可能包含 ICMP 限速",
                     worst ?? lc.stressLossPercent, "%")
                 add(.noConfirmedGeneralLoss, "獨立對照端點 \(clean) 無遺失：無廣泛性封包遺失證據（\(controlText)）", lc.confirmedLossPercent, "%")
+                if let e = st.elevatedAffectedEndpoints {
+                    let list = e.endpoints.map { "\($0.target) \(Fmt.d($0.medianMs, 0)) ms" }.joined(separator: "、")
+                    add(.endpointLatencyElevatedVsPeers, "遺失端點延遲亦明顯高於獨立對照端點（\(list)，對照中位數 \(Fmt.d(e.peerMedianMs, 0)) ms；同為低頻 ICMP）",
+                        e.endpoints.map { $0.medianMs }.max(), "ms")
+                }
             case .noLoss, .noConfirmedGeneralPacketLoss:
                 measured.insert(.loss)
                 add(.noConfirmedGeneralLoss, "壓力與對照探測皆未觀察到遺失：無廣泛性封包遺失證據（\(stressText)；\(controlText)）", lc.confirmedLossPercent, "%")
@@ -356,7 +367,7 @@ public struct EvidenceExtractor: Sendable {
         if let dns = r.dns {
             for f in DNSAnalyzer.analyze(dns) {
                 switch f.kind {
-                case .domainSpecificOutlier: add(.dnsDomainSpecificOutlier, f.detail)
+                case .domainSpecificOutlier, .domainSpecificSystemResolverOutlier, .domainSpecificResolverOutlier: add(.dnsDomainSpecificOutlier, f.detail)
                 case .transportSpecificIssue: add(.dnsTransportSpecificIssue, f.detail)
                 case .resolverWideDegradation, .ipv6DNSPathIssue: break   // covered by dnsSlow / dnsFailures / alternateIPv6ResolverDegraded
                 }

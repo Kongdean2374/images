@@ -12,7 +12,11 @@ public enum RootCause: String, Codable, Sendable, Hashable, CaseIterable {
     case nrSpecificIssue
     case cellularSubsystem
     case ispOrCarrierCongestion
+    /// Exported alias: generalServerOrRouteIssue.
     case serverOrRouteSpecific
+    /// Loss / elevated latency toward one provider's endpoints only (e.g. Cloudflare) while
+    /// independent peers are clean. Exported as `<provider>SpecificPathIssue`.
+    case endpointSpecificPathIssue
     case serverCapacityLimit
     case routingTransit
     case ipv6RoutingIssue

@@ -160,20 +160,63 @@ public struct TrafficEstimate: Codable, Sendable, Hashable {
 /// * `downloadCapBytes` / `uploadCapBytes` — the same per direction.
 public struct StressDataLimits: Codable, Sendable, Hashable {
     public var warningBytes: Int64?
+    /// Second, stronger warning (amber → red) before the hard cap; nil before v2.2.1.
+    public var softWarningBytes: Int64?
     public var hardCapBytes: Int64?
     public var downloadCapBytes: Int64?
     public var uploadCapBytes: Int64?
+    /// The user explicitly chose "unlimited" (the only way a cellular run is uncapped).
+    public var explicitlyUnlimited: Bool?
+    /// How the limits were chosen: "userConfigured", "cellularDefault", "explicitUnlimited" or
+    /// "unlimitedNonCellular"; nil before v2.2.1.
+    public var policy: String?
 
-    public init(warningBytes: Int64? = nil, hardCapBytes: Int64? = nil, downloadCapBytes: Int64? = nil, uploadCapBytes: Int64? = nil) {
+    public init(warningBytes: Int64? = nil, softWarningBytes: Int64? = nil, hardCapBytes: Int64? = nil, downloadCapBytes: Int64? = nil,
+                uploadCapBytes: Int64? = nil, explicitlyUnlimited: Bool? = nil, policy: String? = nil) {
         self.warningBytes = warningBytes
+        self.softWarningBytes = softWarningBytes
         self.hardCapBytes = hardCapBytes
         self.downloadCapBytes = downloadCapBytes
         self.uploadCapBytes = uploadCapBytes
+        self.explicitlyUnlimited = explicitlyUnlimited
+        self.policy = policy
     }
 
     public static let unlimited = StressDataLimits()
     public static let gigabyte: Int64 = 1_000_000_000
+    public static let megabyte: Int64 = 1_000_000
     public static let capPresetsGB: [Int] = [2, 5, 10, 20, 50]
+    /// Hard-cap choices in MB (UI).
+    public static let capPresetsMB: [Int] = [500, 1000, 1500, 2000, 5000, 10000, 20000, 50000]
+
+    /// Default for cellular when nothing was configured: warning 500 MB, soft warning 750 MB,
+    /// hard cap 1.5 GB (the 86 s v2.2.0 run used ≈ 1.02 GB).
+    public static let cellularDefault = StressDataLimits.withHardCap(1_500 * megabyte, policy: "cellularDefault")
+
+    /// Hard cap with warnings at ⅓ (warning) and ½ (soft warning) of it.
+    public static func withHardCap(_ cap: Int64, downloadCap: Int64? = nil, uploadCap: Int64? = nil, policy: String = "userConfigured") -> StressDataLimits {
+        StressDataLimits(warningBytes: cap / 3, softWarningBytes: cap / 2, hardCapBytes: cap,
+                         downloadCapBytes: downloadCap, uploadCapBytes: uploadCap, explicitlyUnlimited: false, policy: policy)
+    }
+
+    /// Limits the runner enforces: on cellular, "no limits configured" becomes `cellularDefault`
+    /// unless the user explicitly chose unlimited.
+    public func effective(onCellular: Bool) -> StressDataLimits {
+        if isLimited {
+            var l = self
+            if l.policy == nil { l.policy = "userConfigured" }
+            return l
+        }
+        if explicitlyUnlimited == true {
+            var l = self
+            l.policy = "explicitUnlimited"
+            return l
+        }
+        if onCellular { return .cellularDefault }
+        var l = self
+        l.policy = "unlimitedNonCellular"
+        return l
+    }
 
     /// Remaining bytes a transfer in `direction` may use; nil = unlimited, ≤ 0 = cap reached.
     public func remaining(_ direction: TransferDirection, down: Int64, up: Int64) -> Int64? {
@@ -289,6 +332,26 @@ public struct StressTestPlan: Codable, Sendable, Hashable {
     }
 
     public func phases(round: Int) -> [StressPlanPhase] { phases.filter { $0.round == round } }
+
+    /// Seconds of the non-throughput phases (health check, idle, loss, monitoring, DNS, route…).
+    public var diagnosticSeconds: Double {
+        phases.filter { $0.kind != .downloadStress && $0.kind != .uploadStress }.reduce(0) { $0 + $1.seconds }
+    }
+
+    /// Why the planned duration differs from the configured one:
+    ///
+    ///     none                              |planned − configured| < 1 s
+    ///     requestedBelowMinimum             configured < 60 s (clamped)
+    ///     minimumRequiredDiagnosticPhases   diagnostic floors > 60 % of T, throughput kept at 40 % of T
+    ///     minimumTransferSeconds            6 s per-transfer floor across nodes × directions × rounds
+    ///     ndt7ProtocolCap                   planned shorter: NDT7 transfers capped at 10 s
+    public func durationAdjustmentReason(configuredSeconds: Double) -> String {
+        let diff = estimatedSeconds - configuredSeconds
+        if abs(diff) < 1 { return "none" }
+        if configuredSeconds < Self.minimumSeconds { return "requestedBelowMinimum" }
+        if diff < 0 { return "ndt7ProtocolCap" }
+        return diagnosticSeconds > 0.6 * requestedSeconds ? "minimumRequiredDiagnosticPhases" : "minimumTransferSeconds"
+    }
 
     /// Expected bytes if the link sustains the given rates for every transfer phase.
     public func trafficEstimate(downloadMbps: Double, uploadMbps: Double) -> TrafficEstimate {

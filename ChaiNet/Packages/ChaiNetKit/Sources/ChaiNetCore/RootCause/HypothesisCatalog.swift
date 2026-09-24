@@ -182,18 +182,29 @@ public enum HypothesisCatalog {
             verificationTests: [.testAlternateServers, .repeatAtDifferentTime, .runTraceroute, .contactProvider], limitations: []),
 
         HypothesisModel(
-            cause: .serverOrRouteSpecific, layer: .server, title: "特定伺服器或其路由異常",
-            explanation: "只有單一伺服器異常而其他獨立端點正常，問題位於該伺服器或通往它的路徑，而不是你的網路。",
+            cause: .serverOrRouteSpecific, layer: .server, title: "一般伺服器 / 路由問題（generalServerOrRouteIssue）",
+            explanation: "測速伺服器或其路由整體異常（吞吐量 / 健康檢查 / 回應時間），而非你的網路。僅少數端點的 ICMP 遺失另見「特定端點路徑問題」。",
             prior: HypothesisModel.defaultPrior,
             // Normal latency on some servers can't exclude one endpoint / path: allServersNormal only
             // lowers the score. Every server anomalous (a general problem) is the orthogonal control.
             weights: [.singleServerAnomalous: 2.5, .regionSpecificAnomaly: 1.0, .serverUnhealthy: 1.5, .ttfbSlow: 0.5,
-                      .serverTransferInvalid: 1.5, .endpointSpecificLossObserved: 1.2, .multipleServersAnomalous: -1.0,
+                      .serverTransferInvalid: 1.5, .multipleServersAnomalous: -1.0,
                       .serverHealthy: -0.3, .allServersNormal: -1.5],
             ruledOutBy: [.allServersAnomalous], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.crossServer], confidenceCap: 0.9,
             verificationTests: [.testAlternateServers, .runTraceroute], limitations: [],
             ruleOutBlockedBy: [.serverTransferInvalid]),
+
+        HypothesisModel(
+            cause: .endpointSpecificPathIssue, layer: .server, title: "特定端點 / 業者路徑問題",
+            explanation: "只有特定業者的端點（例如 Cloudflare）出現遺失，且延遲明顯高於其他獨立端點，而 Google / Apple 等對照正常：問題可能在通往該業者的路徑或其邊緣節點。ICMP 遺失也可能是端點對 ICMP 限速，因此最多只到「可能」，不代表該業者路由故障。",
+            prior: HypothesisModel.defaultPrior,
+            weights: [.endpointSpecificLossObserved: 1.5, .endpointLatencyElevatedVsPeers: 0.8, .singleServerAnomalous: 0.8,
+                      .regionSpecificAnomaly: 0.5, .possibleICMPRateLimiting: -0.3, .allServersAnomalous: -1.5],
+            ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
+            scope: .all, requiredDimensions: [.loss], confidenceCap: 0.65,
+            verificationTests: [.testAlternateServers, .runTraceroute, .repeatAtDifferentTime],
+            limitations: ["ICMP 遺失可能是端點限速（rate limiting），無法由 iPhone 端排除；需以 TCP / HTTP 或不同時段重測確認。"]),
 
         HypothesisModel(
             cause: .serverCapacityLimit, layer: .server, title: "測速伺服器頻寬限制",

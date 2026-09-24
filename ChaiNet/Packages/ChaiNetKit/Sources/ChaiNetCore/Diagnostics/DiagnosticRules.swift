@@ -165,16 +165,22 @@ public enum DiagnosticRules {
             recommendation: "檢查路由器日誌、線路狀態或行動訊號覆蓋。")
     }
 
-    /// Scoped to the probed host: a TCP fallback of URLSession is inconclusive for HTTP/3, never
-    /// a network-wide "HTTP/3 unavailable".
-    public static let http3Unavailable = ClosureRule(.http3Unavailable) { m in
+    /// Scoped to the probed host: a TCP fallback of URLSession is endpoint-specific, never a
+    /// network-wide "HTTP/3 unavailable" (QUIC may well work to other endpoints).
+    public static let http3Unavailable = ClosureRule(.http3FallbackObserved) { m in
         guard m.http3Supported == false else { return nil }
+        // Only several independent strict HTTP/3 endpoints all failing is a general statement.
+        if let attempted = m.strictHTTP3EndpointsAttempted, attempted >= 2, m.strictHTTP3EndpointsFailed == attempted {
+            return DiagnosticFinding(code: .generalHttp3Unavailable, severity: .info, title: "多個端點皆未協商 HTTP/3",
+                detail: "\(attempted) 個獨立端點的嚴格 HTTP/3 嘗試全部退回 TCP。",
+                recommendation: "HTTP/3 無法使用時會自動退回 TCP 上的 HTTP，一般不影響使用。")
+        }
         let host = m.http3ProbeHost ?? "受測端點"
-        let proto = m.negotiatedHTTP?.displayName ?? "TCP"
+        let proto = (m.http3FallbackProtocol ?? m.negotiatedHTTP)?.displayName ?? "TCP"
         let detail = m.quicReachable == true
-            ? "QUIC 交握在其他端點成功（UDP 443 可達），但對 \(host) 的 HTTP 請求退回 \(proto)。iOS URLSession 可能自動退回 TCP，無法嚴格驗證 HTTP/3；此結果僅限該端點，不代表整體網路不支援 HTTP/3。"
-            : "對 \(host) 的 HTTP 請求退回 \(proto)，且未觀察到成功的 QUIC 交握。可能是伺服器不支援、個別端點問題，或 UDP 443 被阻擋；需多端點 QUIC 結果才能區分。"
-        return DiagnosticFinding(code: .http3Unavailable, severity: .info, title: "\(host) 未協商 HTTP/3",
+            ? "QUIC 交握在其他端點成功（UDP 443 可達），但對 \(host) 的 HTTP/3 嘗試退回 \(proto)。此結果僅限該端點（endpoint=\(host)），不代表整體網路不支援 HTTP/3。"
+            : "對 \(host) 的 HTTP/3 嘗試退回 \(proto)，且未觀察到成功的 QUIC 交握。可能是伺服器選擇、個別端點問題，或 UDP 443 被阻擋；需多端點結果才能區分。"
+        return DiagnosticFinding(code: .http3FallbackObserved, severity: .info, title: "\(host) 未協商 HTTP/3（退回 \(proto)）",
             detail: detail,
             recommendation: "HTTP/3 無法使用時會自動退回 TCP 上的 HTTP，一般不影響使用。")
     }
