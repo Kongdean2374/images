@@ -561,7 +561,7 @@ final class DiagnosticReportTests: XCTestCase {
     func testTextReportSections() {
         let (report, gen) = makeReport()
         let text = gen.text(report)
-        XCTAssertTrue(text.hasPrefix("ChaiNet Diagnostic Report v1"))
+        XCTAssertTrue(text.hasPrefix("ChaiNet Diagnostic Report v2"))
         for section in ["Session summary", "Environment", "Statistics", "Raw measurements", "Timeline events", "Anomalies",
                         "Cross-test comparisons", "Evidence", "Diagnostic hypotheses", "Ruled-out causes", "Suggested next tests",
                         "Technical conclusion", "Platform limitations"] {
