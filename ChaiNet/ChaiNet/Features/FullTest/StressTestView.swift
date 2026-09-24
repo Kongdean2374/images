@@ -213,6 +213,12 @@ struct StressResultView: View {
                         Text("\(s.plan.rounds) 輪 · \(s.plan.throughputNodes.count) 個吞吐量節點 · \(s.controlProbes.count) 個對照探測")
                             .font(.caption).foregroundStyle(Theme.textSecondary)
                         Text(s.lossConfirmation.verdict.displayName).font(.caption2).foregroundStyle(Theme.textSecondary)
+                        if let c = s.scoreConfidence {
+                            Text("分數信心：\(c.displayName)").font(.caption2).foregroundStyle(c == .high ? Theme.textSecondary : Theme.warning)
+                        }
+                        if !s.invalidTransfers().isEmpty {
+                            Text("\(s.invalidTransfers().count) 次傳輸無效，已排除於統計與分數").font(.caption2).foregroundStyle(Theme.warning)
+                        }
                     }
                     Spacer()
                 }
@@ -255,8 +261,10 @@ struct StressResultView: View {
         let large = s.downloadAggregate?.largeVariance == true || s.uploadAggregate?.largeVariance == true
         MetricTile(title: "持續下載", value: dl.value, unit: dl.unit, caption: "跨節點中位數", symbol: "arrow.down.circle", tint: Theme.download)
         MetricTile(title: "持續上傳", value: ul.value, unit: ul.unit, caption: "跨節點中位數", symbol: "arrow.up.circle", tint: Theme.upload)
-        MetricTile(title: "下載穩定度", value: Format.number(s.stability(.download), digits: 0), unit: "%", symbol: "waveform.path", tint: Theme.download)
-        MetricTile(title: "上傳穩定度", value: Format.number(s.stability(.upload), digits: 0), unit: "%", symbol: "waveform.path", tint: Theme.upload)
+        MetricTile(title: "下載穩定度", value: Format.number(s.stability(.download), digits: 0), unit: "%",
+                   caption: Self.stabilityCaption(s.stabilityUnavailableReason(.download)), symbol: "waveform.path", tint: Theme.download)
+        MetricTile(title: "上傳穩定度", value: Format.number(s.stability(.upload), digits: 0), unit: "%",
+                   caption: Self.stabilityCaption(s.stabilityUnavailableReason(.upload)), symbol: "waveform.path", tint: Theme.upload)
         MetricTile(title: "閒置 Ping", value: Format.number(s.preLoadLatency?.rtt?.median, digits: 0), unit: "ms", symbol: "timer", tint: Theme.latency)
         MetricTile(title: "負載 Ping", value: Format.number(loaded, digits: 0), unit: "ms", caption: "下載 / 上傳較高者", symbol: "timer", tint: Theme.latency)
         MetricTile(title: "抖動", value: Format.number(s.preLoadLatency?.rtt?.jitter, digits: 1), unit: "ms", symbol: "chart.line.uptrend.xyaxis", tint: Theme.latency)
@@ -265,7 +273,8 @@ struct StressResultView: View {
         MetricTile(title: "僅壓力 ICMP 遺失", value: Format.number(s.lossConfirmation.stressLossPercent, digits: 2), unit: "%",
                    caption: s.lossConfirmation.verdict == .possibleICMPRateLimiting ? "可能為 ICMP 限速" : "50 pps 壓力探測",
                    symbol: "bolt.badge.clock", tint: Theme.warning)
-        MetricTile(title: "Bufferbloat", value: Format.number(s.bufferbloatMs, digits: 0), unit: "ms", caption: "負載 − 閒置（佇列位置未知）",
+        MetricTile(title: "Bufferbloat", value: Format.number(s.bufferbloatMs, digits: 0), unit: "ms",
+                   caption: s.bufferbloatMs == nil ? "無有效負載（insufficientLoad）" : "負載 − 閒置（佇列位置未知）",
                    symbol: "tray.full", tint: Theme.warning)
         MetricTile(title: "跨節點一致性", value: cv.map { large ? "差異大" : ($0 < 0.2 ? "一致" : "尚可") } ?? Format.dash,
                    caption: cv.map { "CV \(Format.number($0, digits: 2))" }, symbol: "square.stack.3d.up", tint: large ? Theme.critical : Theme.accent)
@@ -274,6 +283,15 @@ struct StressResultView: View {
                    symbol: "clock", tint: Theme.info)
         MetricTile(title: "總流量", value: Format.bytes(s.totalBytes), caption: "↓ \(Format.bytes(s.totalDownloadBytes)) ↑ \(Format.bytes(s.totalUploadBytes))",
                    symbol: "externaldrive", tint: Theme.info)
+    }
+
+    static func stabilityCaption(_ reason: String?) -> String? {
+        guard let reason else { return nil }
+        switch reason {
+        case "measurementSamplingArtifact": return "取樣批次化，無法可靠計算"
+        case "noValidTransfer": return "沒有有效傳輸"
+        default: return "資料不足"
+        }
     }
 
     private func buildExports() {
@@ -312,9 +330,11 @@ struct StressTechnicalView: View {
                     section("各節點 · 各輪") {
                         ForEach(s.transfers) { t in
                             let name = s.nodes.first { $0.id == t.nodeID }?.name ?? t.nodeID
-                            KeyValueRow(key: "\(name) 第 \(t.round) 輪 \(t.direction == .download ? "↓" : "↑")（\(t.method)）",
-                                        value: t.speed.map { "\(Format.speed($0.summary.medianMbps, settings: settings.settings)) · 負載 \(Format.ms(t.loadedLatency?.rtt?.median))" }
-                                            ?? "失敗：\(t.error ?? "—")")
+                            KeyValueRow(key: "\(name) 第 \(t.round) 輪 \(t.direction == .download ? "↓" : "↑")\((t.attempt ?? 1) > 1 ? "（重試）" : "")（\(t.method)）",
+                                        value: t.isValid
+                                            ? "\(Format.speed(t.rateMbps, settings: settings.settings)) · 負載 \(t.loadValid ? Format.ms(t.loadedLatency?.rtt?.median) : "無效負載")"
+                                            : "無效：\(t.validity?.reason?.rawValue ?? "endpointFailure")（\(Format.bytes(t.bytes))）",
+                                        valueColor: t.isValid ? Theme.textPrimary : Theme.warning)
                         }
                     }
                     ForEach([s.downloadAggregate, s.uploadAggregate].compactMap { $0 }, id: \.direction) { a in

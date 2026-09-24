@@ -205,7 +205,10 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertEqual(s.postLoadLatency.count, 2)
         XCTAssertNotNil(s.stressProbe)
         XCTAssertEqual(s.stressProbe?.packetsPerSecond, 50)
-        XCTAssertGreaterThanOrEqual(s.controlProbes.count, 3, "primary ICMP + independent ICMP + QUIC")
+        XCTAssertGreaterThanOrEqual(s.controlProbes.count, 3, "primary ICMP + two independent ICMP")
+        XCTAssertTrue(s.controlProbes.allSatisfy(\.isPacketLossProbe), "no QUIC handshakes in the loss verdict")
+        XCTAssertNil(r.download, "generic sections never expose a single node's transfer")
+        XCTAssertNotNil(s.recycledSeconds)
         XCTAssertTrue(s.controlProbes.allSatisfy { $0.packetsPerSecond == 5 })
         XCTAssertTrue(Set(s.phases.map(\.kind)).isSuperset(of: [.healthCheck, .idleLatency, .downloadStress, .uploadStress, .postLoadRecovery,
                                                                  .packetLossStress, .monitoring, .dnsProtocols, .ipFamilies, .crossServerValidation, .routeMTU]))
@@ -300,5 +303,57 @@ struct StuckDNSEngine: DNSBenchmarkEngineProtocol {
     func run(resolvers: [DNSResolverDescriptor], domains: [String],
              progress: @escaping @Sendable (DNSResolverResult) -> Void) async throws -> DNSBenchmarkResult {
         await withCheckedContinuation { (_: CheckedContinuation<DNSBenchmarkResult, Never>) in }
+    }
+}
+
+
+final class StressTransferValidityRunnerTests: XCTestCase {
+    func run(_ runner: TestRunner) async throws -> TestResult {
+        let nodes = TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn)
+        var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: ServerDescriptor.builtIn,
+                                          settings: AppSettings(), onCellular: true)
+        config.stressPlan = StressTestPlan.make(totalSeconds: 300, nodes: nodes)
+        config.stressTimeScale = 0.001
+        var final: TestResult?
+        for try await e in runner.run(config) { if case .completed(let r) = e { final = r } }
+        return try XCTUnwrap(final)
+    }
+
+    /// v2.1.1: Cloudflare round 2 download returned a tiny body (0.005 Mbps) and was counted.
+    /// HTTP engine call order: r1 ↓, r1 ↑, r2 ↓ (tiny), r2 ↓ retry (tiny), r2 ↑.
+    func testTinyRound2IsRetriedThenExcluded() async throws {
+        var runner = TestRunner.mock(sampleDelay: 0)
+        runner.speed = MockSpeedTestEngine(ratesByCall: [431, 50, 0.005, 0.005, 50])
+        let r = try await run(runner)
+        let s = try XCTUnwrap(r.stress)
+        let attempts = s.transfers.filter { $0.nodeID == "cloudflare" && $0.round == 2 && $0.direction == .download }
+        XCTAssertEqual(attempts.map { $0.attempt ?? 1 }, [1, 2])
+        XCTAssertTrue(attempts.allSatisfy { !$0.isValid && $0.validity?.reason == .insufficientPayload })
+        XCTAssertEqual(s.failedSlots().count, 1)
+        XCTAssertEqual(s.downloadAggregate!.values.first { $0.nodeID == "cloudflare" }!.mbps, 431, accuracy: 1)
+        XCTAssertEqual(s.scoreConfidence, .medium)
+        XCTAssertTrue(r.notes.contains { $0.contains("重試仍失敗") })
+        XCTAssertNotEqual(r.stress?.lossConfirmation.verdict, .inconclusive)
+    }
+
+    func testRetryRecovers() async throws {
+        var runner = TestRunner.mock(sampleDelay: 0)
+        runner.speed = MockSpeedTestEngine(ratesByCall: [431, 50, 0.005, 420, 50])
+        let s = try XCTUnwrap(try await run(runner).stress)
+        XCTAssertTrue(s.failedSlots().isEmpty)
+        XCTAssertEqual(s.invalidTransfers().count, 1, "the failed first attempt is kept as evidence")
+        XCTAssertEqual(s.transfers(.download).filter { $0.nodeID == "cloudflare" }.count, 2)
+    }
+
+    func testBatchedUploadThroughRunner() async throws {
+        var runner = TestRunner.mock(sampleDelay: 0)
+        runner.speed = MockSpeedTestEngine(mbps: 200, sampleCount: 80, batchedUpload: true)
+        runner.ndt7 = MockSpeedTestEngine(mbps: 100, sampleCount: 80, batchedUpload: true)
+        let r = try await run(runner)
+        let s = try XCTUnwrap(r.stress)
+        XCTAssertNil(s.stability(.upload))
+        XCTAssertEqual(s.stabilityUnavailableReason(.upload), "measurementSamplingArtifact")
+        XCTAssertNotNil(s.stability(.download))
+        XCTAssertFalse(r.findings.contains { $0.code == .unstableUpload })
     }
 }

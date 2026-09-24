@@ -85,10 +85,15 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case downloadBufferbloat, uploadBufferbloat, noBufferbloat
     /// Latency stayed elevated after the load stopped.
     case slowPostLoadRecovery
+    /// Measured condition: loaded − idle latency ≥ 30 ms on a valid load (cause / location separate).
+    case loadedLatencyInflationObserved
     // Application / protocol
     case dnsSlow, dnsFailures, dnsHealthy
     /// Median fine but P95 ≥ 200 ms and ≥ 3 × median (occasional very slow lookups).
     case dnsHighTailLatency
+    /// Scoped DNS facts: the *system* resolver's median is fine (says nothing about its tail or
+    /// other resolvers); tail latency seen on the system resolver; an alternate IPv6 resolver degraded.
+    case systemDNSHealthy, dnsHighTailLatencyObserved, alternateIPv6ResolverDegraded
     case tcpConnectSlow, tlsSlow, ttfbSlow
     case http3Negotiated, quicBlocked, quicEndpointFailure, quicImplementationFailure
     /// A QUIC handshake succeeded (UDP 443 reachable) — says nothing about HTTP/3 negotiation.
@@ -106,6 +111,10 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case regionSpecificAnomaly
     case serverThroughputOutlierLow, crossServerConsistentThroughput, higherLatencyRelativeToPeers
     case largeCrossProviderThroughputVariance, crossProviderThroughputConsistent
+    /// Every node answered its pre-test health check (says nothing about throughput).
+    case allServerHealthChecksPassed
+    /// A throughput transfer to a server returned an invalid response (error page, tiny body, 429…) even after retry.
+    case serverTransferInvalid
     // Route
     case routeLatencyStep, intermediateHopICMPDeprioritized
     // Sustained load
@@ -130,9 +139,10 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
             .latency
         case .lossNone, .lossHigh, .lossSevere, .lossBursty, .lossRandom, .possibleICMPRateLimiting:
             .loss
-        case .downloadBufferbloat, .uploadBufferbloat, .noBufferbloat, .slowPostLoadRecovery:
+        case .downloadBufferbloat, .uploadBufferbloat, .noBufferbloat, .slowPostLoadRecovery, .loadedLatencyInflationObserved:
             .bufferbloat
-        case .dnsSlow, .dnsFailures, .dnsHealthy, .dnsHighTailLatency:
+        case .dnsSlow, .dnsFailures, .dnsHealthy, .dnsHighTailLatency, .systemDNSHealthy, .dnsHighTailLatencyObserved,
+             .alternateIPv6ResolverDegraded:
             .dns
         case .tcpConnectSlow, .tlsSlow, .ttfbSlow, .http3Negotiated, .quicBlocked, .quicEndpointFailure, .quicImplementationFailure,
              .quicReachable:
@@ -148,7 +158,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
             .stabilityMonitoring
         case .singleServerAnomalous, .multipleServersAnomalous, .allServersAnomalous, .allServersNormal, .regionSpecificAnomaly,
              .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers,
-             .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent:
+             .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent, .allServerHealthChecksPassed, .serverTransferInvalid:
             .crossServer
         case .ipv6DegradedOnly, .ipv4DegradedOnly, .ipFamiliesEquivalent, .ipv6Unavailable:
             .ipFamily
@@ -189,6 +199,7 @@ extension EvidenceCode {
         switch self {
         case .vpnActive, .vpnInactive, .possibleICMPRateLimiting, .intermediateHopICMPDeprioritized: .heuristic
         case .noCellularTests, .no5GTests, .cellularRadioMetricsUnavailable, .noBaseline, .interfaceProbeUnavailable: .notTested
+        case .allServerHealthChecksPassed, .serverTransferInvalid: .measured
         default:
             switch dimension {
             case .crossServer, .ipFamily, .interfaceCompare, .radioCompare, .baseline: .derived

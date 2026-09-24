@@ -86,6 +86,22 @@ public struct SpeedSummary: Codable, Sendable, Hashable {
     /// Share of steady 100 ms intervals that reported zero bytes.
     public var zeroIntervalFraction: Double?
 
+    /// False when the timeline shows progress-reporting batching: short-window statistics
+    /// (P10, minimum, peak, drop windows, stability) then describe the reporting cadence, not the
+    /// network, and must not be used. Bytes / elapsed time (the average) stays valid.
+    public var shortWindowReliable: Bool { samplingArtifactDetected != true }
+    public var reliableP10Mbps: Double? { shortWindowReliable ? p10Mbps : nil }
+    public var reliableMinimumMbps: Double? { shortWindowReliable ? minimumMbps : nil }
+    public var reliablePeakMbps: Double? { shortWindowReliable ? peakMbps : nil }
+    public var reliableStabilityScore: Double? { shortWindowReliable ? stability.score : nil }
+    public var reliableDropCount: Int? { shortWindowReliable ? stability.dropCount : nil }
+    /// "measurementSamplingArtifact" when stability is unavailable because of batching.
+    public var stabilityUnavailableReason: String? { shortWindowReliable ? nil : "measurementSamplingArtifact" }
+    /// Sustained rate: P10 of windows when reliable, else the byte-count average.
+    public var sustainedMbps: Double { shortWindowReliable ? p10Mbps : averageMbps }
+    /// Robust central rate: window median when reliable, else bytes / elapsed time.
+    public var robustMbps: Double { shortWindowReliable ? medianMbps : averageMbps }
+
     /// Human-readable statement of how the statistics were computed.
     public var methodDescription: String {
         let w = windowSamples ?? 1
@@ -106,6 +122,12 @@ public struct SpeedResult: Codable, Sendable, Hashable {
     public var streamChanges: [StreamChange]
     /// True when the test was stopped before its planned duration.
     public var wasCancelled: Bool
+    /// HTTP status / content type / payload / per-stream counters (nil in older results and mocks).
+    public var diagnostics: TransferDiagnostics?
+    /// Whether this transfer produced a real, usable measurement (nil = not validated, treated valid).
+    public var validity: TransferValidity?
+
+    public var isValid: Bool { validity?.valid ?? true }
 
     public init(direction: TransferDirection, samples: [SpeedSample], summary: SpeedSummary, streamChanges: [StreamChange], wasCancelled: Bool) {
         self.direction = direction
@@ -265,7 +287,9 @@ public enum SpeedCalculator {
             medianMbps: Percentile.value(0.5, sorted: sorted)!,
             p95Mbps: Percentile.value(0.95, sorted: sorted)!,
             p10Mbps: Percentile.value(0.10, sorted: sorted)!,
-            stability: StabilityCalculator.evaluate(windows),
+            // Artifact-contaminated timelines (callback / chunk batching) can't support short-window
+            // variability: stability is not computed rather than reported as a network problem.
+            stability: requestedWindow == nil && detection.detected ? .undefined : StabilityCalculator.evaluate(windows),
             totalBytes: totalBytes,
             duration: duration,
             warmupSampleCount: warm + trans,

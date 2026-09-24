@@ -67,6 +67,7 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
 
     static func execute(_ c: SpeedTestConfiguration, emit: @escaping @Sendable (SpeedTestEvent) -> Void) async throws -> SpeedResult {
         let counter = ByteCounter()
+        let collector = TransferCollector(isDownload: c.direction == .download, expectedBytes: Int64(c.chunkBytes))
         let payload: Data? = c.direction == .upload ? UploadPayload.make(bytes: c.chunkBytes) : nil
         let streams = LockedValue<[TransferStream]>([])
         let stopwatch = Stopwatch()
@@ -107,7 +108,7 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
             func addStreams(to target: Int, at offset: Double) {
                 guard target > activeCount else { return }
                 for _ in activeCount..<target {
-                    let stream = TransferStream(counter: counter, timeout: max(10, c.maxDuration))
+                    let stream = TransferStream(counter: counter, timeout: max(10, c.maxDuration), collector: collector)
                     streams.withLock { $0.append(stream) }
                     group.addTask { await worker(stream) }
                 }
@@ -163,6 +164,9 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
 
         if cancelled || Task.isCancelled { throw CancellationError() }
         let summary = SpeedCalculator.summarize(samples: samples, streamChanges: changes, warmupDuration: c.warmupDuration)
-        return SpeedResult(direction: c.direction, samples: samples, summary: summary, streamChanges: changes, wasCancelled: false)
+        var result = SpeedResult(direction: c.direction, samples: samples, summary: summary, streamChanges: changes, wasCancelled: false)
+        result.diagnostics = collector.snapshot(perStreamBytes: streams.current.map(\.bytes))
+        result.validity = TransferValidator.evaluate(result)
+        return result
     }
 }

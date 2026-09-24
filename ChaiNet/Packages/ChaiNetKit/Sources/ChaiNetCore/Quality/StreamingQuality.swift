@@ -49,7 +49,7 @@ public enum StreamingQualityCalculator {
 
     public static func evaluate(download: SpeedResult, ttfbMs: Double?, bufferSeconds: Double = 2,
                                 tiers: [StreamingTier] = StreamingTier.standard, score: Int?) -> StreamingQualityResult {
-        let sustained = download.summary.p10Mbps
+        let sustained = download.summary.sustainedMbps
         let verdicts = tiers.map { tier in
             StreamingTierVerdict(tier: tier, supported: sustained >= tier.requiredMbps * headroomFactor,
                                  headroom: tier.requiredMbps > 0 ? sustained / tier.requiredMbps : 0)

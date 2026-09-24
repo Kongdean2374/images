@@ -122,7 +122,9 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         let contradicting = evidence.filter { (model.weights[$0.code] ?? 0) < 0 }
         // 2. Ruling out needs a decisive, directly measured or derived fact — never a
         //    "not tested" / heuristic observation.
-        let rulingOut = evidence.filter { model.ruledOutBy.contains($0.code) && ($0.kind == .measured || $0.kind == .derived) }
+        // An unexplained fact that the ruling-out evidence can't account for keeps the hypothesis open.
+        let blocked = !codes.isDisjoint(with: model.ruleOutBlockedBy)
+        let rulingOut = blocked ? [] : evidence.filter { model.ruledOutBy.contains($0.code) && ($0.kind == .measured || $0.kind == .derived) }
 
         let score = model.prior + codes.reduce(0.0) { $0 + (model.weights[$1] ?? 0) }
         var confidence = min(model.confidenceCap, Self.sigmoid(score))
@@ -174,7 +176,29 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         }
         // Don't suggest switching to a network the user is already comparing, or LTE while on LTE only.
         var seen = Set<RecommendedTest>()
-        return tests.filter { seen.insert($0).inserted }
+        return tests.filter { Self.applicable($0, codes: codes) && seen.insert($0).inserted }
+    }
+
+    /// Environment-aware filter: a recommendation must make sense for the network that was tested.
+    ///
+    ///     moveCloserToRouter / pauseOtherDevices  → only with a Wi-Fi test
+    ///     disableVPNAndRepeat                     → only with a VPN detected
+    ///     disableLowDataMode                      → only with Low Data Mode on
+    ///     repeatOnCellular                        → not when every test already is cellular
+    ///     repeatOnWiFi                            → not when every test already is Wi-Fi
+    ///     repeatOnLTE / repeatOn5G                → not when the only radio tested already is that one
+    static func applicable(_ test: RecommendedTest, codes: Set<EvidenceCode>) -> Bool {
+        let wifi = codes.contains(.onWiFi), cellular = codes.contains(.onCellular)
+        switch test {
+        case .moveCloserToRouter, .pauseOtherDevices: return wifi
+        case .disableVPNAndRepeat: return codes.contains(.vpnActive)
+        case .disableLowDataMode: return codes.contains(.lowDataMode)
+        case .repeatOnCellular: return !(cellular && !wifi)
+        case .repeatOnWiFi: return !(wifi && !cellular)
+        case .repeatOnLTE: return !(codes.contains(.onLTE) && !codes.contains(.on5G))
+        case .repeatOn5G: return !(codes.contains(.on5G) && !codes.contains(.onLTE))
+        default: return true
+        }
     }
 
     func prioritizeTests(_ hypotheses: [DiagnosticHypothesis]) -> [PrioritizedTest] {

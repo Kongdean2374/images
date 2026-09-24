@@ -84,11 +84,34 @@ public struct StressNode: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+// MARK: - Budget recycling
+
+/// Keeps the actual duration close to the configured one. Phases that finish early (DNS,
+/// protocols, a failed node…) leave budget; it is spent on more stress, never dropped:
+///
+///     remaining ≥ one full round + 2 s  and  extra rounds < 3   → another throughput round
+///     otherwise remaining ≥ 3 s                                  → extended monitoring (remaining − 1 s)
+///     otherwise                                                  → done
+public enum StressBudget {
+    public enum Action: Equatable, Sendable {
+        case extraRound
+        case extendedMonitoring(seconds: Double)
+        case done
+    }
+    public static let maxExtraRounds = 3
+
+    public static func next(remaining: Double, roundCost: Double, extraRoundsDone: Int) -> Action {
+        if roundCost > 0, remaining >= roundCost + 2, extraRoundsDone < maxExtraRounds { return .extraRound }
+        if remaining >= 3 { return .extendedMonitoring(seconds: remaining - 1) }
+        return .done
+    }
+}
+
 // MARK: - Plan
 
 public enum StressPhaseKind: String, Codable, Sendable, Hashable, CaseIterable {
     case healthCheck, warmUp, idleLatency, downloadStress, uploadStress, postLoadRecovery, packetLossStress,
-         monitoring, dnsProtocols, ipFamilies, crossServerValidation, routeMTU
+         monitoring, dnsProtocols, ipFamilies, crossServerValidation, routeMTU, extendedMonitoring
 
     public var title: String {
         switch self {
@@ -104,6 +127,7 @@ public enum StressPhaseKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .ipFamilies: "IPv4 / IPv6"
         case .crossServerValidation: "跨節點驗證"
         case .routeMTU: "路由追蹤 / MTU"
+        case .extendedMonitoring: "延長監測（回收未用時間）"
         }
     }
 }

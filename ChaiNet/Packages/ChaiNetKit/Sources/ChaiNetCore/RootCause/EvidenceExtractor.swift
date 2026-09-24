@@ -40,7 +40,10 @@ public struct EvidenceSet: Codable, Sendable, Hashable {
 /// | latencySpikesFrequent  | ≥ 3 spikes                                                  |
 /// | *Bufferbloat           | loaded − idle median > 100 ms; noBufferbloat: all < 30 ms   |
 /// | dnsSlow / Failures     | system median > 100 ms or > best + 30 ms / ≥ 20 % failures  |
-/// | dnsHighTailLatency     | system P95 ≥ 200 ms and ≥ 3 × median (dnsHealthy suppressed) |
+/// | systemDNSHealthy       | system resolver median fine, failures < 20 % (scoped fact)  |
+/// | dnsHighTailLatencyObserved | system P95 ≥ 150 ms and ≥ 3 × median                    |
+/// | alternateIPv6ResolverDegraded | IPv6 alternate resolver ≥ 10 % failures or P95 ≥ 200 ms |
+/// | loadedLatencyInflationObserved | loaded − idle ≥ 30 ms on a valid load                |
 /// | tcpConnectSlow / tlsSlow / ttfbSlow | > 150 / > 250 / TTFB − TCP − TLS > 300 ms      |
 /// | http3Negotiated        | an HTTP response actually used h3                           |
 /// | quicReachable          | a QUIC handshake completed (says nothing about HTTP/3)      |
@@ -49,6 +52,8 @@ public struct EvidenceSet: Codable, Sendable, Hashable {
 public struct EvidenceExtractor: Sendable {
     public var crossTestAnalyzer: CrossTestAnalyzer
     public var anomalyDetector: AnomalyDetector
+    /// Loaded − idle latency at which the rise is reported as a measured condition.
+    public static let loadedInflationThresholdMs = 30.0
 
     public init(crossTestAnalyzer: CrossTestAnalyzer = CrossTestAnalyzer(), anomalyDetector: AnomalyDetector = AnomalyDetector()) {
         self.crossTestAnalyzer = crossTestAnalyzer
@@ -77,7 +82,12 @@ public struct EvidenceExtractor: Sendable {
 
         // Cross-test comparisons.
         let cross = crossTestAnalyzer.analyze(session, endpointBaselines: baselines?.endpoints ?? [])
-        evidence += crossEvidence(cross, measured: &measured)
+        var crossFacts = crossEvidence(cross, measured: &measured)
+        // Latency probes of other endpoints can't vouch for a server whose transfer was invalid.
+        if evidence.contains(where: { $0.code == .serverTransferInvalid }) {
+            crossFacts.removeAll { $0.code == .allServersNormal }
+        }
+        evidence += crossFacts
 
         // Baseline.
         var comparisons: [BaselineComparison] = []
@@ -209,6 +219,18 @@ public struct EvidenceExtractor: Sendable {
         // Loss
         let lossStats = r.packetLoss ?? r.gaming?.idle ?? r.voice?.latency ?? r.monitoring?.statistics ?? r.idleLatency
         if let st = r.stress {
+            // Health checks and throughput validity are separate facts.
+            let checked = st.nodes.filter { $0.healthy != nil }
+            if !checked.isEmpty && checked.allSatisfy({ $0.healthy == true }) {
+                add(.allServerHealthChecksPassed, "\(checked.count) 個節點健康檢查全部通過（僅代表可連線，不代表吞吐量測試成功）")
+            }
+            for t in st.invalidTransfers() {
+                let name = st.nodes.first { $0.id == t.nodeID }?.name ?? t.nodeID
+                let recovered = st.transfers.contains { $0.nodeID == t.nodeID && $0.round == t.round && $0.direction == t.direction && $0.isValid }
+                add(.serverTransferInvalid,
+                    "\(name) 第 \(t.round) 輪\(t.direction == .download ? "下載" : "上傳")第 \(t.attempt ?? 1) 次傳輸無效（\(t.validity?.reason?.rawValue ?? "invalid")：\(t.validity?.detail ?? "")）"
+                        + (recovered ? "，重試後正常" : "，未能以重試排除"), Double(t.bytes), "bytes")
+            }
             // Stress: only multi-probe (control) loss counts; the 50 pps ICMP probe alone never does.
             let lc = st.lossConfirmation
             let stressText = lc.stressLossPercent.map { "50 pps ICMP 壓力探測 \(Fmt.d($0, 1))%" } ?? "無 50 pps 壓力探測"
@@ -266,6 +288,13 @@ public struct EvidenceExtractor: Sendable {
             measured.insert(.bufferbloat)
             if let v = dlBloat, v > 100 { add(.downloadBufferbloat, "下載時延遲增加 \(Fmt.d(v, 0)) ms", v, "ms") }
             if let v = ulBloat, v > 100 { add(.uploadBufferbloat, "上傳時延遲增加 \(Fmt.d(v, 0)) ms", v, "ms") }
+            // The measured condition (latency rises under a valid load) is separate from any hypothesis
+            // about where the queue is (queue_location=unknown).
+            let worst = [dlBloat, ulBloat].compactMap { $0 }.max() ?? 0
+            if worst >= Self.loadedInflationThresholdMs {
+                let parts = [dlBloat.map { "下載 +\(Fmt.d($0, 0))" }, ulBloat.map { "上傳 +\(Fmt.d($0, 0))" }].compactMap { $0 }.joined(separator: " / ")
+                add(.loadedLatencyInflationObserved, "負載時延遲上升（\(parts) ms，queue_location=unknown）", worst, "ms")
+            }
             if [dlBloat, ulBloat].compactMap({ $0 }).allSatisfy({ $0 < 30 }) {
                 add(.noBufferbloat, "滿載時延遲增加 < 30 ms（下載 \(dlBloat.map { Fmt.d($0, 0) } ?? "—") / 上傳 \(ulBloat.map { Fmt.d($0, 0) } ?? "—") ms）")
             }
@@ -280,16 +309,27 @@ public struct EvidenceExtractor: Sendable {
             }
             if let rtt = system.statistics.rtt {
                 let sys = rtt.median
-                let tail = DNSTail.isHigh(median: sys, p95: rtt.p95)
-                if tail {
-                    add(.dnsHighTailLatency, "系統 DNS P95 \(Fmt.d(rtt.p95, 0)) ms（中位數 \(Fmt.d(sys, 0)) ms）：highTailLatencyObserved，偶有查詢特別慢",
+                if DNSTail.isHigh(median: sys, p95: rtt.p95) {
+                    add(.dnsHighTailLatencyObserved, "系統 DNS P95 \(Fmt.d(rtt.p95, 0)) ms（中位數 \(Fmt.d(sys, 0)) ms）：dnsHighTailLatencyObserved，偶有查詢特別慢",
                         rtt.p95, "ms")
                 }
                 if sys > 100 || (m.bestDNSMs.map { sys - $0 > 30 } ?? false) {
                     add(.dnsSlow, "系統 DNS 中位數 \(Fmt.d(sys, 0)) ms（最佳 \(m.bestDNSName ?? "—") \(m.bestDNSMs.map { Fmt.d($0, 0) } ?? "—") ms）", sys, "ms")
-                } else if failureRate < 20 && !tail {
-                    add(.dnsHealthy, "系統 DNS 中位數 \(Fmt.d(sys, 0)) ms、P95 \(Fmt.d(rtt.p95, 0)) ms，無明顯失敗", sys, "ms")
+                } else if failureRate < 20 {
+                    // Scoped: only the system resolver's median, only this path — not "DNS is fine".
+                    add(.systemDNSHealthy, "系統 DNS 解析器中位數 \(Fmt.d(sys, 0)) ms、P95 \(Fmt.d(rtt.p95, 0)) ms，失敗率 \(Fmt.d(failureRate, 0))%（僅代表系統解析器）", sys, "ms")
                 }
+            }
+        }
+        // Alternate resolvers over IPv6: failures or a slow tail on that path, scoped to that resolver.
+        for res in r.dns?.resolvers ?? [] where res.resolver.transport != .system && res.resolver.endpoint.contains(":") && !res.resolver.endpoint.contains("/") {
+            let fail = res.statistics.loss.lossPercent
+            let p95 = res.statistics.rtt?.p95
+            if fail >= 10 || (p95 ?? 0) >= 200 {
+                measured.insert(.dns)
+                add(.alternateIPv6ResolverDegraded,
+                    "\(res.resolver.name)（\(res.resolver.endpoint)）失敗 \(res.statistics.loss.lost)/\(res.statistics.sent)、P95 \(p95.map { Fmt.d($0, 0) } ?? "—") ms（僅此 IPv6 解析器路徑）",
+                    p95, "ms")
             }
         }
 
@@ -387,7 +427,7 @@ public struct EvidenceExtractor: Sendable {
         switch s.verdict {
         case .insufficientData: break
         case .allNormal:
-            out.append(DiagnosticEvidence(code: .allServersNormal, statement: "\(total) 個獨立伺服器 / 端點皆正常\(measuredNote)"))
+            out.append(DiagnosticEvidence(code: .allServersNormal, statement: "\(total) 個獨立伺服器 / 端點的延遲與遺失皆正常（延遲探測，不含吞吐量）\(measuredNote)"))
         case .singleServerAnomalous:
             out.append(DiagnosticEvidence(code: .singleServerAnomalous, statement: "僅 1 個伺服器異常：\(anomalousNames.joined(separator: "；"))，其他 \(total - 1) 個正常"))
         case .multipleServersAnomalous:

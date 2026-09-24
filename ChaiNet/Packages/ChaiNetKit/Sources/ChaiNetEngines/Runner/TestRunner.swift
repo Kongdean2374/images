@@ -332,8 +332,14 @@ public struct TestRunner: TestRunnerProtocol {
             let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: maxDuration, autoDuration: auto,
                                                 fixedStreams: settings.parallelConnections.fixedCount,
                                                 byteCap: settings.transferByteCap(onCellular: c.onCellular))
-            let (speedResult, loaded, loadedSamples) = try await runThroughput(config, server: server, measureLoaded: needsLatency,
-                                                                               ipPreference: settings.ipPreference, emit: emit)
+            let (speedResult, measuredLoaded, loadedSamples) = try await runThroughput(config, server: server, measureLoaded: needsLatency,
+                                                                                       ipPreference: settings.ipPreference, emit: emit)
+            // Loaded latency only means something if the transfer actually loaded the link.
+            var loaded = measuredLoaded
+            if let v = speedResult.validity, !v.valid {
+                loaded = nil
+                result.notes.append("\(direction == .download ? "下載" : "上傳")傳輸無效（\(v.reason?.rawValue ?? "invalid")：\(v.detail ?? "")），不列入速度、穩定度與 Bufferbloat 計算。")
+            }
             if direction == .download {
                 result.download = speedResult
                 result.downloadLoadedLatency = loaded

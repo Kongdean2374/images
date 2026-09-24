@@ -69,14 +69,33 @@ public enum RawDataExporter {
             kv("burst_threshold", "\(l.burstThreshold)")
             kv("gilbert_p_loss_after_receive", n(l.lossProbabilityAfterReceive)); kv("gilbert_r_recover_after_loss", n(l.recoveryProbabilityAfterLoss))
         }
+        func diagnostics(_ d: TransferDiagnostics) {
+            kv("http_requests", "\(d.requestsStarted)"); kv("http_responses", "\(d.responses)")
+            kv("http_status_counts", d.statusCounts.keys.sorted().map { "\($0):\(d.statusCounts[$0]!)" }.joined(separator: ","))
+            kv("content_types", d.contentTypes.joined(separator: "|")); kv("expected_bytes_per_request", d.expectedBytesPerRequest.map(String.init) ?? "null")
+            kv("smallest_response_bytes", d.smallestResponseBytes.map(String.init) ?? "null"); kv("tiny_responses", "\(d.tinyResponses)")
+            kv("transport_errors", "\(d.errorCount)"); kv("timeouts", "\(d.timeoutCount)")
+            kv("per_stream_bytes", d.perStreamBytes.map(String.init).joined(separator: ","))
+        }
         func speed(_ name: String, _ s: SpeedResult?) {
             sec(name)
             guard let s else { kv("measured", "false"); return }
             let m = s.summary
-            kv("avg_mbps_time_weighted", n(m.averageMbps)); kv("peak_mbps", n(m.peakMbps)); kv("min_mbps", n(m.minimumMbps))
-            kv("median_mbps", n(m.medianMbps)); kv("p95_mbps", n(m.p95Mbps)); kv("p10_mbps_sustained", n(m.p10Mbps))
-            kv("stability_score_0_100", n(m.stability.score, 1)); kv("stability_cv", n(m.stability.coefficientOfVariation, 4))
-            kv("drop_windows_below_50pct_median", "\(m.stability.dropCount)")
+            func reliable(_ v: Double?, _ d: Int = 3) -> String { m.shortWindowReliable ? n(v, d) : "unavailable" }
+            kv("valid", b(s.isValid))
+            if let v = s.validity, !v.valid { kv("error", v.reason?.rawValue ?? "invalid"); kv("error_detail", v.detail ?? "") }
+            kv("avg_mbps_time_weighted", n(m.averageMbps)); kv("peak_mbps", reliable(m.peakMbps)); kv("min_mbps", reliable(m.minimumMbps))
+            kv("median_mbps", n(m.medianMbps)); kv("p95_mbps", n(m.p95Mbps)); kv("p10_mbps_sustained", reliable(m.p10Mbps))
+            kv("sampling_artifact", b(m.samplingArtifactDetected ?? false))
+            if m.shortWindowReliable {
+                kv("stability_score_0_100", n(m.stability.score, 1)); kv("stability_cv", n(m.stability.coefficientOfVariation, 4))
+                kv("drop_windows_below_50pct_median", "\(m.stability.dropCount)")
+            } else {
+                kv("stability", "unavailable"); kv("stability_reason", m.stabilityUnavailableReason ?? "measurementSamplingArtifact")
+                kv("drop_windows_below_50pct_median", "unavailable")
+                o.append("# Progress reporting was batched (long 0 Mbps runs + bursts): short-window statistics describe the reporting cadence, not the network. Average = bytes / elapsed time remains valid.")
+            }
+            if let d = s.diagnostics { diagnostics(d) }
             kv("total_bytes", "\(m.totalBytes)"); kv("duration_s", n(m.duration)); kv("cancelled", b(s.wasCancelled))
             kv("statistics_method", "time-weighted windows of \(m.windowSamples ?? 1) x 100 ms samples after warm-up \(n(m.warmupDuration ?? 1, 1)) s and stream-count transition guard 1.0 s")
             kv("excluded_samples_total", "\(m.warmupSampleCount)"); kv("excluded_samples_stream_transitions", "\(m.transitionExcludedSampleCount ?? 0)")
@@ -131,6 +150,9 @@ public enum RawDataExporter {
             kv("stress_packet_rate_pps", n(st.plan.stressPacketsPerSecond, 0)); kv("control_packet_rate_pps", n(st.plan.controlPacketsPerSecond, 0))
             kv("total_download_bytes", "\(st.totalDownloadBytes)"); kv("total_upload_bytes", "\(st.totalUploadBytes)"); kv("total_bytes", "\(st.totalBytes)")
             kv("stress_score_0_100", st.score.map(String.init) ?? "null")
+            kv("score_confidence", st.scoreConfidence?.rawValue ?? "null")
+            kv("excluded_invalid_metrics", (st.excludedInvalidMetrics ?? []).joined(separator: " | "))
+            kv("recycled_budget_s", n(st.recycledSeconds, 1)); kv("extended_monitoring_median_ms", n(st.extendedMonitoring?.rtt?.median))
             for w in st.warnings { kv("warning", w) }
             sec("stress_nodes")
             o.append("node_id,name,provider,host,capabilities,throughput_capable,healthy,health_latency_ms,health_detail")
@@ -146,13 +168,28 @@ public enum RawDataExporter {
                     .joined(separator: ","))
             }
             sec("stress_transfers_per_server")
-            o.append("node_id,round,direction,method,bytes,avg_mbps,median_mbps,p10_mbps,p95_mbps,min_mbps,peak_mbps,stability,window_samples,sampling_artifact,loaded_median_ms,loaded_p95_ms,error")
+            o.append("node_id,round,attempt,direction,method,valid,error,load_valid,bytes,duration_s,avg_mbps,median_mbps,p10_mbps,p95_mbps,min_mbps,peak_mbps,stability,stability_reason,window_samples,sampling_artifact,loaded_median_ms,loaded_p95_ms,http_status_counts,tiny_responses,per_stream_bytes")
             for t in st.transfers {
                 let m = t.speed?.summary
-                o.append([t.nodeID, "\(t.round)", t.direction.rawValue, t.method, "\(t.bytes)", n(m?.averageMbps), n(m?.medianMbps), n(m?.p10Mbps),
-                          n(m?.p95Mbps), n(m?.minimumMbps), n(m?.peakMbps), n(m?.stability.score, 1), m?.windowSamples.map(String.init) ?? "null",
-                          b(m?.samplingArtifactDetected), n(t.loadedLatency?.rtt?.median), n(t.loadedLatency?.rtt?.p95),
-                          t.error == nil ? "none" : "yes"].joined(separator: ","))
+                let rel = m?.shortWindowReliable ?? false
+                func sw(_ v: Double?, _ d: Int = 3) -> String { rel ? n(v, d) : "unavailable" }
+                let d = t.speed?.diagnostics
+                o.append([t.nodeID, "\(t.round)", "\(t.attempt ?? 1)", t.direction.rawValue, t.method, b(t.isValid),
+                          t.isValid ? "none" : (t.validity?.reason?.rawValue ?? "endpointFailure"), b(t.loadValid), "\(t.bytes)",
+                          n(m?.duration, 2), n(m?.averageMbps), n(m?.medianMbps), sw(m?.p10Mbps), n(m?.p95Mbps), sw(m?.minimumMbps), sw(m?.peakMbps),
+                          rel ? n(m?.stability.score, 1) : "unavailable", m?.stabilityUnavailableReason ?? "",
+                          m?.windowSamples.map(String.init) ?? "null", b(m?.samplingArtifactDetected ?? false),
+                          t.loadValid ? n(t.loadedLatency?.rtt?.median) : "unavailable", t.loadValid ? n(t.loadedLatency?.rtt?.p95) : "unavailable",
+                          (d?.statusCounts ?? [:]).keys.sorted().map { "\($0):\(d!.statusCounts[$0]!)" }.joined(separator: "|"),
+                          d.map { "\($0.tinyResponses)" } ?? "", (d?.perStreamBytes ?? []).map(String.init).joined(separator: "|")].joined(separator: ","))
+            }
+            let invalid = st.invalidTransfers()
+            if !invalid.isEmpty {
+                sec("stress_invalid_transfers")
+                for t in invalid {
+                    kv("transfer.\(t.nodeID).round\(t.round).\(t.direction.rawValue).attempt\(t.attempt ?? 1)",
+                       "error=\(t.validity?.reason?.rawValue ?? "endpointFailure") detail=\((t.validity?.detail ?? t.error ?? "").replacingOccurrences(of: "\n", with: " ")) excluded_from=throughput_aggregate,degradation,cross_provider_variance,stability,bufferbloat,stress_score,root_cause")
+                }
             }
             for agg in [st.downloadAggregate, st.uploadAggregate].compactMap({ $0 }) {
                 sec("stress_cross_provider_\(agg.direction.rawValue)")
@@ -162,10 +199,10 @@ public enum RawDataExporter {
                 kv("coefficient_of_variation", n(agg.coefficientOfVariation, 4)); kv("large_cross_provider_throughput_variance", b(agg.largeVariance))
             }
             sec("stress_loss_probes")
-            o.append("probe_id,name,target,method,pps,role,sent,received,loss_percent,median_ms,p95_ms,jitter_ms")
+            o.append("probe_id,name,target,method,pps,role,counts_for_loss_verdict,sent,received,loss_percent,median_ms,p95_ms,jitter_ms")
             for p in [st.stressProbe].compactMap({ $0 }) + st.controlProbes {
                 o.append([p.id, p.isStressProbe ? "High-rate ICMP stress probe" : p.name, p.target, p.method, n(p.packetsPerSecond, 0),
-                          p.isStressProbe ? "stress" : "control", "\(p.sent)", "\(p.statistics.received)", n(p.lossPercent),
+                          p.isStressProbe ? "stress" : "control", b(!p.isStressProbe && p.isPacketLossProbe), "\(p.sent)", "\(p.statistics.received)", n(p.lossPercent),
                           n(p.statistics.rtt?.median), n(p.statistics.rtt?.p95), n(p.statistics.rtt?.jitter)].joined(separator: ","))
             }
             let lc = st.lossConfirmation
@@ -174,7 +211,13 @@ public enum RawDataExporter {
             sec("stress_latency_recovery")
             kv("pre_load_median_ms", n(st.preLoadLatency?.rtt?.median)); kv("pre_load_p95_ms", n(st.preLoadLatency?.rtt?.p95))
             kv("pre_load_jitter_ms", n(st.preLoadLatency?.rtt?.jitter))
-            kv("loaded_download_median_ms", n(st.loadedLatencyMs(.download))); kv("loaded_upload_median_ms", n(st.loadedLatencyMs(.upload)))
+            for d in TransferDirection.allCases {
+                let valid = !st.loadValidTransfers(d).isEmpty
+                kv("\(d.rawValue)_load_valid", b(valid))
+                kv("loaded_\(d.rawValue)_median_ms", valid ? n(st.loadedLatencyMs(d)) : "unavailable")
+                kv("\(d.rawValue)_loaded_latency_increase_ms", valid ? n(st.loadedLatencyIncreaseMs(d)) : "unavailable")
+                if !valid { kv("\(d.rawValue)_grade", "unavailable"); kv("\(d.rawValue)_grade_reason", "insufficientLoad") }
+            }
             kv("loaded_latency_inflation_ms", n(st.bufferbloatMs)); kv("queue_location", "unknown")
             for (i, post) in st.postLoadLatency.enumerated() {
                 kv("post_load_round_\(i + 1)_median_ms", n(post.rtt?.median)); kv("post_load_round_\(i + 1)_p95_ms", n(post.rtt?.p95))
@@ -216,19 +259,43 @@ public enum RawDataExporter {
         kv("streaming", r.scores.streaming.map(String.init) ?? "null"); kv("voice", r.scores.voice.map(String.init) ?? "null")
         kv("upload", r.scores.upload.map(String.init) ?? "null")
 
-        speed("download", r.download)
-        speed("upload", r.upload)
-        latency("latency_idle", r.idleLatency)
-        latency("latency_download_loaded", r.downloadLoadedLatency)
-        latency("latency_upload_loaded", r.uploadLoadedLatency)
+        if let st = r.stress {
+            // Stress: generic sections are the aggregate of valid transfers, never one node's last transfer.
+            for agg in [(TransferDirection.download, st.downloadAggregate), (TransferDirection.upload, st.uploadAggregate)] {
+                sec(agg.0.rawValue)
+                kv("scope", "stress_aggregate_of_valid_transfers (per-node / per-round detail: [stress_transfers_per_server])")
+                kv("valid_transfers", "\(st.transfers(agg.0).count)"); kv("invalid_transfers", "\(st.invalidTransfers().filter { $0.direction == agg.0 }.count)")
+                kv("median_across_nodes_mbps", n(agg.1?.medianMbps)); kv("mean_across_nodes_mbps", n(agg.1?.meanMbps))
+                kv("max_node_mbps", n(agg.1?.maxMbps)); kv("min_node_mbps", n(agg.1?.minMbps))
+                if let score = st.stability(agg.0) { kv("stability_score_0_100", n(score, 1)) }
+                else { kv("stability", "unavailable"); kv("stability_reason", st.stabilityUnavailableReason(agg.0) ?? "unavailable") }
+            }
+            latency("latency_idle", r.idleLatency)
+            latency("latency_download_loaded", r.downloadLoadedLatency)
+            kv("scope", "pooled samples of load-valid download transfers (\(st.loadValidTransfers(.download).count))")
+            kv("load_valid", b(!st.loadValidTransfers(.download).isEmpty))
+            latency("latency_upload_loaded", r.uploadLoadedLatency)
+            kv("scope", "pooled samples of load-valid upload transfers (\(st.loadValidTransfers(.upload).count))")
+            kv("load_valid", b(!st.loadValidTransfers(.upload).isEmpty))
+        } else {
+            speed("download", r.download)
+            speed("upload", r.upload)
+            latency("latency_idle", r.idleLatency)
+            latency("latency_download_loaded", r.downloadLoadedLatency)
+            latency("latency_upload_loaded", r.uploadLoadedLatency)
+        }
         latency("packet_loss_probe", r.packetLoss)
         if let m = r.packetLossMethod { kv("method", m.replacingOccurrences(of: "，", with: "; ").replacingOccurrences(of: "個封包", with: "packets").replacingOccurrences(of: "每", with: "every ")) }
 
         if let bb = r.bufferbloat {
             sec("bufferbloat")
             kv("grade", bb.grade.rawValue); kv("idle_median_ms", n(bb.idleMedianMs))
-            kv("download_loaded_median_ms", n(bb.downloadLoadedMedianMs)); kv("download_increase_ms", n(bb.downloadIncreaseMs)); kv("download_grade", bb.downloadGrade?.rawValue ?? "null")
-            kv("upload_loaded_median_ms", n(bb.uploadLoadedMedianMs)); kv("upload_increase_ms", n(bb.uploadIncreaseMs)); kv("upload_grade", bb.uploadGrade?.rawValue ?? "null")
+            kv("download_loaded_median_ms", n(bb.downloadLoadedMedianMs)); kv("download_increase_ms", n(bb.downloadIncreaseMs))
+            kv("download_grade", bb.downloadGrade?.rawValue ?? "unavailable")
+            if bb.downloadGrade == nil { kv("download_grade_reason", "insufficientLoad") }
+            kv("upload_loaded_median_ms", n(bb.uploadLoadedMedianMs)); kv("upload_increase_ms", n(bb.uploadIncreaseMs))
+            kv("upload_grade", bb.uploadGrade?.rawValue ?? "unavailable")
+            if bb.uploadGrade == nil { kv("upload_grade_reason", "insufficientLoad") }
             kv("interpretation", "loadedLatencyInflation / networkPathQueueing")
             kv("queue_location", "unknown")
             kv("possible_queue_locations", "device_or_modem_queue,radio_scheduler,access_network,carrier_or_core_network,router,remote_path")
@@ -358,11 +425,13 @@ public enum RawDataExporter {
         csvSamples("raw.monitoring", r.monitoring?.samples)
         if let st = r.stress {
             csvSamples("raw.stress.pre_load_latency", st.preLoadSamples)
+            csvSamples("raw.stress.extended_monitoring", st.extendedMonitoringSamples)
             for (i, post) in st.postLoadSamples.enumerated() { csvSamples("raw.stress.post_load_round_\(i + 1)", post) }
             for p in [st.stressProbe].compactMap({ $0 }) + st.controlProbes { csvSamples("raw.stress.loss_probe.\(p.id)", p.samples) }
             for t in st.transfers {
-                speedSamples("raw.stress.\(t.nodeID).round\(t.round).\(t.direction.rawValue)_samples_100ms", t.speed)
-                csvSamples("raw.stress.\(t.nodeID).round\(t.round).\(t.direction.rawValue)_loaded_latency", t.loadedSamples)
+                let tag = "raw.stress.\(t.nodeID).round\(t.round)\((t.attempt ?? 1) > 1 ? ".attempt\(t.attempt!)" : "").\(t.direction.rawValue)"
+                speedSamples("\(tag)_samples_100ms", t.speed)
+                csvSamples("\(tag)_loaded_latency", t.loadedSamples)
             }
         }
         for run in r.serverRuns ?? [] {

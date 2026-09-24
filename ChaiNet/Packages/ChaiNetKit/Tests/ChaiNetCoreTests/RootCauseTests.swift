@@ -165,7 +165,10 @@ final class RootCauseRuleTests: XCTestCase {
 
     func testDNS() {
         XCTAssertEqual(hyp(analyze([.onWiFi, .dnsFailures], interface: .wifi), .dnsResolverIssue).likelihood, .likely)
-        XCTAssertEqual(hyp(analyze([.onWiFi, .dnsHealthy], interface: .wifi), .dnsResolverIssue).likelihood, .ruledOut)
+        // A healthy system-resolver median lowers DNS confidence but never rules DNS out globally.
+        XCTAssertEqual(hyp(analyze([.onWiFi, .systemDNSHealthy], interface: .wifi), .dnsResolverIssue).likelihood, .unlikely)
+        XCTAssertNotEqual(hyp(analyze([.onWiFi, .systemDNSHealthy, .dnsHighTailLatencyObserved, .alternateIPv6ResolverDegraded], interface: .wifi),
+                              .dnsResolverIssue).likelihood, .ruledOut)
     }
 
     func testVPNApplicability() {

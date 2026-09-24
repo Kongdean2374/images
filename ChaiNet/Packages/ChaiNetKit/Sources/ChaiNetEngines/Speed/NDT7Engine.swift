@@ -132,8 +132,18 @@ public struct NDT7SpeedTestEngine: SpeedTestEngineProtocol {
                 throw EngineError.server("NDT7 \(target.machine)：\(error.localizedDescription)")
             }
             let summary = SpeedCalculator.summarize(samples: samples, warmupDuration: c.warmupDuration)
-            continuation.yield(.completed(SpeedResult(direction: c.direction, samples: samples, summary: summary,
-                                                      streamChanges: [StreamChange(offset: 0, streams: 1)], wasCancelled: false)))
+            var result = SpeedResult(direction: c.direction, samples: samples, summary: summary,
+                                     streamChanges: [StreamChange(offset: 0, streams: 1)], wasCancelled: false)
+            var d = TransferDiagnostics()
+            d.requestsStarted = 1
+            if let error = finished.current, !TransferCollector.isCancellation(error) {
+                d.errorCount = 1
+                d.errorSamples = ["\(target.machine): \(error.localizedDescription)"]
+            }
+            d.perStreamBytes = [counter.total]
+            result.diagnostics = d
+            result.validity = TransferValidator.evaluate(result)
+            continuation.yield(.completed(result))
         }
     }
 }

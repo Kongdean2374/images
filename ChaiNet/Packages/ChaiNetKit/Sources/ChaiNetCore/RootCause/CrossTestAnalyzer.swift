@@ -152,7 +152,7 @@ public struct CrossTestAnalyzer: Sendable {
             if let server = r.server {
                 entry(server.id, server.name, server.location, "speed test") { e in
                     if let lat = r.idleLatency { e.stats.append(lat) }
-                    if let dl = r.download?.summary.averageMbps { e.downloads.append(dl) }
+                    if let d = r.download, d.isValid { e.downloads.append(d.summary.averageMbps) }
                     if r.serverHealth?.healthy == false { e.unhealthy = true }
                 }
             }
@@ -160,7 +160,7 @@ public struct CrossTestAnalyzer: Sendable {
             for run in r.serverRuns ?? [] {
                 entry(run.server.id, run.server.name, run.server.location, "multi-server") { e in
                     if let lat = run.packetLoss ?? run.idleLatency { e.stats.append(lat) }
-                    if let dl = run.download?.summary.averageMbps { e.downloads.append(dl) }
+                    if let d = run.download, d.isValid { e.downloads.append(d.summary.averageMbps) }
                     if let err = run.error { e.errors.append(err) }
                 }
             }

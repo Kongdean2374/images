@@ -166,11 +166,15 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
     /// Flattens the result for the Score / Diagnostics engines.
     public var metrics: MetricSnapshot {
         var m = MetricSnapshot()
-        m.downloadMbps = download?.summary.averageMbps ?? streaming?.download.summary.averageMbps
-        m.downloadPeakMbps = download?.summary.peakMbps
-        m.uploadMbps = upload?.summary.averageMbps ?? obs?.upload.summary.averageMbps
-        m.downloadStability = (download ?? streaming?.download)?.summary.stability.score
-        m.uploadStability = (upload ?? obs?.upload)?.summary.stability.score
+        // Invalid transfers (error page, tiny body, rate limit…) are never measurements; artifact-
+        // contaminated short-window statistics (stability, peak) are unavailable, not bad.
+        let dl = [download, streaming?.download].compactMap { $0 }.first { $0.isValid }
+        let ul = [upload, obs?.upload].compactMap { $0 }.first { $0.isValid }
+        m.downloadMbps = dl?.summary.averageMbps
+        m.downloadPeakMbps = dl?.summary.reliablePeakMbps
+        m.uploadMbps = ul?.summary.averageMbps
+        m.downloadStability = dl?.summary.reliableStabilityScore
+        m.uploadStability = ul?.summary.reliableStabilityScore
 
         let latency = idleLatency ?? gaming?.idle ?? voice?.latency ?? monitoring?.statistics
         m.idleLatencyMs = latency?.rtt?.median
@@ -213,18 +217,16 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
         }
         m.pathMTU = mtu?.pathMTU
         if let stress {
-            // Stress: cross-provider medians and confirmed (multi-probe) loss, never one node or the
-            // stress-only ICMP probe.
-            if let v = stress.downloadAggregate?.medianMbps { m.downloadMbps = v }
-            if let v = stress.uploadAggregate?.medianMbps { m.uploadMbps = v }
-            if let v = stress.downloadAggregate?.maxMbps { m.downloadPeakMbps = v }
-            m.downloadStability = stress.stability(.download) ?? m.downloadStability
-            m.uploadStability = stress.stability(.upload) ?? m.uploadStability
+            // Stress: cross-provider medians of valid transfers, reliable stability only, confirmed
+            // (multi-probe) loss and loaded latency from transfers that really loaded the link.
+            m.downloadMbps = stress.downloadAggregate?.medianMbps
+            m.uploadMbps = stress.uploadAggregate?.medianMbps
+            m.downloadPeakMbps = stress.downloadAggregate?.maxMbps
+            m.downloadStability = stress.stability(.download)
+            m.uploadStability = stress.stability(.upload)
             if let v = stress.lossConfirmation.confirmedLossPercent { m.lossPercent = v }
-            if let idle = stress.preLoadLatency?.rtt?.median {
-                m.downloadBloatMs = stress.loadedLatencyMs(.download).map { max(0, $0 - idle) } ?? m.downloadBloatMs
-                m.uploadBloatMs = stress.loadedLatencyMs(.upload).map { max(0, $0 - idle) } ?? m.uploadBloatMs
-            }
+            m.downloadBloatMs = stress.loadedLatencyIncreaseMs(.download)
+            m.uploadBloatMs = stress.loadedLatencyIncreaseMs(.upload)
         }
         if let monitoring {
             m.spikeCount = monitoring.spikes.count

@@ -47,6 +47,9 @@ public struct HypothesisModel: Sendable {
     public var confidenceCap: Double
     public var verificationTests: [RecommendedTest]
     public var limitations: [String]
+    /// While any of these is present the hypothesis can't be ruled out (e.g. an unexplained
+    /// invalid server transfer keeps "server / route specific" open whatever other checks say).
+    public var ruleOutBlockedBy: Set<EvidenceCode> = []
 
     public static let incompleteCap = 0.6
     public static let defaultPrior = -1.5
@@ -83,7 +86,8 @@ public enum HypothesisCatalog {
             cause: .loadedLatencyInflation, layer: .pathQueueing, title: "負載延遲上升（網路路徑佇列，位置未知）",
             explanation: "滿載時延遲明顯上升，代表封包在路徑上某處排隊（queue_location=unknown）。可能位置：裝置 / 數據機佇列、無線電排程器、接取網路、電信商 / 核心網路、路由器、遠端路徑。沒有額外證據時不指定實體位置。",
             prior: HypothesisModel.defaultPrior,
-            weights: [.downloadBufferbloat: 2.3, .uploadBufferbloat: 2.3, .idleLatencyLow: 0.3, .jitterHigh: 0.3, .slowPostLoadRecovery: 0.5],
+            weights: [.loadedLatencyInflationObserved: 2.0, .downloadBufferbloat: 2.3, .uploadBufferbloat: 2.3, .idleLatencyLow: 0.3,
+                      .jitterHigh: 0.3, .slowPostLoadRecovery: 0.5],
             ruledOutBy: [.noBufferbloat], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.bufferbloat], confidenceCap: 0.95,
             verificationTests: [.runBufferbloatTest, .repeatOnWiFi, .repeatOnCellular, .repeatAtDifferentTime],
@@ -173,17 +177,18 @@ public enum HypothesisCatalog {
             explanation: "只有單一伺服器異常而其他獨立端點正常，問題位於該伺服器或通往它的路徑，而不是你的網路。",
             prior: HypothesisModel.defaultPrior,
             weights: [.singleServerAnomalous: 2.5, .regionSpecificAnomaly: 1.0, .serverUnhealthy: 1.5, .ttfbSlow: 0.5,
-                      .multipleServersAnomalous: -1.0, .serverHealthy: -0.3],
+                      .serverTransferInvalid: 1.5, .multipleServersAnomalous: -1.0, .serverHealthy: -0.3],
             ruledOutBy: [.allServersAnomalous, .allServersNormal], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.crossServer], confidenceCap: 0.9,
-            verificationTests: [.testAlternateServers, .runTraceroute], limitations: []),
+            verificationTests: [.testAlternateServers, .runTraceroute], limitations: [],
+            ruleOutBlockedBy: [.serverTransferInvalid]),
 
         HypothesisModel(
             cause: .serverCapacityLimit, layer: .server, title: "測速伺服器頻寬限制",
             explanation: "某伺服器測得的速度明顯低於其他伺服器，代表瓶頸在該伺服器的容量而非你的線路。",
             prior: HypothesisModel.defaultPrior,
             weights: [.serverThroughputOutlierLow: 2.5, .serverUnhealthy: 1.0, .largeCrossProviderThroughputVariance: 1.0,
-                      .crossProviderThroughputConsistent: -1.5],
+                      .serverTransferInvalid: 1.0, .crossProviderThroughputConsistent: -1.5],
             ruledOutBy: [.crossServerConsistentThroughput], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.crossServer], confidenceCap: 0.9,
             verificationTests: [.testAlternateServers], limitations: []),
@@ -203,7 +208,7 @@ public enum HypothesisCatalog {
             cause: .ipv6RoutingIssue, layer: .routing, title: "IPv6 路由 / ISP IPv6 路徑異常",
             explanation: "只有 IPv6 延遲偏高或遺失，IPv4 正常；代表 ISP 的 IPv6 路徑有問題，而非整體網路故障。",
             prior: HypothesisModel.defaultPrior,
-            weights: [.ipv6DegradedOnly: 3.0],
+            weights: [.ipv6DegradedOnly: 3.0, .alternateIPv6ResolverDegraded: 0.6],
             ruledOutBy: [.ipFamiliesEquivalent, .ipv4DegradedOnly], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.ipFamily], confidenceCap: 0.9,
             verificationTests: [.compareIPFamilies, .runTraceroute, .contactProvider], limitations: ["路由追蹤目前僅支援 IPv4。"]),
@@ -221,8 +226,11 @@ public enum HypothesisCatalog {
             cause: .dnsResolverIssue, layer: .application, title: "DNS 解析器緩慢或失敗",
             explanation: "網頁「開很慢」但測速正常時，常是 DNS 解析緩慢或失敗。",
             prior: HypothesisModel.defaultPrior,
-            weights: [.dnsSlow: 2.0, .dnsFailures: 2.5, .dnsHighTailLatency: 0.8],
-            ruledOutBy: [.dnsHealthy], requiresAny: [], notApplicableWhen: [],
+            // One healthy system-resolver median never rules DNS out globally: it lowers confidence,
+            // while tail latency and degraded alternate resolvers keep the question open.
+            weights: [.dnsSlow: 2.0, .dnsFailures: 2.5, .dnsHighTailLatency: 0.8, .dnsHighTailLatencyObserved: 0.8,
+                      .alternateIPv6ResolverDegraded: 0.3, .systemDNSHealthy: -1.5, .dnsHealthy: -1.5],
+            ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.dns], confidenceCap: 0.9,
             verificationTests: [.runDNSBenchmark], limitations: []),
 

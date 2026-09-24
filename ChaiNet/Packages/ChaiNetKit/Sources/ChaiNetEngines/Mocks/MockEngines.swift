@@ -40,18 +40,28 @@ public struct MockProbeFactory: LatencyProbeFactory {
 }
 
 /// Emits a constant-rate timeline quickly (`sampleDelay` between samples).
+/// `ratesByCall` scripts successive runs (e.g. a node that answers with a tiny body the 2nd time).
 public struct MockSpeedTestEngine: SpeedTestEngineProtocol {
     public var mbps: Double
     public var sampleCount: Int
     public var sampleDelay: Double
-    public init(mbps: Double = 100, sampleCount: Int = 30, sampleDelay: Double = 0) {
+    public var ratesByCall: [Double]?
+    /// Upload: 3 of 4 samples carry 0 bytes and the 4th the burst (callback batching).
+    public var batchedUpload: Bool
+    private let calls = LockedValue(0)
+    public init(mbps: Double = 100, sampleCount: Int = 30, sampleDelay: Double = 0, ratesByCall: [Double]? = nil, batchedUpload: Bool = false) {
         self.mbps = mbps
         self.sampleCount = sampleCount
         self.sampleDelay = sampleDelay
+        self.ratesByCall = ratesByCall
+        self.batchedUpload = batchedUpload
     }
 
     public func run(_ configuration: SpeedTestConfiguration) -> AsyncThrowingStream<SpeedTestEvent, Error> {
-        let mbps = mbps, count = sampleCount, delay = sampleDelay
+        let call = calls.withLock { n -> Int in defer { n += 1 }; return n }
+        let mbps = ratesByCall.map { $0[min(call, $0.count - 1)] } ?? mbps
+        let count = sampleCount, delay = sampleDelay
+        let batched = batchedUpload && configuration.direction == .upload
         return makeCancellableStream { continuation in
             var samples: [SpeedSample] = []
             var cumulative: Int64 = 0
@@ -59,16 +69,19 @@ public struct MockSpeedTestEngine: SpeedTestEngineProtocol {
             for i in 0..<count {
                 if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                 try Task.checkCancellation()
-                let bytes = Int64(mbps * 1_000_000 / 8 * 0.1)
+                let flat = Int64(mbps * 1_000_000 / 8 * 0.1)
+                let bytes = batched ? (i % 4 == 3 ? flat * 4 : 0) : flat
                 cumulative += bytes
                 let s = SpeedSample(offset: Double(i + 1) * 0.1, intervalDuration: 0.1, intervalBytes: bytes, cumulativeBytes: cumulative,
                                     activeStreams: configuration.fixedStreams ?? 2)
                 samples.append(s)
                 continuation.yield(.sample(s))
             }
-            continuation.yield(.completed(SpeedResult(direction: configuration.direction, samples: samples,
+            var result = SpeedResult(direction: configuration.direction, samples: samples,
                                                       summary: SpeedCalculator.summarize(samples: samples, warmupDuration: 0),
-                                                      streamChanges: [StreamChange(offset: 0, streams: 2)], wasCancelled: false)))
+                                                      streamChanges: [StreamChange(offset: 0, streams: 2)], wasCancelled: false)
+            result.validity = TransferValidator.evaluate(result)
+            continuation.yield(.completed(result))
         }
     }
 }

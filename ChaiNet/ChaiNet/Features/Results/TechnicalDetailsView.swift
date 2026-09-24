@@ -122,13 +122,23 @@ struct SpeedDetail: View {
                         style: settings.chartStyle, unit: settings.primarySpeedUnit, color: color,
                         height: 150, averageMbps: s.averageMbps)
         KeyValueRow(key: "平均（時間加權）", value: Format.speed(s.averageMbps, settings: settings, secondary: true))
-        KeyValueRow(key: "峰值（最高 0.5 秒視窗）", value: Format.speed(s.peakMbps, settings: settings))
-        KeyValueRow(key: "最低", value: Format.speed(s.minimumMbps, settings: settings))
+        if let v = result.validity, !v.valid {
+            Label("傳輸無效（\(v.reason?.rawValue ?? "invalid")）：\(v.detail ?? "")，不列入速度與分數", systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(Theme.warning)
+        }
+        KeyValueRow(key: "峰值（最高分析視窗）", value: s.shortWindowReliable ? Format.speed(s.peakMbps, settings: settings) : "無法取得（取樣批次化）")
+        KeyValueRow(key: "最低", value: s.shortWindowReliable ? Format.speed(s.minimumMbps, settings: settings) : "無法取得（取樣批次化）")
         KeyValueRow(key: "中位數", value: Format.speed(s.medianMbps, settings: settings))
         KeyValueRow(key: "P95", value: Format.speed(s.p95Mbps, settings: settings))
-        KeyValueRow(key: "P10（持續可用速度）", value: Format.speed(s.p10Mbps, settings: settings))
-        KeyValueRow(key: "穩定度", value: "\(Format.number(s.stability.score, digits: 0)) / 100 · CV \(Format.number(s.stability.coefficientOfVariation, digits: 3))")
-        KeyValueRow(key: "驟降次數（< 50% 中位數）", value: "\(s.stability.dropCount)")
+        KeyValueRow(key: "P10（持續可用速度）", value: s.shortWindowReliable ? Format.speed(s.p10Mbps, settings: settings) : "無法取得（取樣批次化）")
+        if s.shortWindowReliable {
+            KeyValueRow(key: "穩定度", value: "\(Format.number(s.stability.score, digits: 0)) / 100 · CV \(Format.number(s.stability.coefficientOfVariation, digits: 3))")
+            KeyValueRow(key: "驟降次數（< 50% 中位數）", value: "\(s.stability.dropCount)")
+        } else {
+            KeyValueRow(key: "穩定度", value: "無法取得（measurementSamplingArtifact）", valueColor: Theme.textSecondary)
+            Text("iOS 回報的傳輸進度被批次化（長時間 0 後突然爆量），短時間視窗反映的是回報節奏而非網路；平均速度（總位元組 / 時間）仍有效。這是量測限制，不代表網路不穩。")
+                .font(.caption2).foregroundStyle(Theme.textSecondary)
+        }
         KeyValueRow(key: "傳輸量 / 時間", value: "\(Format.bytes(s.totalBytes)) / \(Format.number(s.duration, digits: 1)) 秒")
         KeyValueRow(key: "排除樣本（暖機 + 連線數變更）", value: "\(s.warmupSampleCount)（其中連線變更 \(s.transitionExcludedSampleCount ?? 0)）")
         Text(s.methodDescription).font(.caption2).foregroundStyle(Theme.textSecondary)

@@ -78,7 +78,15 @@ final class SpeedCalculationTests: XCTestCase {
         XCTAssertEqual(s.medianMbps, 62.5, accuracy: 0.5)
         XCTAssertEqual(s.minimumMbps, 62.5, accuracy: 0.5, "no false 0 Mbps window")
         XCTAssertLessThan(s.peakMbps, 70, "no false 1000+ Mbps peak")
-        XCTAssertGreaterThan(s.stability.score!, 90)
+        // Artifact-contaminated timeline: short-window stability is not computed (measurement
+        // limitation), and never reported as instability. The byte-count average stays valid.
+        XCTAssertNil(s.stability.score)
+        XCTAssertNil(s.reliableStabilityScore)
+        XCTAssertNil(s.reliableP10Mbps)
+        XCTAssertNil(s.reliableMinimumMbps)
+        XCTAssertEqual(s.stabilityUnavailableReason, "measurementSamplingArtifact")
+        XCTAssertEqual(s.sustainedMbps, s.averageMbps, accuracy: 1e-9)
+        XCTAssertEqual(s.averageMbps, 62.5, accuracy: 0.5)
     }
 
     func testRealOutageIsNotSmoothedAway() {

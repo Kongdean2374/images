@@ -55,7 +55,7 @@ final class ProtocolEvidenceTests: XCTestCase {
 final class DNSTailTests: XCTestCase {
     func testRule() {
         XCTAssertTrue(DNSTail.isHigh(median: 20, p95: 300))
-        XCTAssertFalse(DNSTail.isHigh(median: 20, p95: 150), "below 200 ms absolute floor")
+        XCTAssertFalse(DNSTail.isHigh(median: 20, p95: 140), "below 150 ms absolute floor")
         XCTAssertFalse(DNSTail.isHigh(median: 120, p95: 250), "less than 3 × median")
     }
 
@@ -72,8 +72,9 @@ final class DNSTailTests: XCTestCase {
         // 18 fast lookups, 2 very slow ones: median 15 ms, P95 ≈ 400 ms.
         let r = dnsResult(Array(repeating: 15, count: 18) + [420, 450])
         let codes = Set(EvidenceExtractor().extract(test: SessionTest(label: "A", result: r)).0.map(\.code))
-        XCTAssertTrue(codes.contains(.dnsHighTailLatency))
-        XCTAssertFalse(codes.contains(.dnsHealthy), "healthy must not be claimed with a high tail")
+        XCTAssertTrue(codes.contains(.dnsHighTailLatencyObserved))
+        XCTAssertTrue(codes.contains(.systemDNSHealthy), "median-scoped fact may coexist with the tail")
+        XCTAssertFalse(codes.contains(.dnsHealthy), "no global 'DNS healthy' claim")
         XCTAssertFalse(codes.contains(.dnsSlow), "median is fine")
         XCTAssertTrue(DiagnosticsEngine().diagnose(r.metrics).contains { $0.code == .dnsHighTailLatency })
     }
@@ -81,8 +82,8 @@ final class DNSTailTests: XCTestCase {
     func testUniformlyFastIsHealthy() {
         let r = dnsResult(Array(repeating: 15, count: 20))
         let codes = Set(EvidenceExtractor().extract(test: SessionTest(label: "A", result: r)).0.map(\.code))
-        XCTAssertTrue(codes.contains(.dnsHealthy))
-        XCTAssertFalse(codes.contains(.dnsHighTailLatency))
+        XCTAssertTrue(codes.contains(.systemDNSHealthy))
+        XCTAssertFalse(codes.contains(.dnsHighTailLatencyObserved))
     }
 }
 

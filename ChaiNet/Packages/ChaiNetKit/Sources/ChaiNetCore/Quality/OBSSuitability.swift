@@ -68,18 +68,20 @@ public enum OBSSuitabilityCalculator {
 
     public static func evaluate(upload: SpeedResult, idleLatency: LatencyStatistics?, uploadLoadedLatency: LatencyStatistics?,
                                 presets: [OBSPreset] = OBSPreset.standard, score: Int?) -> OBSSuitabilityResult {
-        let sustained = upload.summary.p10Mbps
+        // P10 when short windows are reliable; bytes / elapsed time when progress reporting is batched.
+        let sustained = upload.summary.sustainedMbps
         let capacityKbps = sustained * 1000
         var warnings: [String] = []
 
-        let stability = upload.summary.stability.score ?? 0
+        // Unavailable stability (sampling artifact) is a measurement limitation, not instability.
+        let stability = upload.summary.reliableStabilityScore
         var bloat: Double?
         if let idle = idleLatency?.rtt?.median, let loaded = uploadLoadedLatency?.rtt?.median {
             bloat = max(0, loaded - idle)
         }
-        let unstable = stability < 70
+        let unstable = stability.map { $0 < 70 } ?? false
         let bloated = (bloat ?? 0) > 100
-        if unstable { warnings.append("上傳速度不穩定（穩定度 \(Int(stability))/100），直播可能掉幀。") }
+        if unstable { warnings.append("上傳速度不穩定（穩定度 \(Int(stability ?? 0))/100），直播可能掉幀。") }
         if bloated { warnings.append("上傳時延遲增加 \(Int(bloat ?? 0)) ms（上行 Bufferbloat）。") }
 
         let verdicts = presets.map { preset -> OBSPresetVerdict in

@@ -86,7 +86,7 @@ final class LossConfirmationTests: XCTestCase {
     static func probe(_ id: String, loss: Double, stress: Bool = false, count: Int = 100) -> LossProbeResult {
         let lost = Int(loss / 100 * Double(count))
         let samples = (0..<count).map { LatencySample(sequence: $0, offset: Double($0) * 0.2, rttMs: $0 < lost ? nil : 20) }
-        return LossProbeResult(id: id, name: id, target: id, method: stress ? "icmpEcho" : "tcpConnect",
+        return LossProbeResult(id: id, name: id, target: id, method: "icmpEcho",
                                packetsPerSecond: stress ? 50 : 5, isStressProbe: stress, samples: samples)
     }
 

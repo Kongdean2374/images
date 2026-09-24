@@ -197,6 +197,31 @@ extension TestRunner {
         end(.idleLatency, hc, planned: idlePlanned)
         emit(.partial(result))
 
+        // One node × direction transfer; an invalid result (error page, tiny body, 429…) is retried
+        // once after a short pause. Every attempt is kept; only valid ones reach statistics.
+        func runTransfer(_ node: StressNode, _ server: ServerDescriptor, _ direction: TransferDirection, round: Int,
+                         seconds: Double, kind: StressPhaseKind, note: String? = nil) async throws {
+            let ndt7 = node.provider == .mlab
+            for attempt in 1...2 {
+                emit(.phase(direction == .download ? .download : .upload))
+                hc = begin(kind, round: round, node: attempt == 1 ? node.name : "\(node.name)（重試）", total: total)
+                let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, seconds * scale),
+                                                    autoDuration: nil, fixedStreams: ndt7 ? nil : plan.streams, byteCap: nil)
+                let t = try await stressTransfer(config, engine: ndt7 ? self.ndt7 : self.speed, node: node, round: round,
+                                                 method: ndt7 ? "NDT7 WebSocket x1" : "HTTP x\(plan.streams)",
+                                                 loadedProbe: referenceProbe(), bytes: bytes, attempt: attempt, emit: emit)
+                transfers.append(t)
+                let why = t.validity.flatMap { $0.valid ? nil : "\($0.reason?.rawValue ?? "invalid")：\($0.detail ?? "")" }
+                end(kind, hc, planned: seconds, round: round, node: node.id,
+                    note: [note, why.map { "invalid（\($0)）" }].compactMap { $0 }.joined(separator: "；").nilIfEmpty)
+                emit(.partial(result))
+                if t.isValid { return }
+                result.notes.append("\(node.name) 第 \(round) 輪\(direction == .download ? "下載" : "上傳")無效（\(why ?? "")）"
+                                    + (attempt == 1 ? "，重試一次。" : "；重試仍失敗，保留為診斷證據，不列入吞吐量統計。"))
+                if attempt == 1 { try await Task.sleep(for: .seconds(2 * scale)) }
+            }
+        }
+
         // 4. Rounds: every throughput node × download / upload, then recovery and cross-server checks.
         var postStats: [LatencyStatistics] = []
         var postSamples: [[LatencySample]] = []
@@ -204,18 +229,7 @@ extension TestRunner {
             for phase in plan.phases(round: round) where phase.kind == .downloadStress || phase.kind == .uploadStress {
                 guard let node = plan.nodes.first(where: { $0.id == phase.nodeID }), let server = node.server else { continue }
                 let direction: TransferDirection = phase.kind == .downloadStress ? .download : .upload
-                emit(.phase(direction == .download ? .download : .upload))
-                hc = begin(phase.kind, round: round, node: node.name, total: total)
-                let ndt7 = node.provider == .mlab
-                let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, phase.seconds * scale),
-                                                    autoDuration: nil, fixedStreams: ndt7 ? nil : plan.streams, byteCap: nil)
-                let t = try await stressTransfer(config, engine: ndt7 ? self.ndt7 : self.speed, node: node, round: round,
-                                                 method: ndt7 ? "NDT7 WebSocket x1" : "HTTP x\(plan.streams)",
-                                                 loadedProbe: referenceProbe(), bytes: bytes, emit: emit)
-                transfers.append(t)
-                end(phase.kind, hc, planned: phase.seconds, round: round, node: node.id, note: t.error)
-                result.notes += t.error.map { ["\(node.name) 第 \(round) 輪\(direction == .download ? "下載" : "上傳")：\($0)"] } ?? []
-                emit(.partial(result))
+                try await runTransfer(node, server, direction, round: round, seconds: phase.seconds, kind: phase.kind)
             }
             // Cooldown / post-load recovery: how fast queues drain once the load stops.
             let recovery = plan.phases(round: round).first { $0.kind == .postLoadRecovery }?.seconds ?? 4
@@ -313,23 +327,61 @@ extension TestRunner {
         end(.routeMTU, hc, planned: routePlanned)
         try Task.checkCancellation()
 
+        // 10. Recycle unused budget (phases that finished early) into more stress work so the actual
+        //     duration stays close to the configured one.
+        let deadline = requested.requestedSeconds * scale
+        let template = plan.phases(round: 1).filter { $0.kind == .downloadStress || $0.kind == .uploadStress }
+        let roundCost = plan.phases(round: 1).reduce(0) { $0 + $1.seconds } * scale
+        var extraRounds = 0
+        var extendedSamples: [LatencySample] = []
+        let recycleStart = clock.elapsed
+        recycle: while true {
+            try Task.checkCancellation()
+            switch StressBudget.next(remaining: deadline - clock.elapsed, roundCost: template.isEmpty ? 0 : roundCost,
+                                     extraRoundsDone: extraRounds) {
+            case .extraRound:
+                extraRounds += 1
+                let round = plan.rounds + extraRounds
+                for phase in template {
+                    guard let node = plan.nodes.first(where: { $0.id == phase.nodeID }), let server = node.server else { continue }
+                    try await runTransfer(node, server, phase.kind == .downloadStress ? .download : .upload, round: round,
+                                          seconds: phase.seconds, kind: phase.kind, note: "recycled budget")
+                }
+                let recovery = plan.phases(round: 1).first { $0.kind == .postLoadRecovery }?.seconds ?? 4
+                hc = begin(.postLoadRecovery, round: round, total: total)
+                let post = await sampleReference(seconds: recovery, phase: .idleLatency)
+                postSamples.append(post)
+                postStats.append(LatencyStatistics.compute(from: post))
+                end(.postLoadRecovery, hc, planned: recovery, round: round, note: "recycled budget")
+            case .extendedMonitoring(let seconds):
+                emit(.phase(.monitoring))
+                hc = begin(.extendedMonitoring, total: total)
+                extendedSamples = await sampleReference(seconds: seconds / scale, phase: .monitoring)
+                end(.extendedMonitoring, hc, planned: seconds / scale, note: "recycled budget")
+                break recycle
+            case .done:
+                break recycle
+            }
+        }
+        let recycled = (clock.elapsed - recycleStart) / scale
+
         // Assemble.
         emit(.phase(.analyzing))
-        let summary = StressSummary(plan: plan, configuredSeconds: requested.requestedSeconds, actualSeconds: clock.elapsed, nodes: nodes,
+        let summary = StressSummary(plan: plan, configuredSeconds: requested.requestedSeconds, actualSeconds: clock.elapsed / scale, nodes: nodes,
                                     transfers: transfers, phases: records, stressProbe: stressProbe, controlProbes: controls,
                                     preLoadLatency: result.idleLatency, preLoadSamples: preSamples, postLoadLatency: postStats,
-                                    postLoadSamples: postSamples, warnings: c.stressWarnings)
+                                    postLoadSamples: postSamples, warnings: c.stressWarnings,
+                                    extendedMonitoringSamples: extendedSamples, recycledSeconds: recycled)
         result.stress = summary
-        // Representative single-node series for the standard charts (the primary HTTP node's last round).
-        let chartNode = plan.throughputNodes.first { $0.provider != .mlab }?.id ?? plan.throughputNodes.first?.id
-        let lastDL = transfers.last { $0.nodeID == chartNode && $0.direction == .download && $0.speed != nil }
-        let lastUL = transfers.last { $0.nodeID == chartNode && $0.direction == .upload && $0.speed != nil }
-        result.download = lastDL?.speed
-        result.downloadLoadedLatency = lastDL?.loadedLatency
-        result.downloadLoadedSamples = lastDL?.loadedSamples
-        result.upload = lastUL?.speed
-        result.uploadLoadedLatency = lastUL?.loadedLatency
-        result.uploadLoadedSamples = lastUL?.loadedSamples
+        // Generic sections describe the stress aggregate, never one node's last transfer: no single
+        // download / upload timeline; loaded latency = pooled samples of load-valid transfers only.
+        result.download = nil
+        result.upload = nil
+        let pooledDL = summary.pooledLoadedSamples(.download), pooledUL = summary.pooledLoadedSamples(.upload)
+        result.downloadLoadedSamples = pooledDL.isEmpty ? nil : pooledDL
+        result.downloadLoadedLatency = pooledDL.isEmpty ? nil : LatencyStatistics.compute(from: pooledDL)
+        result.uploadLoadedSamples = pooledUL.isEmpty ? nil : pooledUL
+        result.uploadLoadedLatency = pooledUL.isEmpty ? nil : LatencyStatistics.compute(from: pooledUL)
         if let idle = result.idleLatency {
             result.bufferbloat = BufferbloatCalculator.evaluate(idle: idle, downloadLoaded: result.downloadLoadedLatency,
                                                                 uploadLoaded: result.uploadLoadedLatency)
@@ -373,7 +425,7 @@ extension TestRunner {
 
     /// One transfer with loaded latency on a separate connection. Endpoint errors are returned, not thrown.
     func stressTransfer(_ config: SpeedTestConfiguration, engine: any SpeedTestEngineProtocol, node: StressNode, round: Int, method: String,
-                        loadedProbe: any LatencyProbe, bytes: LockedValue<(down: Int64, up: Int64)>,
+                        loadedProbe: any LatencyProbe, bytes: LockedValue<(down: Int64, up: Int64)>, attempt: Int = 1,
                         emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> StressTransferResult {
         let direction = config.direction
         let phase: TestPhase = direction == .download ? .download : .upload
@@ -416,7 +468,7 @@ extension TestRunner {
         let loaded = ramped.isEmpty ? all : ramped
         return StressTransferResult(nodeID: node.id, round: round, direction: direction, method: method, speed: speedResult,
                                     loadedLatency: loaded.isEmpty ? nil : LatencyStatistics.compute(from: loaded), loadedSamples: all,
-                                    error: failure ?? (speedResult == nil ? "未完成" : nil))
+                                    error: failure ?? (speedResult == nil ? "未完成" : nil), attempt: attempt)
     }
 
     /// 50 pps ICMP stress probe plus independent low-rate controls, all at the same time:
@@ -447,11 +499,8 @@ extension TestRunner {
                                   pps: plan.controlPacketsPerSecond, stress: false, count: controlCount, interval: controlInterval, probe: p))
             }
         }
-        if let host = primary?.host {
-            specs.append(Spec(id: "control-quic-\(host)", name: "QUIC / UDP 443 handshake control", target: host, method: "quicHandshake",
-                              pps: plan.controlPacketsPerSecond, stress: false, count: controlCount, interval: controlInterval,
-                              probe: stressProbes.quic(host: host)))
-        }
+        // No QUIC handshakes here: a failed handshake is a protocol / endpoint result, not a lost
+        // packet (QUIC is covered by the protocol diagnostics). UDP loss uses UDP echo when available.
         for node in plan.throughputNodes where node.provider == .chainet {
             if let server = node.server, let port = server.udpEchoPort {
                 specs.append(Spec(id: "control-udp-\(node.id)", name: "UDP echo control (\(node.name))", target: "\(server.host):\(port)",
@@ -478,4 +527,8 @@ extension TestRunner {
         let ordered = specs.compactMap { s in results.first { $0.id == s.id } }
         return (ordered.first { $0.isStressProbe }, ordered.filter { !$0.isStressProbe })
     }
+}
+
+extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
