@@ -339,7 +339,8 @@ final class StressTransferValidityRunnerTests: XCTestCase {
     func testRetryRecovers() async throws {
         var runner = TestRunner.mock(sampleDelay: 0)
         runner.speed = MockSpeedTestEngine(ratesByCall: [431, 50, 0.005, 420, 50])
-        let s = try XCTUnwrap(try await run(runner).stress)
+        let result = try await run(runner)
+        let s = try XCTUnwrap(result.stress)
         XCTAssertTrue(s.failedSlots().isEmpty)
         XCTAssertEqual(s.invalidTransfers().count, 1, "the failed first attempt is kept as evidence")
         XCTAssertEqual(s.transfers(.download).filter { $0.nodeID == "cloudflare" }.count, 2)
