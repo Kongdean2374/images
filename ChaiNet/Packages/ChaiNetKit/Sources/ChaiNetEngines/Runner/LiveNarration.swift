@@ -51,8 +51,8 @@ enum LiveNarration {
     }
 
     static func ipFamiliesResult(_ f: IPFamilyComparisonResult, emit: @Sendable (TestRunEvent) -> Void) {
-        let v4 = f.ipv4?.rtt?.median.map { "\(Fmt.d($0, 0)) ms" } ?? "無法連線"
-        let v6 = f.ipv6?.rtt?.median.map { "\(Fmt.d($0, 0)) ms" } ?? "無法連線"
+        let v4 = (f.ipv4?.rtt?.median).map { "\(Fmt.d($0, 0)) ms" } ?? "無法連線"
+        let v6 = (f.ipv6?.rtt?.median).map { "\(Fmt.d($0, 0)) ms" } ?? "無法連線"
         emit(.note(.ipFamilies, "結果：IPv4 \(v4)、IPv6 \(v6)"))
     }
 
