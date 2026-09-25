@@ -33,6 +33,30 @@ final class RunViewModel {
     /// doesn't flicker.
     private(set) var displayMbps: [TransferDirection: Double] = [:]
     private(set) var displaySummary: [TransferDirection: SpeedSummary] = [:]
+    /// Smooth count between readouts: the value shown at the last update and when it changed.
+    private(set) var displayFrom: [TransferDirection: Double] = [:]
+    private(set) var displayChangedAt: [TransferDirection: Date] = [:]
+    /// Arrival time of the latest throughput sample (the live chart interpolates between samples).
+    private(set) var lastSampleAt: [TransferDirection: Date] = [:]
+    /// Later phases (DNS, IPv4 / IPv6, MTU…): live series, labelled values and Chinese notes.
+    private(set) var liveSeries: [TestPhase: [String: [LatencySample]]] = [:]
+    private(set) var liveSeriesOrder: [TestPhase: [String]] = [:]
+    private(set) var liveValues: [TestPhase: [LiveValue]] = [:]
+    private(set) var notes: [TestPhase: [LiveNote]] = [:]
+    private(set) var phaseStartedAt: Date?
+
+    struct LiveValue: Identifiable, Equatable {
+        var label: String
+        var value: Double
+        var unit: String
+        var id: String { label }
+    }
+
+    struct LiveNote: Identifiable, Equatable {
+        var id: Int
+        var text: String
+    }
+    private var noteCounter = 0
     /// Partial while running, final afterwards.
     private(set) var result: TestResult?
     private(set) var configuration: TestRunConfiguration?
@@ -60,6 +84,8 @@ final class RunViewModel {
 
     /// Display refresh cadence in samples (5 × 100 ms = 0.5 s).
     static let displayEvery = 5
+    /// Live notes kept per phase.
+    static let maxNotes = 6
 
     var activeDirection: TransferDirection? {
         switch phase {
@@ -67,6 +93,18 @@ final class RunViewModel {
         case .upload: .upload
         default: nil
         }
+    }
+
+    /// Readout eased from the previous value to the current one over `countDuration`
+    /// (ease-out), so the big number glides at display refresh rate instead of jumping.
+    static let countDuration = 0.45
+
+    func animatedMbps(_ direction: TransferDirection, at date: Date) -> Double? {
+        guard let target = displayMbps[direction] else { return nil }
+        guard let from = displayFrom[direction], let at = displayChangedAt[direction] else { return target }
+        let t = min(1, max(0, date.timeIntervalSince(at) / Self.countDuration))
+        let eased = 1 - pow(1 - t, 3)
+        return from + (target - from) * eased
     }
 
     /// Current rate: mean of the last 5 samples (0.5 s) for a readable, still responsive number.
@@ -186,6 +224,14 @@ final class RunViewModel {
         stressProgress = nil
         displayMbps = [:]
         displaySummary = [:]
+        displayFrom = [:]
+        displayChangedAt = [:]
+        lastSampleAt = [:]
+        liveSeries = [:]
+        liveSeriesOrder = [:]
+        liveValues = [:]
+        notes = [:]
+        phaseStartedAt = nil
         result = nil
     }
 
@@ -209,6 +255,7 @@ final class RunViewModel {
         switch event {
         case .phase(let p):
             if let current = phase, current != p { completedPhases.append(current) }
+            if phase != p { phaseStartedAt = Date() }
             phase = p
         case .network(let n):
             network = n
@@ -218,9 +265,14 @@ final class RunViewModel {
             latencySamples[p, default: []].append(s)
         case .speedSample(let d, let s):
             if d == .download { downloadSamples.append(s) } else { uploadSamples.append(s) }
+            let now = Date()
+            lastSampleAt[d] = now
             let count = samples(d).count
             if count == 1 || count % Self.displayEvery == 0 {
-                displayMbps[d] = currentMbps(d)
+                let next = currentMbps(d)
+                displayFrom[d] = animatedMbps(d, at: now) ?? next
+                displayChangedAt[d] = now
+                displayMbps[d] = next
                 displaySummary[d] = liveSummary(d)
             }
         case .streams(let d, let n):
@@ -234,8 +286,26 @@ final class RunViewModel {
             let newPhase = stressProgress?.phaseIndex != p.phaseIndex
             stressProgress = p
             guard newPhase else { break }
-            if p.kind == .downloadStress { downloadSamples = []; displayMbps[.download] = nil; displaySummary[.download] = nil }
-            if p.kind == .uploadStress { uploadSamples = []; displayMbps[.upload] = nil; displaySummary[.upload] = nil }
+            for (kind, d) in [(StressPhaseKind.downloadStress, TransferDirection.download), (.uploadStress, .upload)] where p.kind == kind {
+                if d == .download { downloadSamples = [] } else { uploadSamples = [] }
+                displayMbps[d] = nil
+                displaySummary[d] = nil
+                displayFrom[d] = nil
+                displayChangedAt[d] = nil
+                lastSampleAt[d] = nil
+            }
+        case .liveSample(let p, let series, let sample):
+            if liveSeries[p]?[series] == nil { liveSeriesOrder[p, default: []].append(series) }
+            liveSeries[p, default: [:]][series, default: []].append(sample)
+        case .liveValue(let p, let label, let value, let unit):
+            var values = liveValues[p] ?? []
+            if let i = values.firstIndex(where: { $0.label == label }) { values[i].value = value } else { values.append(LiveValue(label: label, value: value, unit: unit)) }
+            liveValues[p] = values
+        case .note(let p, let text):
+            noteCounter += 1
+            var list = notes[p] ?? []
+            list.append(LiveNote(id: noteCounter, text: text))
+            notes[p] = Array(list.suffix(Self.maxNotes))
         case .partial(let r):
             result = r
         case .completed(let r):

@@ -7,6 +7,12 @@ public protocol TracerouteEngineProtocol: Sendable {
 
 public protocol MTUDiscoveryEngineProtocol: Sendable {
     func run(host: String) async throws -> MTUResult
+    /// Same measurement, describing each probed packet size to `live`.
+    func run(host: String, live: LiveSink) async throws -> MTUResult
+}
+
+extension MTUDiscoveryEngineProtocol {
+    public func run(host: String, live: LiveSink) async throws -> MTUResult { try await run(host: host) }
 }
 
 /// ICMP traceroute (IPv4): echo requests with increasing TTL; routers answer "time exceeded",
@@ -104,7 +110,9 @@ public struct ICMPTracerouteEngine: TracerouteEngineProtocol {
 public struct ICMPMTUDiscoveryEngine: MTUDiscoveryEngineProtocol {
     public init() {}
 
-    public func run(host: String) async throws -> MTUResult {
+    public func run(host: String) async throws -> MTUResult { try await run(host: host, live: .none) }
+
+    public func run(host: String, live: LiveSink) async throws -> MTUResult {
         let address: String
         if SocketSupport.isIPv4Literal(host) {
             address = host
@@ -147,15 +155,18 @@ public struct ICMPMTUDiscoveryEngine: MTUDiscoveryEngineProtocol {
                 }
                 if outcome.0 {
                     probes.append(MTUProbe(packetSize: size, succeeded: true, note: nil))
+                    live.note("\(size) bytes（禁止分段）：通過")
                     return true
                 }
                 if outcome.1?.contains("EMSGSIZE") == true || outcome.1?.contains("MTU") == true {
                     probes.append(MTUProbe(packetSize: size, succeeded: false, note: outcome.1))
+                    live.note("\(size) bytes（禁止分段）：\(outcome.1 ?? "失敗")")
                     return false
                 }
                 if size == 576 || probes.count > 40 { probes.append(MTUProbe(packetSize: size, succeeded: false, note: outcome.1)); return false }
             }
             probes.append(MTUProbe(packetSize: size, succeeded: false, note: "兩次皆無回應"))
+            live.note("\(size) bytes（禁止分段）：無回應")
             return false
         }
 

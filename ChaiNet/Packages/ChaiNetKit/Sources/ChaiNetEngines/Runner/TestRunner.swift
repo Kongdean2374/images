@@ -149,6 +149,12 @@ public enum TestRunEvent: Sendable {
     case completed(TestResult)
     /// Extreme Stress Test phase / round / node and running traffic totals.
     case stressProgress(StressProgress)
+    /// Display only: one sample of a named live series (e.g. "IPv4" / "IPv6", an endpoint).
+    case liveSample(TestPhase, String, LatencySample)
+    /// Display only: a labelled value for the phase's live bar chart (e.g. a resolver's median).
+    case liveValue(TestPhase, String, Double, String)
+    /// Display only: a short Traditional-Chinese description of what is being measured now.
+    case note(TestPhase, String)
 }
 
 public protocol TestRunnerProtocol: Sendable {
@@ -394,17 +400,23 @@ public struct TestRunner: TestRunnerProtocol {
 
         if items.contains(.dns) {
             emit(.phase(.dns))
-            result.dns = try await dns.run(resolvers: c.dnsResolvers, domains: DNSBenchmarkEngine.defaultDomains) { _ in }
+            LiveNarration.dnsStart(resolvers: c.dnsResolvers.count, domains: DNSBenchmarkEngine.defaultDomains.count, emit: emit)
+            result.dns = try await dns.run(resolvers: c.dnsResolvers, domains: DNSBenchmarkEngine.defaultDomains) { LiveNarration.dnsResolver($0, emit: emit) }
             emit(.partial(result))
         }
         if !items.isDisjoint(with: [.http, .tls, .quic]) {
             emit(.phase(.protocols))
+            LiveNarration.protocolStart(host: server.host, emit: emit)
             result.protocolProbe = try await protocols.run(url: server.pingURL())
+            if let p = result.protocolProbe { LiveNarration.protocolResult(p, emit: emit) }
             emit(.partial(result))
         }
         if items.contains(.ipFamilies) {
             emit(.phase(.ipFamilies))
-            result.ipFamilyComparison = await ipFamilies.run(host: server.host, port: UInt16(server.baseURL.port ?? 443), probes: c.ipFamilyProbes)
+            LiveNarration.ipFamiliesStart(host: server.host, emit: emit)
+            result.ipFamilyComparison = await ipFamilies.run(host: server.host, port: UInt16(server.baseURL.port ?? 443), probes: c.ipFamilyProbes,
+                                                             live: LiveNarration.sink(.ipFamilies, emit))
+            if let f = result.ipFamilyComparison { LiveNarration.ipFamiliesResult(f, emit: emit) }
             emit(.partial(result))
         }
         try Task.checkCancellation()
@@ -417,7 +429,9 @@ public struct TestRunner: TestRunnerProtocol {
             if primaryAbnormal && !items.contains(.crossValidation) {
                 result.notes.append("主要伺服器出現異常，已自動對 \(c.crossValidationEndpoints.count) 個獨立端點進行交叉驗證。")
             }
-            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: c.crossValidationProbes)
+            emit(.note(.crossValidation, "同時量測 \(c.crossValidationEndpoints.count) 個獨立端點（不同業者），判斷問題只在主伺服器還是普遍存在"))
+            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: c.crossValidationProbes,
+                                                   live: LiveNarration.sink(.crossValidation, emit))
             if let primaryStats {
                 checks.insert(EndpointCheck(id: server.id, name: server.name, host: server.host, region: server.location,
                                             method: result.packetLoss != nil ? (server.udpEchoPort != nil ? .udpEcho : .icmpEcho) : .httpPing,
@@ -428,19 +442,23 @@ public struct TestRunner: TestRunnerProtocol {
         }
         if items.contains(.interfaceCompare) {
             emit(.phase(.interfaceCompare))
-            result.interfaceCompare = await interfaces.run(host: server.host, interfaces: [.wifi, .cellular], probes: c.interfaceProbes)
+            emit(.note(.interfaceCompare, "分別經由 Wi‑Fi 與行動網路量測同一目標，比較兩個介面的連線品質"))
+            result.interfaceCompare = await interfaces.run(host: server.host, interfaces: [.wifi, .cellular], probes: c.interfaceProbes,
+                                                           live: LiveNarration.sink(.interfaceCompare, emit))
             emit(.partial(result))
         }
         let icmpTarget = c.tracerouteHost ?? server.icmpHost ?? server.host
         if items.contains(.mtu) {
             emit(.phase(.mtu))
-            do { result.mtu = try await mtu.run(host: icmpTarget) }
+            LiveNarration.mtuStart(host: icmpTarget, emit: emit)
+            do { result.mtu = try await mtu.run(host: icmpTarget, live: LiveNarration.sink(.mtu, emit)) }
             catch is CancellationError { throw CancellationError() }
             catch { result.notes.append("MTU 測試失敗：\(error.localizedDescription)") }
             emit(.partial(result))
         }
         if items.contains(.traceroute) {
             emit(.phase(.traceroute))
+            LiveNarration.traceStart(host: icmpTarget, emit: emit)
             do { result.traceroute = try await traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) } }
             catch is CancellationError { throw CancellationError() }
             catch { result.notes.append("路由追蹤失敗：\(error.localizedDescription)") }

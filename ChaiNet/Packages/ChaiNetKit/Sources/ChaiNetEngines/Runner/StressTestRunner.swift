@@ -287,7 +287,7 @@ extension TestRunner {
             hc = begin(.crossServerValidation, round: round, total: total)
             let endpoints = c.crossValidationEndpoints, crossProbes = count(cross, pps: 10, minimum: 5)
             var checks = try await guarded(max(30, cross * 3), "跨節點驗證", &result.notes) {
-                await self.crossValidation.run(endpoints: endpoints, probes: crossProbes)
+                await self.crossValidation.run(endpoints: endpoints, probes: crossProbes, live: LiveNarration.sink(.crossValidation, emit))
             } ?? []
             if let primary, let idle = result.idleLatency {
                 checks.insert(EndpointCheck(id: primary.id, name: primary.name, host: primary.host, region: primary.location,
@@ -335,14 +335,17 @@ extension TestRunner {
         let dnsPlanned = plan.phases.first { $0.kind == .dnsProtocols }?.seconds ?? 10
         hc = begin(.dnsProtocols, total: total)
         let resolvers = c.dnsResolvers
+        LiveNarration.dnsStart(resolvers: resolvers.count, domains: DNSBenchmarkEngine.defaultDomains.count, emit: emit)
         result.dns = try await guarded(Self.dnsWatchdog, "DNS 測試", &result.notes) {
-            try await self.dns.run(resolvers: resolvers, domains: DNSBenchmarkEngine.defaultDomains) { _ in }
+            try await self.dns.run(resolvers: resolvers, domains: DNSBenchmarkEngine.defaultDomains) { LiveNarration.dnsResolver($0, emit: emit) }
         }
         emit(.phase(.protocols))
         let protocolURL = primary?.pingURL() ?? URL(string: "https://www.apple.com")!
+        LiveNarration.protocolStart(host: protocolURL.host() ?? "", emit: emit)
         result.protocolProbe = try await guarded(Self.protocolWatchdog, "協定分析", &result.notes) {
             try await self.protocols.run(url: protocolURL)
         }
+        if let p = result.protocolProbe { LiveNarration.protocolResult(p, emit: emit) }
         end(.dnsProtocols, hc, planned: dnsPlanned)
         emit(.partial(result))
 
@@ -352,9 +355,11 @@ extension TestRunner {
         hc = begin(.ipFamilies, total: total)
         let familyHost = primary?.host ?? latencyNode?.host ?? "www.apple.com"
         let familyProbes = count(ipPlanned, pps: 5, minimum: 5)
+        LiveNarration.ipFamiliesStart(host: familyHost, emit: emit)
         result.ipFamilyComparison = try await guarded(max(30, ipPlanned * 3), "IPv4 / IPv6 比較", &result.notes) {
-            await self.ipFamilies.run(host: familyHost, port: 443, probes: familyProbes)
+            await self.ipFamilies.run(host: familyHost, port: 443, probes: familyProbes, live: LiveNarration.sink(.ipFamilies, emit))
         }
+        if let f = result.ipFamilyComparison { LiveNarration.ipFamiliesResult(f, emit: emit) }
         end(.ipFamilies, hc, planned: ipPlanned)
 
         // 9. Route / MTU.
@@ -362,8 +367,12 @@ extension TestRunner {
         hc = begin(.routeMTU, total: total)
         let icmpTarget = primary?.icmpHost ?? primary?.host ?? "1.1.1.1"
         emit(.phase(.mtu))
-        result.mtu = try await guarded(Self.mtuWatchdog, "MTU 測試", &result.notes) { try await self.mtu.run(host: icmpTarget) }
+        LiveNarration.mtuStart(host: icmpTarget, emit: emit)
+        result.mtu = try await guarded(Self.mtuWatchdog, "MTU 測試", &result.notes) {
+            try await self.mtu.run(host: icmpTarget, live: LiveNarration.sink(.mtu, emit))
+        }
         emit(.phase(.traceroute))
+        LiveNarration.traceStart(host: icmpTarget, emit: emit)
         result.traceroute = try await guarded(Self.tracerouteWatchdog, "路由追蹤", &result.notes) {
             try await self.traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) }
         }

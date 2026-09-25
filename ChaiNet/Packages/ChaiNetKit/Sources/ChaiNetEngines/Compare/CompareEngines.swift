@@ -27,6 +27,14 @@ public struct ValidationEndpoint: Sendable, Hashable {
 
 public protocol CrossValidationEngineProtocol: Sendable {
     func run(endpoints: [ValidationEndpoint], probes: Int) async -> [EndpointCheck]
+    /// Same measurement, streaming each sample to `live` (series = endpoint name).
+    func run(endpoints: [ValidationEndpoint], probes: Int, live: LiveSink) async -> [EndpointCheck]
+}
+
+extension CrossValidationEngineProtocol {
+    public func run(endpoints: [ValidationEndpoint], probes: Int, live: LiveSink) async -> [EndpointCheck] {
+        await run(endpoints: endpoints, probes: probes)
+    }
 }
 
 /// Measures several independent endpoints so a problem can be localised
@@ -36,9 +44,13 @@ public struct CrossValidationEngine: CrossValidationEngineProtocol {
     public init() {}
 
     public func run(endpoints: [ValidationEndpoint], probes: Int = 30) async -> [EndpointCheck] {
+        await run(endpoints: endpoints, probes: probes, live: .none)
+    }
+
+    public func run(endpoints: [ValidationEndpoint], probes: Int, live: LiveSink) async -> [EndpointCheck] {
         await withTaskGroup(of: EndpointCheck.self) { group in
             for endpoint in endpoints {
-                group.addTask { await Self.check(endpoint, probes: probes) }
+                group.addTask { await Self.check(endpoint, probes: probes, live: live) }
             }
             var out: [EndpointCheck] = []
             for await c in group { out.append(c) }
@@ -46,11 +58,11 @@ public struct CrossValidationEngine: CrossValidationEngineProtocol {
         }
     }
 
-    static func check(_ e: ValidationEndpoint, probes: Int) async -> EndpointCheck {
+    static func check(_ e: ValidationEndpoint, probes: Int, live: LiveSink = .none) async -> EndpointCheck {
         let icmp = ICMPEchoProbe(host: e.host)
         do {
             try await icmp.prepare()
-            let samples = await LatencySampler.collect(probe: icmp, count: probes, interval: 0.1, timeout: 1.5)
+            let samples = await LatencySampler.collect(probe: icmp, count: probes, interval: 0.1, timeout: 1.5) { live.sample(e.name, $0) }
             await icmp.close()
             let stats = LatencyStatistics.compute(from: samples)
             // ICMP completely filtered → retry with TCP rather than reporting 100 % loss.
@@ -61,7 +73,8 @@ public struct CrossValidationEngine: CrossValidationEngineProtocol {
             await icmp.close()
         }
         let tcp = TCPConnectProbe(host: e.host, port: 443)
-        let samples = await LatencySampler.collect(probe: tcp, count: min(probes, 15), interval: 0.2, timeout: 1.0)
+        live.note("\(e.name) 過濾 ICMP，改用 TCP 443 連線時間量測")
+        let samples = await LatencySampler.collect(probe: tcp, count: min(probes, 15), interval: 0.2, timeout: 1.0) { live.sample(e.name, $0) }
         let stats = LatencyStatistics.compute(from: samples)
         return EndpointCheck(id: e.id, name: e.name, host: e.host, region: e.region, method: .tcpConnect, statistics: stats,
                              error: stats.rtt == nil ? "無回應" : nil, isPrimary: false)
@@ -70,6 +83,14 @@ public struct CrossValidationEngine: CrossValidationEngineProtocol {
 
 public protocol IPFamilyCompareEngineProtocol: Sendable {
     func run(host: String, port: UInt16, probes: Int) async -> IPFamilyComparisonResult
+    /// Same measurement, streaming each sample to `live` (series "IPv4" / "IPv6").
+    func run(host: String, port: UInt16, probes: Int, live: LiveSink) async -> IPFamilyComparisonResult
+}
+
+extension IPFamilyCompareEngineProtocol {
+    public func run(host: String, port: UInt16, probes: Int, live: LiveSink) async -> IPFamilyComparisonResult {
+        await run(host: host, port: port, probes: probes)
+    }
 }
 
 /// Measures the same host over IPv4 and IPv6 separately (Network.framework IP version pinning).
@@ -77,8 +98,16 @@ public struct IPFamilyCompareEngine: IPFamilyCompareEngineProtocol {
     public init() {}
 
     public func run(host: String, port: UInt16 = 443, probes: Int = 15) async -> IPFamilyComparisonResult {
-        async let v4 = LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port, ipVersion: .v4), count: probes, interval: 0.2, timeout: 1.5)
-        async let v6 = LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port, ipVersion: .v6), count: probes, interval: 0.2, timeout: 1.5)
+        await run(host: host, port: port, probes: probes, live: .none)
+    }
+
+    public func run(host: String, port: UInt16, probes: Int, live: LiveSink) async -> IPFamilyComparisonResult {
+        async let v4 = LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port, ipVersion: .v4), count: probes, interval: 0.2, timeout: 1.5) {
+            live.sample("IPv4", $0)
+        }
+        async let v6 = LatencySampler.collect(probe: TCPConnectProbe(host: host, port: port, ipVersion: .v6), count: probes, interval: 0.2, timeout: 1.5) {
+            live.sample("IPv6", $0)
+        }
         let s4 = LatencyStatistics.compute(from: await v4)
         let s6 = LatencyStatistics.compute(from: await v6)
         return IPFamilyComparisonResult(target: "\(host):\(port)", method: .tcpConnect,
@@ -89,6 +118,14 @@ public struct IPFamilyCompareEngine: IPFamilyCompareEngineProtocol {
 
 public protocol InterfaceCompareEngineProtocol: Sendable {
     func run(host: String, interfaces: [InterfaceKind], probes: Int) async -> [InterfaceProbeResult]
+    /// Same measurement, streaming each sample to `live` (series = interface name).
+    func run(host: String, interfaces: [InterfaceKind], probes: Int, live: LiveSink) async -> [InterfaceProbeResult]
+}
+
+extension InterfaceCompareEngineProtocol {
+    public func run(host: String, interfaces: [InterfaceKind], probes: Int, live: LiveSink) async -> [InterfaceProbeResult] {
+        await run(host: host, interfaces: interfaces, probes: probes)
+    }
 }
 
 /// Latency over specific interfaces *simultaneously* (e.g. cellular while connected to Wi-Fi)
@@ -100,10 +137,17 @@ public struct InterfaceCompareEngine: InterfaceCompareEngineProtocol {
     public init() {}
 
     public func run(host: String, interfaces: [InterfaceKind] = [.wifi, .cellular], probes: Int = 15) async -> [InterfaceProbeResult] {
+        await run(host: host, interfaces: interfaces, probes: probes, live: .none)
+    }
+
+    public func run(host: String, interfaces: [InterfaceKind], probes: Int, live: LiveSink) async -> [InterfaceProbeResult] {
         var out: [InterfaceProbeResult] = []
         for kind in interfaces {
             guard NWAsync.interfaceType(kind) != nil else { continue }
-            let samples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, interface: kind), count: probes, interval: 0.2, timeout: 2)
+            live.note("正在經由\(kind.displayName)量測 TCP 連線時間")
+            let samples = await LatencySampler.collect(probe: TCPConnectProbe(host: host, interface: kind), count: probes, interval: 0.2, timeout: 2) {
+                live.sample(kind.displayName, $0)
+            }
             let stats = LatencyStatistics.compute(from: samples)
             out.append(InterfaceProbeResult(interface: kind, tcpConnect: stats.rtt == nil ? nil : stats,
                                             error: stats.rtt == nil ? "\(kind.displayName) 無法使用或未連線" : nil))

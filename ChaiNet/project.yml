@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "2.2.2"
+    MARKETING_VERSION: "2.3.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -50,6 +50,8 @@ targets:
         UISupportedInterfaceOrientations~ipad:
           [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIUserInterfaceStyle: Dark
+        # Allow 120 Hz on ProMotion iPhones (live charts redraw every frame).
+        CADisableMinimumFrameDurationOnPhone: true
         NSLocationWhenInUseUsageDescription: "若你在設定中開啟「儲存位置」，ChaiNet 會把測試地點只存在本機，用於地圖與同區域的歷史基準比較。位置不會上傳到任何伺服器。"
         NSLocalNetworkUsageDescription: "ChaiNet 需要存取區域網路，才能測試你自架於區域網路中的測速伺服器與路由器延遲。"
         UIBackgroundModes: [fetch]
