@@ -228,10 +228,14 @@ final class RunViewModel {
         case .traceHop(let hop):
             traceHops.append(hop)
         case .stressProgress(let p):
+            // The runner re-sends the current phase about once a second with fresh data-usage
+            // counters. Only a *new* phase (another transfer) starts a fresh live timeline —
+            // clearing on every update blanked the chart and speed every second.
+            let newPhase = stressProgress?.phaseIndex != p.phaseIndex
             stressProgress = p
-            // Each stress transfer starts a fresh timeline; show the current one live.
-            if p.kind == .downloadStress { downloadSamples = []; displayMbps[.download] = nil }
-            if p.kind == .uploadStress { uploadSamples = []; displayMbps[.upload] = nil }
+            guard newPhase else { break }
+            if p.kind == .downloadStress { downloadSamples = []; displayMbps[.download] = nil; displaySummary[.download] = nil }
+            if p.kind == .uploadStress { uploadSamples = []; displayMbps[.upload] = nil; displaySummary[.upload] = nil }
         case .partial(let r):
             result = r
         case .completed(let r):
