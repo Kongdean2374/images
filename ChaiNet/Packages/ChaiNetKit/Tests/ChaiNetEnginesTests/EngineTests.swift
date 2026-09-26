@@ -310,6 +310,49 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertTrue(next.fallback, "later loads skip the blocked endpoint")
     }
 
+    /// An engine that never returns (a hung socket) is abandoned by the load watchdog and the load
+    /// continues on the fallback node — the stress test never waits forever.
+    func testHungEngineIsAbandonedByWatchdog() async throws {
+        struct Hung: SpeedTestEngineProtocol {
+            func run(_ configuration: SpeedTestConfiguration) -> AsyncThrowingStream<SpeedTestEvent, Error> {
+                AsyncThrowingStream { _ in }   // never yields, never finishes
+            }
+        }
+        let monitor = ContinuousLatencyMonitor(probe: nil, descriptor: nil, clock: Stopwatch(), scale: 0.001)
+        let ctx = StressLoadContext(speed: Hung(), ndt7: MockSpeedTestEngine(mbps: 200), monitor: monitor, environment: nil,
+                                    bytes: LockedValue((0, 0)), limits: .unlimited, scale: 0.001, emit: { _ in })
+        let started = Date()
+        let run = try await ctx.runLoad(server: ServerDescriptor.builtIn[0], direction: .download, streams: 16, seconds: 20)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 30, "watchdog returned")
+        _ = run
+        XCTAssertNotNil(ctx.primaryBlocked.current)
+        let next = try await ctx.runLoad(server: ServerDescriptor.builtIn[0], direction: .download, streams: 16, seconds: 20)
+        XCTAssertTrue(next.fallback, "the hung endpoint is not used again")
+        XCTAssertNotNil(next.speed)
+    }
+
+    /// Recovery windows stream the control latency live (never a silent wait).
+    func testRecoveryShowsLiveLatency() async throws {
+        struct Instant: LatencyProbe {
+            var method: EndpointProbeMethod { .icmpEcho }
+            var targetDescription: String { "test" }
+            func prepare() async throws {}
+            func probe(sequence: Int, timeout: Double) async -> Double? { 12 }
+            func close() async {}
+        }
+        let events = LockedValue<[TestRunEvent]>([])
+        let monitor = ContinuousLatencyMonitor(probe: Instant(), descriptor: nil, intervalSeconds: 0.25, clock: Stopwatch(), scale: 0.01)
+        monitor.start()
+        let ctx = StressLoadContext(speed: MockSpeedTestEngine(), ndt7: MockSpeedTestEngine(), monitor: monitor, environment: nil,
+                                    bytes: LockedValue((0, 0)), limits: .unlimited, scale: 0.01, emit: { e in events.withLock { $0.append(e) } })
+        let r = try await RecoveryEngine().run(ctx, kind: "final", afterPhase: "burst", seconds: 20, idleBaselineMs: 12)
+        monitor.cancel()
+        let live = events.current.filter { if case .latencySample(.monitoring, _) = $0 { return true }; return false }
+        XCTAssertFalse(live.isEmpty)
+        XCTAssertTrue(events.current.contains { if case .note(.monitoring, _) = $0 { return true }; return false })
+        XCTAssertTrue(r.complete)
+    }
+
     func testOneFailingEndpointDoesNotFailTheTest() async throws {
         var runner = TestRunner.mock(sampleDelay: 0)
         runner.stressProbes = MockStressProbeFactory(unhealthyNodeIDs: ["mlab-ndt7", "quad9-dns"])

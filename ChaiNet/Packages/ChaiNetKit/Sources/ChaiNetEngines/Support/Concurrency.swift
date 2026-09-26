@@ -98,6 +98,19 @@ public func withTimeout<T: Sendable>(_ seconds: Double, _ operation: @escaping @
     }
 }
 
+/// Like `withTimeout`, but a timeout or failure yields `fallback` instead of throwing — for steps
+/// that must never block a test (prepare / close / snapshots). Only cancellation propagates.
+public func withDeadline<T: Sendable>(_ seconds: Double, fallback: T, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    do {
+        return try await withTimeout(seconds, operation)
+    } catch is CancellationError {
+        throw CancellationError()
+    } catch {
+        try Task.checkCancellation()
+        return fallback
+    }
+}
+
 final class TimeoutRace<T: Sendable>: @unchecked Sendable {
     private struct State {
         var continuation: CheckedContinuation<T, Error>?

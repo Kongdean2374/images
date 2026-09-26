@@ -42,7 +42,7 @@ extension TestRunner {
         // Idle control baseline (same probe the load phases are compared with).
         emit(.phase(.idleLatency))
         let idleStart = monitor.enter("idle", phase: .idleLatency, load: .idle)
-        try await ctx.pause(5)
+        try await ctx.observe(5, phase: .idleLatency, what: "量測閒置基準（固定對照探測，5 秒）", idleBaselineMs: nil)
         await monitor.waitForSamples(since: idleStart, count: 5)
         let idle = monitor.latencySamples(from: idleStart, to: monitor.now)
         result.idleSamples = idle

@@ -246,7 +246,9 @@ public struct TestRunner: TestRunnerProtocol {
         let settings = c.settings
 
         emit(.phase(.preparing))
-        let snapshot = await networkInfo.snapshot(includePublicIP: true)
+        let info = networkInfo
+        let snapshot = try await withDeadline(15, fallback: nil) { Optional(await info.snapshot(includePublicIP: true)) }
+            ?? (await info.snapshot(includePublicIP: false))
         emit(.network(snapshot))
         guard snapshot.status == .satisfied else { throw EngineError.noNetwork }
         var result = TestResult(kind: c.kind, network: snapshot)
@@ -260,7 +262,8 @@ public struct TestRunner: TestRunnerProtocol {
         if let fixed = c.fixedServer, c.autoAdditionalServerCount == 0 {
             server = fixed
         } else {
-            let ranking = await servers.rank(c.candidateServers)
+            let directory = servers, candidates = c.candidateServers
+            let ranking = try await withDeadline(20, fallback: []) { await directory.rank(candidates) }
             let reachable = ranking.filter { $0.medianMs != nil }.map(\.server)
             guard let best = c.fixedServer ?? reachable.first ?? c.candidateServers.first else {
                 throw EngineError.server("沒有可用的測速伺服器")
@@ -275,11 +278,12 @@ public struct TestRunner: TestRunnerProtocol {
             }
         }
         extraServers.removeAll { $0.id == server.id }
-        if let info = await servers.info(for: server) {
+        let directory = servers, chosen = server
+        if let info = try await withDeadline(10, fallback: nil, { await directory.info(for: chosen) }) {
             result.serverInfo = info
             if server.udpEchoPort == nil { server.udpEchoPort = info.udpEchoPort }
         }
-        result.serverHealth = await servers.health(for: server)
+        result.serverHealth = try await withDeadline(15, fallback: nil) { Optional(await directory.health(for: chosen)) }
         result.server = server
         emit(.serverSelected(server))
         emit(.partial(result))
@@ -289,11 +293,11 @@ public struct TestRunner: TestRunnerProtocol {
         if needsLatency {
             emit(.phase(.idleLatency))
             let probe = probes.latencyProbe(for: server, ipPreference: settings.ipPreference)
-            try await probe.prepare()
+            try await probe.prepareBounded()
             let samples = await LatencySampler.collect(probe: probe, count: c.idleProbeCount, interval: 0.1, timeout: 2) {
                 emit(.latencySample(.idleLatency, $0))
             }
-            await probe.close()
+            await probe.closeBounded()
             try Task.checkCancellation()
             result.idleSamples = samples
             result.idleLatency = LatencyStatistics.compute(from: samples)
@@ -306,13 +310,13 @@ public struct TestRunner: TestRunnerProtocol {
             if let pair = probes.lossProbe(for: server, payloadSize: c.lossPayloadBytes, ipPreference: settings.ipPreference) {
                 let probe = pair.probe, method = pair.method
                 do {
-                    try await probe.prepare()
+                    try await probe.prepareBounded()
                     let count = items.contains(.latencySpikes) && c.settings.testDuration == .auto && c.fullTestPlan == nil
                         ? max(c.lossProbeCount, 200) : c.lossProbeCount
                     let samples = await LatencySampler.collect(probe: probe, count: count, interval: c.lossProbeInterval, timeout: 1) {
                         emit(.latencySample(.packetLoss, $0))
                     }
-                    await probe.close()
+                    await probe.closeBounded()
                     try Task.checkCancellation()
                     let stats = LatencyStatistics.compute(from: samples)
                     result.packetLoss = stats
@@ -324,7 +328,7 @@ public struct TestRunner: TestRunnerProtocol {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    await probe.close()
+                    await probe.closeBounded()
                     result.notes.append("封包遺失測試失敗：\(error.localizedDescription)")
                 }
             } else {
@@ -405,21 +409,27 @@ public struct TestRunner: TestRunnerProtocol {
         if items.contains(.dns) {
             emit(.phase(.dns))
             LiveNarration.dnsStart(resolvers: c.dnsResolvers.count, domains: DNSBenchmarkEngine.defaultDomains.count, emit: emit)
-            result.dns = try await dns.run(resolvers: c.dnsResolvers, domains: DNSBenchmarkEngine.defaultDomains) { LiveNarration.dnsResolver($0, emit: emit) }
+            let dnsEngine = dns, resolvers = c.dnsResolvers
+            result.dns = try await guarded(Self.dnsWatchdog, "DNS 測試", &result.notes) {
+                try await dnsEngine.run(resolvers: resolvers, domains: DNSBenchmarkEngine.defaultDomains) { LiveNarration.dnsResolver($0, emit: emit) }
+            }
             emit(.partial(result))
         }
         if !items.isDisjoint(with: [.http, .tls, .quic]) {
             emit(.phase(.protocols))
             LiveNarration.protocolStart(host: server.host, emit: emit)
-            result.protocolProbe = try await protocols.run(url: server.pingURL())
+            let protocolEngine = protocols, pingURL = server.pingURL()
+            result.protocolProbe = try await guarded(Self.protocolWatchdog, "協定分析", &result.notes) { try await protocolEngine.run(url: pingURL) }
             if let p = result.protocolProbe { LiveNarration.protocolResult(p, emit: emit) }
             emit(.partial(result))
         }
         if items.contains(.ipFamilies) {
             emit(.phase(.ipFamilies))
             LiveNarration.ipFamiliesStart(host: server.host, emit: emit)
-            result.ipFamilyComparison = await ipFamilies.run(host: server.host, port: UInt16(server.baseURL.port ?? 443), probes: c.ipFamilyProbes,
-                                                             live: LiveNarration.sink(.ipFamilies, emit))
+            let familyEngine = ipFamilies, host = server.host, port = UInt16(server.baseURL.port ?? 443), familyProbes = c.ipFamilyProbes
+            result.ipFamilyComparison = try await guarded(45, "IPv4 / IPv6 比較", &result.notes) {
+                await familyEngine.run(host: host, port: port, probes: familyProbes, live: LiveNarration.sink(.ipFamilies, emit))
+            }
             if let f = result.ipFamilyComparison { LiveNarration.ipFamiliesResult(f, emit: emit) }
             emit(.partial(result))
         }
@@ -434,8 +444,10 @@ public struct TestRunner: TestRunnerProtocol {
                 result.notes.append("主要伺服器出現異常，已自動對 \(c.crossValidationEndpoints.count) 個獨立端點進行交叉驗證。")
             }
             emit(.note(.crossValidation, "同時量測 \(c.crossValidationEndpoints.count) 個獨立端點（不同業者），判斷問題只在主伺服器還是普遍存在"))
-            var checks = await crossValidation.run(endpoints: c.crossValidationEndpoints, probes: c.crossValidationProbes,
-                                                   live: LiveNarration.sink(.crossValidation, emit))
+            let crossEngine = crossValidation, endpoints = c.crossValidationEndpoints, crossProbes = c.crossValidationProbes
+            var checks = try await guarded(60, "交叉驗證", &result.notes) {
+                await crossEngine.run(endpoints: endpoints, probes: crossProbes, live: LiveNarration.sink(.crossValidation, emit))
+            } ?? []
             if let primaryStats {
                 checks.insert(EndpointCheck(id: server.id, name: server.name, host: server.host, region: server.location,
                                             method: result.packetLoss != nil ? (server.udpEchoPort != nil ? .udpEcho : .icmpEcho) : .httpPing,
@@ -447,25 +459,29 @@ public struct TestRunner: TestRunnerProtocol {
         if items.contains(.interfaceCompare) {
             emit(.phase(.interfaceCompare))
             emit(.note(.interfaceCompare, "分別經由 Wi‑Fi 與行動網路量測同一目標，比較兩個介面的連線品質"))
-            result.interfaceCompare = await interfaces.run(host: server.host, interfaces: [.wifi, .cellular], probes: c.interfaceProbes,
-                                                           live: LiveNarration.sink(.interfaceCompare, emit))
+            let interfaceEngine = interfaces, host = server.host, interfaceProbes = c.interfaceProbes
+            result.interfaceCompare = try await guarded(45, "介面比較", &result.notes) {
+                await interfaceEngine.run(host: host, interfaces: [.wifi, .cellular], probes: interfaceProbes, live: LiveNarration.sink(.interfaceCompare, emit))
+            }
             emit(.partial(result))
         }
         let icmpTarget = c.tracerouteHost ?? server.icmpHost ?? server.host
         if items.contains(.mtu) {
             emit(.phase(.mtu))
             LiveNarration.mtuStart(host: icmpTarget, emit: emit)
-            do { result.mtu = try await mtu.run(host: icmpTarget, live: LiveNarration.sink(.mtu, emit)) }
-            catch is CancellationError { throw CancellationError() }
-            catch { result.notes.append("MTU 測試失敗：\(error.localizedDescription)") }
+            let mtuEngine = mtu
+            result.mtu = try await guarded(Self.mtuWatchdog, "MTU 測試", &result.notes) {
+                try await mtuEngine.run(host: icmpTarget, live: LiveNarration.sink(.mtu, emit))
+            }
             emit(.partial(result))
         }
         if items.contains(.traceroute) {
             emit(.phase(.traceroute))
             LiveNarration.traceStart(host: icmpTarget, emit: emit)
-            do { result.traceroute = try await traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) } }
-            catch is CancellationError { throw CancellationError() }
-            catch { result.notes.append("路由追蹤失敗：\(error.localizedDescription)") }
+            let traceEngine = traceroute
+            result.traceroute = try await guarded(Self.tracerouteWatchdog, "路由追蹤", &result.notes) {
+                try await traceEngine.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) }
+            }
             emit(.partial(result))
         }
         try Task.checkCancellation()
@@ -489,21 +505,21 @@ public struct TestRunner: TestRunnerProtocol {
         if needsLatency {
             let probe = probes.latencyProbe(for: target, ipPreference: c.settings.ipPreference)
             do {
-                try await probe.prepare()
+                try await probe.prepareBounded()
                 run.idleLatency = LatencyStatistics.compute(from: await LatencySampler.collect(probe: probe, count: c.idleProbeCount, interval: 0.1, timeout: 2))
-            } catch is CancellationError { await probe.close(); throw CancellationError() }
+            } catch is CancellationError { await probe.closeBounded(); throw CancellationError() }
             catch { run.error = "延遲：\(error.localizedDescription)" }
-            await probe.close()
+            await probe.closeBounded()
         }
         if needsLoss, let pair = probes.lossProbe(for: target, payloadSize: c.lossPayloadBytes, ipPreference: c.settings.ipPreference) {
             do {
-                try await pair.probe.prepare()
+                try await pair.probe.prepareBounded()
                 run.packetLoss = LatencyStatistics.compute(from: await LatencySampler.collect(probe: pair.probe, count: c.lossProbeCount,
                                                                                                interval: c.lossProbeInterval, timeout: 1))
                 run.packetLossMethod = pair.method
-            } catch is CancellationError { await pair.probe.close(); throw CancellationError() }
+            } catch is CancellationError { await pair.probe.closeBounded(); throw CancellationError() }
             catch { run.error = "遺失：\(error.localizedDescription)" }
-            await pair.probe.close()
+            await pair.probe.closeBounded()
         }
         try Task.checkCancellation()
         for direction in [TransferDirection.download, .upload] where c.items.contains(direction == .download ? .download : .upload) {
@@ -528,7 +544,7 @@ public struct TestRunner: TestRunnerProtocol {
         let direction = config.direction
         let phase: TestPhase = direction == .download ? .download : .upload
         let loadedProbe: (any LatencyProbe)? = measureLoaded ? probes.latencyProbe(for: server, ipPreference: ipPreference) : nil
-        try? await loadedProbe?.prepare()
+        try? await loadedProbe?.prepareBounded()
 
         let loadedTask: Task<[LatencySample], Never>? = loadedProbe.map { probe in
             Task {
@@ -552,7 +568,7 @@ public struct TestRunner: TestRunnerProtocol {
             }
         } catch {
             loadedTask?.cancel()
-            await loadedProbe?.close()
+            await loadedProbe?.closeBounded()
             throw error
         }
         loadedTask?.cancel()
@@ -561,7 +577,7 @@ public struct TestRunner: TestRunnerProtocol {
         let allLoaded = await loadedTask?.value ?? []
         let rampedUp = allLoaded.filter { $0.offset >= 1.0 }
         let loadedSamples = rampedUp.isEmpty ? allLoaded : rampedUp
-        await loadedProbe?.close()
+        await loadedProbe?.closeBounded()
         try Task.checkCancellation()
         guard let speedResult else { throw EngineError.invalidResponse("測速未完成") }
         return (speedResult, loadedSamples.isEmpty ? nil : LatencyStatistics.compute(from: loadedSamples), allLoaded)

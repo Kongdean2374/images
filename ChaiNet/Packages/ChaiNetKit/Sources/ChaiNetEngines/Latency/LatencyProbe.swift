@@ -15,6 +15,20 @@ public protocol LatencyProbe: Sendable {
     func close() async
 }
 
+extension LatencyProbe {
+    /// `prepare()` with a hard limit (DNS / socket setup that never answers must not block a test).
+    public func prepareBounded(_ seconds: Double = 8) async throws {
+        try await withTimeout(seconds) { try await self.prepare() }
+    }
+
+    /// `close()` that never keeps the caller waiting more than `seconds` (it finishes in the
+    /// background) — also when the test was just cancelled.
+    public func closeBounded(_ seconds: Double = 3) async {
+        let task = Task { await self.close() }
+        _ = try? await withTimeout(seconds) { await task.value }
+    }
+}
+
 /// Schedules probes at a fixed rate.
 ///
 /// Probe *i* is sent at `i × interval` seconds after start regardless of previous replies
@@ -32,7 +46,9 @@ public enum LatencySampler {
                         let seq = i
                         let offset = stopwatch.elapsed
                         group.addTask {
-                            let rtt = await probe.probe(sequence: seq, timeout: timeout)
+                            // Hard deadline on top of the probe's own timeout: a probe stuck on a callback
+                            // that never fires must not keep the sampler (and the test) waiting forever.
+                            let rtt: Double? = (try? await withTimeout(timeout + 1) { await probe.probe(sequence: seq, timeout: timeout) }) ?? nil
                             // A probe cancelled mid-flight is not a network loss; don't report it.
                             if Task.isCancelled { return }
                             continuation.yield(LatencySample(sequence: seq, offset: offset, rttMs: rtt))

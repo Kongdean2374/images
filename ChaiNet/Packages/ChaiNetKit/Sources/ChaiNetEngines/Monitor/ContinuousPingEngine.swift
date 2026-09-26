@@ -29,7 +29,7 @@ public struct ContinuousPingEngine: ContinuousPingEngineProtocol {
     public func run(probe: any LatencyProbe, interval: Double, duration: Double?) -> AsyncThrowingStream<MonitorEvent, Error> {
         let info = networkInfo
         return makeCancellableStream { continuation in
-            try await probe.prepare()
+            try await withTimeout(10) { try await probe.prepare() }
             let stopwatch = Stopwatch()
             let pathTask = Task {
                 var last: (InterfaceKind, PathStatus)?
@@ -66,7 +66,7 @@ public struct ContinuousPingEngine: ContinuousPingEngineProtocol {
                     }
                 }
             }
-            await probe.close()
+            _ = try? await withDeadline(3, fallback: ()) { await probe.close() }
             try Task.checkCancellation()
         }
     }

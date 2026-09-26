@@ -108,7 +108,10 @@ extension TestRunner {
         let clock = Stopwatch()
 
         emit(.phase(.preparing))
-        let snapshot = await networkInfo.snapshot(includePublicIP: true)
+        // Public-IP lookup is bounded: without an answer the test starts with the local snapshot.
+        let info = networkInfo
+        let snapshot = try await withDeadline(15, fallback: nil) { Optional(await info.snapshot(includePublicIP: true)) }
+            ?? (await info.snapshot(includePublicIP: false))
         emit(.network(snapshot))
         guard snapshot.status == .satisfied else { throw EngineError.noNetwork }
         var result = TestResult(kind: .extremeStressTest, network: snapshot)
@@ -143,14 +146,18 @@ extension TestRunner {
         await withTaskGroup(of: (Int, Bool, Double?, String?, UInt16?).self) { group in
             for (i, node) in nodes.enumerated() {
                 group.addTask {
-                    if let server = node.server, node.provider != .mlab {
-                        let h = await self.servers.health(for: server)
-                        var port: UInt16?
-                        if node.provider == .chainet { port = await self.servers.info(for: server)?.udpEchoPort }
-                        return (i, h.healthy, h.responseMs, h.detail, port)
-                    }
-                    let h = await self.stressProbes.health(of: node)
-                    return (i, h.healthy, h.ms, h.detail, nil)
+                    // A node that never answers is marked unhealthy after 15 s instead of holding up the test.
+                    let timedOut: (Int, Bool, Double?, String?, UInt16?) = (i, false, nil, "健康檢查逾時（15 秒）", nil)
+                    return (try? await withDeadline(15, fallback: timedOut) {
+                        if let server = node.server, node.provider != .mlab {
+                            let h = await self.servers.health(for: server)
+                            var port: UInt16?
+                            if node.provider == .chainet { port = await self.servers.info(for: server)?.udpEchoPort }
+                            return (i, h.healthy, h.responseMs, h.detail, port)
+                        }
+                        let h = await self.stressProbes.health(of: node)
+                        return (i, h.healthy, h.ms, h.detail, nil)
+                    }) ?? timedOut
                 }
             }
             for await (i, ok, ms, detail, port) in group {
@@ -192,7 +199,7 @@ extension TestRunner {
         func sampleReference(seconds: Double, phase: TestPhase) async -> [LatencySample] {
             let probe = referenceProbe()
             defer { Task { await probe.close() } }
-            do { try await probe.prepare() } catch { return [] }
+            do { try await withTimeout(8) { try await probe.prepare() } } catch { return [] }
             return await LatencySampler.collect(probe: probe, count: count(seconds, pps: 10, minimum: 5), interval: interval(0.1), timeout: 2) {
                 emit(.latencySample(phase, $0))
             }
@@ -563,7 +570,8 @@ extension TestRunner {
             emit(.phase(.monitoring))
             hc = begin(.extendedMonitoring, total: total)
             let t0 = monitor.enter("finalObservation", phase: .extendedMonitoring, load: .idle)
-            try await ctx.pause(seconds)
+            try await ctx.observe(seconds, what: "最終延長觀察：用剩餘的測試時間持續量測延遲與遺失（約 \(Int(seconds.rounded())) 秒）",
+                                  idleBaselineMs: idleControlMedian)
             extendedSamples = monitor.latencySamples(from: t0, to: monitor.now)
             end(.extendedMonitoring, hc, planned: seconds, note: "final observation (continuous monitor)")
             recycled = seconds
@@ -655,8 +663,8 @@ extension TestRunner {
                         emit: @escaping @Sendable (TestRunEvent) -> Void) async throws -> StressTransferResult {
         let direction = config.direction
         let phase: TestPhase = direction == .download ? .download : .upload
-        try? await loadedProbe.prepare()
-        if let controlProbe { try? await controlProbe.prepare() }
+        _ = try? await withTimeout(8) { try await loadedProbe.prepare() }
+        if let controlProbe { _ = try? await withTimeout(8) { try await controlProbe.prepare() } }
         let controlTask: Task<[LatencySample], Never>? = controlProbe.map { probe in
             Task {
                 var out: [LatencySample] = []
@@ -701,8 +709,8 @@ extension TestRunner {
         } catch is CancellationError {
             loadedTask.cancel()
             controlTask?.cancel()
-            await loadedProbe.close()
-            await controlProbe?.close()
+            _ = try? await withDeadline(3, fallback: ()) { await loadedProbe.close() }
+            _ = try? await withDeadline(3, fallback: ()) { await controlProbe?.close() }
             throw CancellationError()
         } catch {
             failure = error.localizedDescription
@@ -711,8 +719,8 @@ extension TestRunner {
         controlTask?.cancel()
         let all = await loadedTask.value
         let control = await controlTask?.value
-        await loadedProbe.close()
-        await controlProbe?.close()
+        _ = try? await withDeadline(3, fallback: ()) { await loadedProbe.close() }
+        _ = try? await withDeadline(3, fallback: ()) { await controlProbe?.close() }
         try Task.checkCancellation()
         let ramped = all.filter { $0.offset >= 1.0 }
         let loaded = ramped.isEmpty ? all : ramped
@@ -763,11 +771,11 @@ extension TestRunner {
         let results = await withTaskGroup(of: LossProbeResult?.self) { group in
             for spec in specs {
                 group.addTask {
-                    do { try await spec.probe.prepare() } catch { return nil }
+                    do { try await withTimeout(8) { try await spec.probe.prepare() } } catch { return nil }
                     let samples = await LatencySampler.collect(probe: spec.probe, count: spec.count, interval: spec.interval, timeout: 1) {
                         if spec.stress { emit(.latencySample(.packetLoss, $0)) }
                     }
-                    await spec.probe.close()
+                    _ = try? await withDeadline(3, fallback: ()) { await spec.probe.close() }
                     return LossProbeResult(id: spec.id, name: spec.name, target: spec.target, method: spec.method,
                                            packetsPerSecond: spec.pps, isStressProbe: spec.stress, samples: samples)
                 }

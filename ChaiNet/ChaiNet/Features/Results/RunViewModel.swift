@@ -301,6 +301,11 @@ final class RunViewModel {
             let share = p.kind.loadShare
             if share.download > 0 { resetLive(.download) }
             if share.upload > 0 { resetLive(.upload) }
+            // Recovery / observation windows each show their own live latency and status line.
+            if !p.kind.isLoadPhase {
+                latencySamples[.monitoring] = nil
+                notes[.monitoring] = nil
+            }
         case .liveSample(let p, let series, let sample):
             if liveSeries[p]?[series] == nil { liveSeriesOrder[p, default: []].append(series) }
             liveSeries[p, default: [:]][series, default: []].append(sample)

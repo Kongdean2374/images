@@ -14,7 +14,10 @@ struct LiveRunView: View {
             if let direction = vm.activeDirection ?? lastDirection {
                 ThroughputLivePanel(vm: vm, direction: direction)
             } else if vm.phase == .idleLatency || vm.phase == .packetLoss || vm.phase == .monitoring {
-                LatencyLivePanel(samples: vm.latencySamples[vm.phase ?? .idleLatency] ?? [], title: vm.phase?.displayName ?? "")
+                let phase = vm.phase ?? .idleLatency
+                LatencyLivePanel(samples: vm.latencySamples[phase] ?? [],
+                                 title: vm.stressProgress.map { $0.kind.isLoadPhase ? phase.displayName : $0.kind.title } ?? phase.displayName,
+                                 status: vm.notes[phase]?.last?.text)
             } else {
                 PhaseActivityPanel(vm: vm, phase: vm.phase ?? .preparing)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -155,6 +158,8 @@ private struct LiveStat: View {
 private struct LatencyLivePanel: View {
     let samples: [LatencySample]
     let title: String
+    /// Latest status line of the phase (what is measured now / time left).
+    var status: String? = nil
 
     var body: some View {
         let stats = LatencyStatistics.compute(from: samples)
@@ -163,6 +168,11 @@ private struct LatencyLivePanel: View {
                 Label(title, systemImage: "dot.radiowaves.left.and.right").font(.headline).foregroundStyle(Theme.latency)
                 Spacer()
                 Text("\(stats.sent) 個探測").font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+            }
+            if let status {
+                Text(status).font(.caption).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transaction { $0.animation = nil }
             }
             HStack(alignment: .top, spacing: 12) {
                 LiveStat(title: "中位數", value: Format.ms(stats.rtt?.median))
