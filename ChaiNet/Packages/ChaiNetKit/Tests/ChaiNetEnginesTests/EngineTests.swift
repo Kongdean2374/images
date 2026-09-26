@@ -195,15 +195,15 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertEqual(r.kind, .extremeStressTest)
         let s = try XCTUnwrap(r.stress)
         XCTAssertEqual(s.testMode, "extremeStressTest")
-        XCTAssertEqual(s.plan.rounds, 2)
-        // Cloudflare (HTTP x16) and M-Lab (NDT7) in both rounds, both directions.
-        XCTAssertEqual(s.transfers.count, 8)
+        XCTAssertEqual(s.plan.rounds, 1)
+        // Standard throughput: Cloudflare (HTTP x16) and M-Lab (NDT7), both directions, once.
+        XCTAssertEqual(s.transfers.count, 4)
         XCTAssertTrue(s.transfers.contains { $0.method == "NDT7 WebSocket x1" })
         XCTAssertTrue(s.transfers.contains { $0.method == "HTTP x16" })
         XCTAssertEqual(s.downloadAggregate?.values.count, 2)
         XCTAssertGreaterThan(s.totalDownloadBytes, 0)
         XCTAssertGreaterThan(s.totalUploadBytes, 0)
-        XCTAssertEqual(s.postLoadLatency.count, 2)
+        XCTAssertEqual(s.postLoadLatency.count, 1)
         XCTAssertNotNil(s.stressProbe)
         XCTAssertEqual(s.stressProbe?.packetsPerSecond, 50)
         XCTAssertGreaterThanOrEqual(s.controlProbes.count, 3, "primary ICMP + two independent ICMP")
@@ -217,6 +217,73 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertNotNil(r.dns); XCTAssertNotNil(r.traceroute); XCTAssertNotNil(r.monitoring); XCTAssertNotNil(r.ipFamilyComparison)
         XCTAssertTrue(r.notes.contains("test warning"))
         XCTAssertNotNil(s.score)
+    }
+
+    /// v3.0: the stress phases really run (real load through the speed engines) and are kept apart
+    /// from the standard (headline) throughput.
+    func testStressPhasesRunAfterStandardThroughput() async throws {
+        let (r, _) = try await run(TestRunner.mock(sampleDelay: 0))
+        let s = try XCTUnwrap(r.stress)
+        let L = try XCTUnwrap(r.stressLoad)
+        XCTAssertTrue(Set(s.phases.map(\.kind)).isSuperset(of: [.streamRamp, .sustainedDownload, .sustainedUpload, .fullDuplex, .burst,
+                                                                  .multiDestination, .shortRecovery, .finalRecovery]))
+        let ramp = try XCTUnwrap(L.streamRamp)
+        XCTAssertEqual(ramp.stages.first?.streamCount, 1, "the ramp starts at one stream, never at 32")
+        // The mock delivers the same rate whatever the stream count → plateau right away.
+        XCTAssertTrue(ramp.saturationDetected)
+        XCTAssertEqual(ramp.saturationStreamCount, 1)
+        XCTAssertLessThan(ramp.maxObservedStreamCount, 32, "stops once two stages stop gaining")
+        XCTAssertNotNil(L.sustainedDownload?.throughput)
+        XCTAssertNotNil(L.sustainedUpload?.throughput)
+        XCTAssertNotNil(L.fullDuplex?.download)
+        XCTAssertNotNil(L.fullDuplex?.upload)
+        XCTAssertEqual(L.fullDuplex?.queueLocation, "unknown")
+        XCTAssertEqual(L.burst?.cycles.count, s.plan.burstCycles)
+        XCTAssertEqual(L.multiDestination?.destinations.count, 2)
+        XCTAssertEqual(L.multiDestination?.methodEquivalent, false)
+        XCTAssertEqual(L.recoveries.filter { $0.kind == "short" }.count, 3)
+        XCTAssertNotNil(L.finalRecovery)
+        XCTAssertNotNil(L.monitor, "one continuous monitor for the whole test")
+        XCTAssertTrue(Set(L.monitor!.samples.map(\.phase)).isSuperset(of: ["idleLatency", "finalRecovery"]), "samples are tagged with their phase")
+        XCTAssertNotNil(L.environment)
+        // Headline = standard throughput, never the stress aggregate.
+        XCTAssertEqual(s.headlineMbps(.download)!, s.transfers(.download).first { $0.nodeID == "cloudflare" }!.rateMbps!, accuracy: 0.01)
+        XCTAssertGreaterThan(s.totalDownloadBytes, s.transfers.filter { $0.direction == .download }.reduce(0) { $0 + $1.bytes },
+                             "actual usage includes the stress phases")
+        let text = RawDataExporter.text(r, analysis: nil, appVersion: "3.0.0", platform: "iOS")
+        for section in ["[stress_saturation]", "[stress_stream_ramp]", "[stress_sustained_download]", "[stress_sustained_upload]",
+                        "[stress_full_duplex]", "[stress_burst]", "[stress_multi_destination]", "[stress_recovery]", "[thermal_environment]",
+                        "[stress_cross_load_impact]", "[raw.stress.continuous_monitor]", "[raw.stress.full_duplex.download]"] {
+            XCTAssertTrue(text.contains(section), section)
+        }
+        XCTAssertTrue(text.contains("measurement_type=standard_throughput"))
+    }
+
+    /// Toolbox: every stress engine runs alone through the same code.
+    func testToolboxStressEnginesRun() async throws {
+        for kind in StressToolKind.allCases {
+            var config = TestRunConfiguration(kind: .stressTool, items: [], candidateServers: ServerDescriptor.builtIn,
+                                              settings: AppSettings(), onCellular: false)
+            config.stressTool = StressToolRequest(kind: kind, durationSeconds: 10, maxStreams: 16, burstCycles: 3)
+            config.stressTimeScale = 0.001
+            var final: TestResult?
+            for try await e in TestRunner.mock(sampleDelay: 0).run(config) { if case .completed(let r) = e { final = r } }
+            let r = try XCTUnwrap(final, "\(kind)")
+            let L = try XCTUnwrap(r.stressLoad, "\(kind)")
+            switch kind {
+            case .streamRamp: XCTAssertNotNil(L.streamRamp)
+            case .sustainedDownload, .recovery: XCTAssertNotNil(L.sustainedDownload)
+            case .sustainedUpload: XCTAssertNotNil(L.sustainedUpload)
+            case .fullDuplex:
+                XCTAssertNotNil(L.fullDuplex)
+                XCTAssertNotNil(L.fullDuplex?.downloadOnlyReferenceMbps, "single-direction reference measured first")
+            case .burst: XCTAssertEqual(L.burst?.cycles.count, 3)
+            case .multiDestination: XCTAssertEqual(L.multiDestination?.destinations.count, 2)
+            case .packetLossStress: XCTAssertFalse(L.lossProbes?.isEmpty ?? true)
+            }
+            if kind == .recovery { XCTAssertEqual(L.finalRecovery?.kind, "final") }
+            XCTAssertEqual(r.kind, .stressTool)
+        }
     }
 
     func testOneFailingEndpointDoesNotFailTheTest() async throws {
@@ -391,31 +458,31 @@ final class StressTransferValidityRunnerTests: XCTestCase {
         return try XCTUnwrap(final)
     }
 
-    /// v2.1.1: Cloudflare round 2 download returned a tiny body (0.005 Mbps) and was counted.
-    /// HTTP engine call order: r1 ↓, r1 ↑, r2 ↓ (tiny), r2 ↓ retry (tiny), r2 ↑.
-    func testTinyRound2IsRetriedThenExcluded() async throws {
+    /// v2.1.1: a Cloudflare download returned a tiny body (0.005 Mbps) and was counted.
+    /// v3.0 (one standard round) HTTP engine call order: ↓ (tiny), ↓ retry (tiny), ↑, then stress phases.
+    func testTinyStandardDownloadIsRetriedThenExcluded() async throws {
         var runner = TestRunner.mock(sampleDelay: 0)
-        runner.speed = MockSpeedTestEngine(ratesByCall: [431, 50, 0.005, 0.005, 50])
+        runner.speed = MockSpeedTestEngine(ratesByCall: [0.005, 0.005, 50])
         let r = try await run(runner)
         let s = try XCTUnwrap(r.stress)
-        let attempts = s.transfers.filter { $0.nodeID == "cloudflare" && $0.round == 2 && $0.direction == .download }
+        let attempts = s.transfers.filter { $0.nodeID == "cloudflare" && $0.round == 1 && $0.direction == .download }
         XCTAssertEqual(attempts.map { $0.attempt ?? 1 }, [1, 2])
         XCTAssertTrue(attempts.allSatisfy { !$0.isValid && $0.validity?.reason == .insufficientPayload })
         XCTAssertEqual(s.failedSlots().count, 1)
-        XCTAssertEqual(s.downloadAggregate!.values.first { $0.nodeID == "cloudflare" }!.mbps, 431, accuracy: 1)
-        XCTAssertEqual(s.scoreConfidence, .medium)
+        XCTAssertNil(s.downloadAggregate?.values.first { $0.nodeID == "cloudflare" }, "an invalid transfer never reaches the aggregate")
+        XCTAssertNotEqual(s.scoreConfidence, .high)
         XCTAssertTrue(r.notes.contains { $0.contains("重試仍失敗") })
         XCTAssertNotEqual(r.stress?.lossConfirmation.verdict, .inconclusive)
     }
 
     func testRetryRecovers() async throws {
         var runner = TestRunner.mock(sampleDelay: 0)
-        runner.speed = MockSpeedTestEngine(ratesByCall: [431, 50, 0.005, 420, 50])
+        runner.speed = MockSpeedTestEngine(ratesByCall: [0.005, 420, 50])
         let result = try await run(runner)
         let s = try XCTUnwrap(result.stress)
         XCTAssertTrue(s.failedSlots().isEmpty)
         XCTAssertEqual(s.invalidTransfers().count, 1, "the failed first attempt is kept as evidence")
-        XCTAssertEqual(s.transfers(.download).filter { $0.nodeID == "cloudflare" }.count, 2)
+        XCTAssertEqual(s.transfers(.download).filter { $0.nodeID == "cloudflare" }.count, 1)
     }
 
     func testBatchedUploadThroughRunner() async throws {

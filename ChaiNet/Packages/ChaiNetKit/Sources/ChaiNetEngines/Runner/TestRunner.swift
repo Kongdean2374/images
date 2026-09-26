@@ -66,6 +66,8 @@ public struct TestRunConfiguration: Sendable {
     public var stressTrafficEstimate: TrafficEstimate?
     /// Multiplies phase durations / probe counts (tests only; 1 in the app).
     public var stressTimeScale: Double = 1
+    /// Toolbox stress tool (kind `.stressTool`): which engine and its parameters.
+    public var stressTool: StressToolRequest?
 
     public init(kind: TestKind, items: Set<TestItem>, candidateServers: [ServerDescriptor], fixedServer: ServerDescriptor? = nil,
                 settings: AppSettings, onCellular: Bool) {
@@ -226,6 +228,8 @@ public struct TestRunner: TestRunnerProtocol {
             let result: TestResult
             if configuration.kind == .extremeStressTest, let plan = configuration.stressPlan {
                 result = try await runner.executeStress(configuration, plan: plan, emit: emit)
+            } else if configuration.kind == .stressTool, let request = configuration.stressTool {
+                result = try await runner.executeStressTool(configuration, request: request, emit: emit)
             } else {
                 result = try await runner.execute(configuration, emit: emit)
             }

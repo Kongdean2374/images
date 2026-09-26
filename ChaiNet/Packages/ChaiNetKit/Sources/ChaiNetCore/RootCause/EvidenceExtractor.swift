@@ -431,6 +431,54 @@ public struct EvidenceExtractor: Sendable {
             }
         }
 
+        // v3.0 stress phases — facts first; mechanisms / locations stay hypotheses.
+        if let L = r.stressLoad {
+            if let ramp = L.streamRamp {
+                measured.insert(.throughput)
+                if ramp.saturationDetected, let n = ramp.saturationStreamCount {
+                    add(.saturationReached, "連線數階梯：約 \(n) 條連線後吞吐量不再明顯增加（\(Fmt.d(ramp.saturationThroughputMbps ?? 0, 0)) Mbps）", ramp.saturationThroughputMbps, "Mbps")
+                }
+                if let g = ramp.marginalGainPercent, g < StreamRampResult.plateauGainPercent {
+                    add(.streamScalingPlateau, "最後一級連線數的增益僅 \(Fmt.d(g, 1))%：增加連線已無法提高吞吐量", g, "%")
+                }
+            }
+            for s in [L.sustainedDownload, L.sustainedUpload].compactMap({ $0 }) {
+                if let d = s.throughput?.degradationPercent, d >= 15 {
+                    add(.sustainedThroughputDegradation, "持續\(s.direction == .download ? "下載" : "上傳") \(Fmt.d(s.plannedSeconds, 0)) 秒：結尾比開頭慢 \(Fmt.d(d, 0))%", d, "%")
+                }
+            }
+            if let fd = L.fullDuplex {
+                measured.insert(.throughput)
+                let worst = [fd.downloadDegradationPercent, fd.uploadDegradationPercent].compactMap { $0 }.max()
+                if let worst, worst >= 25 {
+                    add(.fullDuplexInterference, "上下行同時滿載：下載降 \(Fmt.d(fd.downloadDegradationPercent ?? 0, 0))%、上傳降 \(Fmt.d(fd.uploadDegradationPercent ?? 0, 0))%（相對單向，同節點同方法）", worst, "%")
+                }
+            }
+            let inflations = [L.sustainedDownload?.latency?.inflationMs, L.sustainedUpload?.latency?.inflationMs, L.fullDuplex?.latency?.inflationMs].compactMap { $0 }
+            if let w = inflations.max(), w >= Self.loadedInflationThresholdMs {
+                measured.insert(.bufferbloat)
+                add(.loadCorrelatedLatencyInflation, "負載時控制延遲上升 \(Fmt.d(w, 0)) ms（同一固定目標與方法：\(L.monitor?.probe.target ?? "control")；佇列位置未知）", w, "ms")
+            }
+            let idleLoss = L.monitor.map { m in m.samples.filter { $0.loadType == .idle } }.map { s in s.isEmpty ? 0 : Double(s.filter { $0.rttMs == nil }.count) / Double(s.count) * 100 } ?? 0
+            let loadLoss = [L.sustainedDownload?.latency?.lossPercent, L.sustainedUpload?.latency?.lossPercent, L.fullDuplex?.latency?.lossPercent].compactMap { $0 }.max()
+            if let loadLoss, loadLoss >= 1, idleLoss < 0.5 {
+                add(.loadCorrelatedLoss, "負載時控制探測遺失 \(Fmt.d(loadLoss, 1))%，閒置時 \(Fmt.d(idleLoss, 1))%（同一探測）", loadLoss, "%")
+            }
+            if let bu = L.burst {
+                if let m = bu.medianRecoveryTimeMs, m > 1000 { add(.burstRecoverySlow, "突發負載結束後延遲恢復中位數 \(Fmt.d(m, 0)) ms", m, "ms") }
+                if let l = bu.lossPercent, l >= 1, idleLoss < 0.5 { add(.burstTriggeredLoss, "突發負載期間控制探測遺失 \(Fmt.d(l, 1))%", l, "%") }
+            }
+            if let md = L.multiDestination, md.singleDestinationLimitationPossible {
+                add(.multiDestinationHigherAggregate, "多目的地總和 \(Fmt.d(md.aggregateMbps, 0)) Mbps 高於單一目的地 \(Fmt.d(md.bestSingleStandardMbps ?? 0, 0)) Mbps：單一目的地限制「可能」存在（方法不同，非供應商比較）", md.aggregateMbps, "Mbps")
+            }
+            if let f = L.finalRecovery, !f.complete {
+                add(.postLoadRecoveryIncomplete, "最終恢復 \(Fmt.d(f.plannedSeconds, 0)) 秒內延遲未回到基準 ±10%")
+            }
+            if let env = L.environment, env.thermalRose {
+                add(.thermalStateChangedDuringLoad, "壓力期間裝置溫度狀態 \(env.thermalStart ?? "?") → \(env.thermalPeak ?? "?")（僅為相關性，不代表網路因熱降速）")
+            }
+        }
+
         // MTU
         if let mtu = r.mtu?.pathMTU {
             measured.insert(.mtu)

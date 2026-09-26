@@ -112,6 +112,21 @@ public enum StressBudget {
 public enum StressPhaseKind: String, Codable, Sendable, Hashable, CaseIterable {
     case healthCheck, warmUp, idleLatency, downloadStress, uploadStress, postLoadRecovery, packetLossStress,
          monitoring, dnsProtocols, ipFamilies, crossServerValidation, routeMTU, extendedMonitoring
+    // v3.0: stress phases after the standard throughput.
+    case streamRamp, sustainedDownload, sustainedUpload, fullDuplex, burst, multiDestination, shortRecovery, finalRecovery
+
+    /// Share of the phase that loads each direction (traffic estimate / projection).
+    public var loadShare: (download: Double, upload: Double) {
+        switch self {
+        case .downloadStress, .streamRamp, .sustainedDownload, .multiDestination: (1, 0)
+        case .uploadStress, .sustainedUpload: (0, 1)
+        case .fullDuplex: (1, 1)
+        case .burst: (0.6, 0)
+        default: (0, 0)
+        }
+    }
+
+    public var isLoadPhase: Bool { loadShare.download > 0 || loadShare.upload > 0 }
 
     public var title: String {
         switch self {
@@ -127,7 +142,15 @@ public enum StressPhaseKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .ipFamilies: "IPv4 / IPv6"
         case .crossServerValidation: "跨節點驗證"
         case .routeMTU: "路由追蹤 / MTU"
-        case .extendedMonitoring: "延長監測（回收未用時間）"
+        case .extendedMonitoring: "最終延長觀察"
+        case .streamRamp: "連線數階梯（飽和點搜尋）"
+        case .sustainedDownload: "持續下載滿載"
+        case .sustainedUpload: "持續上傳滿載"
+        case .fullDuplex: "全雙工（上下行同時滿載）"
+        case .burst: "突發負載（負載 / 閒置循環）"
+        case .multiDestination: "多目的地同時下載"
+        case .shortRecovery: "短恢復"
+        case .finalRecovery: "最終恢復"
         }
     }
 }
@@ -309,6 +332,12 @@ public struct StressTestPlan: Codable, Sendable, Hashable {
     public var controlPacketsPerSecond: Double
     /// Seconds per HTTP transfer (one node, one direction, one round).
     public var transferSeconds: Double
+    /// v3.0 stress parameters (nil in plans saved before v3.0).
+    public var rampStages: [Int]?
+    public var rampStageSeconds: Double?
+    public var burstCycles: Int?
+    public var burstLoadSeconds: Double?
+    public var burstIdleSeconds: Double?
 
     public static let presets: [Double] = [60, 180, 300, 600, 900]
     public static let minimumSeconds: Double = 60
@@ -316,54 +345,102 @@ public struct StressTestPlan: Codable, Sendable, Hashable {
     public static let ndt7MaxSeconds: Double = 10
     public static let maxStreams = 16
 
-    public static func rounds(for seconds: Double) -> Int { seconds <= 180 ? 1 : (seconds <= 600 ? 2 : 3) }
+    /// v3.0: one standard throughput round; the time of former repeat rounds goes to the stress phases.
+    public static func rounds(for seconds: Double) -> Int { 1 }
 
+    /// Budget (seconds, T = requested, clamped to 60…3600):
+    ///
+    ///     fixed      healthCheck 4 · warmUp 3 · idle max(5, 4 % T)
+    ///                standard HTTP transfer clamp(4 % T, 6, 15) per direction · NDT7 min(that, 10)
+    ///                recovery (reference) max(3, 1.5 % T) · cross-server max(3, 2 % T)
+    ///                dns/protocols clamp(5 % T, 8, 20) · ipFamilies max(4, 2 % T) · route/MTU 15 (T < 180) or 20
+    ///                packet loss max(10, 5 % T) · monitoring max(8, 3 % T)
+    ///     flexible   F = max(T₃₀₀ − fixed, Σ minimums), T₃₀₀ = min(T, 300); each phase = max(min, weight × F)
+    ///                ramp 14 % (7 stages) · sustained ↓ 17 % · sustained ↑ 13 % · full duplex 14 %
+    ///                burst 17 % (3 s load + 2 s idle cycles, 3…10) · multi-destination 7 %
+    ///                short recoveries 6 % (3×) · final recovery 12 % (15…30 s)
+    ///     T > 300    the extra time goes to sustained ↓ 30 % · sustained ↑ 25 % · full duplex 25 % · final recovery 20 %
     public static func make(totalSeconds: Double, nodes: [StressNode]) -> StressTestPlan {
         let t = min(max(totalSeconds, minimumSeconds), maximumSeconds)
-        let r = rounds(for: t)
         let throughputNodes = nodes.filter(\.isThroughputCapable)
-        let n = Double(max(1, throughputNodes.count))
-        let rd = Double(r)
-        let idle = max(5, 0.05 * t)
-        let loss = max(10, 0.10 * t)
-        let monitoring = max(10, 0.07 * t)
-        let dnsProtocols = min(25, max(10, 0.08 * t))
-        let ipFamilies = max(4, 0.03 * t)
-        let route: Double = t < 180 ? 15 : 30
-        let recovery = max(4, 0.02 * t / rd)
-        let cross = max(3, 0.03 * t / rd)
-        let fixed = 4 + 3 + idle + loss + monitoring + dnsProtocols + ipFamilies + route + rd * (recovery + cross)
-        let budget = max(t - fixed, 0.4 * t)
-        // NDT7 transfers are capped by the protocol; their unused share goes to the HTTP nodes.
-        let mlabCount = Double(throughputNodes.filter { $0.provider == .mlab }.count)
-        let httpCount = n - mlabCount
-        let even = budget / (2 * rd * n)
-        let mlabSeconds = min(max(6, even), ndt7MaxSeconds)
-        let transfer = httpCount > 0 ? max(6, (budget - 2 * rd * mlabCount * mlabSeconds) / (2 * rd * httpCount)) : max(6, even)
+        let httpNodes = throughputNodes.filter { $0.provider != .mlab }
+        let transfer = min(15, max(6, 0.04 * t))
+        let ndt7 = min(transfer, ndt7MaxSeconds)
+        let idle = max(5, 0.04 * t)
+        let recovery = max(3, 0.015 * t)
+        let cross = max(3, 0.02 * t)
+        let dnsProtocols = min(20, max(8, 0.05 * t))
+        let ipFamilies = max(4, 0.02 * t)
+        let route: Double = t < 180 ? 15 : 20
+        let loss = max(10, 0.05 * t)
+        let monitoring = max(8, 0.03 * t)
+        let standard = throughputNodes.reduce(0.0) { $0 + 2 * ($1.provider == .mlab ? ndt7 : transfer) }
+        let fixed = 4 + 3 + idle + standard + recovery + cross + dnsProtocols + ipFamilies + route + loss + monitoring
+
+        let stages = StreamRampResult.defaultStages
+        let hasHTTP = !httpNodes.isEmpty
+        // name: (weight, minimum)
+        let spec: [(StressPhaseKind, Double, Double)] = [
+            (.streamRamp, 0.14, 2.0 * Double(stages.count)), (.sustainedDownload, 0.17, 10), (.sustainedUpload, 0.13, 10),
+            (.fullDuplex, 0.14, 10), (.burst, 0.17, 15), (.multiDestination, 0.07, 8), (.shortRecovery, 0.06, 9), (.finalRecovery, 0.12, 15),
+        ]
+        let minimums = spec.reduce(0) { $0 + $1.2 }
+        let flexible = max(min(t, 300) - fixed, minimums)
+        var alloc: [StressPhaseKind: Double] = [:]
+        for (kind, weight, minimum) in spec { alloc[kind] = max(minimum, weight * flexible) }
+        let extra = max(0, t - max(300, fixed + minimums))
+        alloc[.sustainedDownload, default: 0] += 0.30 * extra
+        alloc[.sustainedUpload, default: 0] += 0.25 * extra
+        alloc[.fullDuplex, default: 0] += 0.25 * extra
+        alloc[.finalRecovery, default: 0] += 0.20 * extra
+        alloc[.finalRecovery] = min(max(15, alloc[.finalRecovery]!), 30 + 0.20 * extra)
+        let rampStage = alloc[.streamRamp]! / Double(stages.count)
+        let cycles = Int(min(10, max(3, (alloc[.burst]! / 5).rounded(.down))))
 
         var phases: [StressPlanPhase] = [
             StressPlanPhase(kind: .healthCheck, seconds: 4),
             StressPlanPhase(kind: .warmUp, seconds: 3),
             StressPlanPhase(kind: .idleLatency, seconds: idle),
         ]
-        for round in 1...r {
-            for node in throughputNodes {
-                let s = node.provider == .mlab ? min(transfer, ndt7MaxSeconds) : transfer
-                phases.append(StressPlanPhase(kind: .downloadStress, round: round, nodeID: node.id, seconds: s))
-                phases.append(StressPlanPhase(kind: .uploadStress, round: round, nodeID: node.id, seconds: s))
-            }
-            phases.append(StressPlanPhase(kind: .postLoadRecovery, round: round, seconds: recovery))
-            phases.append(StressPlanPhase(kind: .crossServerValidation, round: round, seconds: cross))
+        for node in throughputNodes {
+            let s = node.provider == .mlab ? ndt7 : transfer
+            phases.append(StressPlanPhase(kind: .downloadStress, round: 1, nodeID: node.id, seconds: s))
+            phases.append(StressPlanPhase(kind: .uploadStress, round: 1, nodeID: node.id, seconds: s))
         }
+        phases.append(StressPlanPhase(kind: .postLoadRecovery, round: 1, seconds: recovery))
+        phases.append(StressPlanPhase(kind: .crossServerValidation, round: 1, seconds: cross))
         phases += [
-            StressPlanPhase(kind: .packetLossStress, seconds: loss),
-            StressPlanPhase(kind: .monitoring, seconds: monitoring),
             StressPlanPhase(kind: .dnsProtocols, seconds: dnsProtocols),
             StressPlanPhase(kind: .ipFamilies, seconds: ipFamilies),
             StressPlanPhase(kind: .routeMTU, seconds: route),
         ]
-        return StressTestPlan(requestedSeconds: t, rounds: r, nodes: nodes, phases: phases, streams: maxStreams,
-                              stressPacketsPerSecond: 50, controlPacketsPerSecond: 5, transferSeconds: transfer)
+        if hasHTTP {
+            let shortRec = alloc[.shortRecovery]! / 3
+            phases += [
+                StressPlanPhase(kind: .streamRamp, nodeID: httpNodes[0].id, seconds: rampStage * Double(stages.count)),
+                StressPlanPhase(kind: .sustainedDownload, nodeID: httpNodes[0].id, seconds: alloc[.sustainedDownload]!),
+                StressPlanPhase(kind: .shortRecovery, round: 1, seconds: shortRec),
+                StressPlanPhase(kind: .sustainedUpload, nodeID: httpNodes[0].id, seconds: alloc[.sustainedUpload]!),
+                StressPlanPhase(kind: .shortRecovery, round: 2, seconds: shortRec),
+                StressPlanPhase(kind: .fullDuplex, nodeID: httpNodes[0].id, seconds: alloc[.fullDuplex]!),
+                StressPlanPhase(kind: .shortRecovery, round: 3, seconds: shortRec),
+                StressPlanPhase(kind: .burst, nodeID: httpNodes[0].id, seconds: Double(cycles) * 5),
+            ]
+            if throughputNodes.count >= 2 { phases.append(StressPlanPhase(kind: .multiDestination, seconds: alloc[.multiDestination]!)) }
+        }
+        phases += [
+            StressPlanPhase(kind: .packetLossStress, seconds: loss),
+            StressPlanPhase(kind: .monitoring, seconds: monitoring),
+            StressPlanPhase(kind: .finalRecovery, seconds: alloc[.finalRecovery]!),
+        ]
+        var plan = StressTestPlan(requestedSeconds: t, rounds: 1, nodes: nodes, phases: phases, streams: maxStreams,
+                                  stressPacketsPerSecond: 50, controlPacketsPerSecond: 5, transferSeconds: transfer)
+        plan.rampStages = stages
+        plan.rampStageSeconds = rampStage
+        plan.burstCycles = cycles
+        plan.burstLoadSeconds = 3
+        plan.burstIdleSeconds = 2
+        return plan
     }
 
     public var estimatedSeconds: Double { phases.reduce(0) { $0 + $1.seconds } }
@@ -385,7 +462,7 @@ public struct StressTestPlan: Codable, Sendable, Hashable {
 
     /// Seconds of the non-throughput phases (health check, idle, loss, monitoring, DNS, route…).
     public var diagnosticSeconds: Double {
-        phases.filter { $0.kind != .downloadStress && $0.kind != .uploadStress }.reduce(0) { $0 + $1.seconds }
+        phases.filter { !$0.kind.isLoadPhase }.reduce(0) { $0 + $1.seconds }
     }
 
     /// Why the planned duration differs from the configured one:
@@ -404,9 +481,13 @@ public struct StressTestPlan: Codable, Sendable, Hashable {
     }
 
     /// Expected bytes if the link sustains the given rates for every transfer phase.
+    /// Seconds of load per direction over every load phase (standard + stress).
+    public var loadSeconds: (download: Double, upload: Double) {
+        phases.reduce((0.0, 0.0)) { ($0.0 + $1.seconds * $1.kind.loadShare.download, $0.1 + $1.seconds * $1.kind.loadShare.upload) }
+    }
+
     public func trafficEstimate(downloadMbps: Double, uploadMbps: Double, networkClass: NetworkClass? = nil) -> TrafficEstimate {
-        let dl = phases.filter { $0.kind == .downloadStress }.reduce(0) { $0 + $1.seconds }
-        let ul = phases.filter { $0.kind == .uploadStress }.reduce(0) { $0 + $1.seconds }
+        let (dl, ul) = loadSeconds
         var e = TrafficEstimate(downloadBytes: Int64(dl * downloadMbps * 1_000_000 / 8),
                                 uploadBytes: Int64(ul * uploadMbps * 1_000_000 / 8),
                                 assumedDownloadMbps: downloadMbps, assumedUploadMbps: uploadMbps)

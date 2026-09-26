@@ -35,6 +35,8 @@ public struct MetricSnapshot: Codable, Sendable, Hashable {
     public var quicReachable: Bool?
     /// Host the HTTP / HTTP-3 probe targeted (findings are scoped to it).
     public var http3ProbeHost: String?
+    /// Worst control-latency inflation during the v3.0 stress phases (ms); nil when not run.
+    public var stressLoadInflationMs: Double?
     /// Protocol the strict HTTP/3 attempt actually used when it did not negotiate h3.
     public var http3FallbackProtocol: HTTPProtocolVersion?
     /// Independent endpoints with a strict HTTP/3 attempt, and how many of them failed.

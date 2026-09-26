@@ -89,6 +89,10 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     /// One independent validation endpoint (not a speed-test server) behaves differently from its
     /// peers in latency-probe results only (ICMP / TCP). Scoped to that endpoint address.
     case endpointSpecificBehaviorObserved
+    // v3.0 stress phases
+    case saturationReached, streamScalingPlateau, sustainedThroughputDegradation, fullDuplexInterference
+    case burstRecoverySlow, burstTriggeredLoss, multiDestinationHigherAggregate, postLoadRecoveryIncomplete
+    case thermalStateChangedDuringLoad, loadCorrelatedLatencyInflation, loadCorrelatedLoss
     case latencySpikesFrequent
     // Bufferbloat
     case downloadBufferbloat, uploadBufferbloat, noBufferbloat
@@ -157,8 +161,17 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     public var dimension: EvidenceDimension {
         switch self {
         case .downloadHigh, .downloadNormal, .downloadLow, .uploadVeryLow, .uploadLow, .uploadNormal, .asymmetricRatio,
-             .downloadUnstable, .downloadStable, .uploadUnstable, .uploadStable, .throughputDegradationUnderLoad:
+             .downloadUnstable, .downloadStable, .uploadUnstable, .uploadStable, .throughputDegradationUnderLoad,
+             .saturationReached, .streamScalingPlateau, .sustainedThroughputDegradation, .fullDuplexInterference:
             .throughput
+        case .burstRecoverySlow, .postLoadRecoveryIncomplete, .loadCorrelatedLatencyInflation:
+            .bufferbloat
+        case .burstTriggeredLoss, .loadCorrelatedLoss:
+            .loss
+        case .multiDestinationHigherAggregate:
+            .crossServer
+        case .thermalStateChangedDuringLoad:
+            .environment
         case .idleLatencyLow, .idleLatencyHigh, .jitterHigh, .jitterLow, .latencySpikesFrequent:
             .latency
         case .lossNone, .lossHigh, .lossSevere, .lossBursty, .lossRandom, .possibleICMPRateLimiting, .endpointSpecificLossObserved, .noConfirmedGeneralLoss:
@@ -227,6 +240,7 @@ extension EvidenceCode {
              .loadedLatencyRiseLimitedComparison: .heuristic
         case .noCellularTests, .no5GTests, .cellularRadioMetricsUnavailable, .noBaseline, .interfaceProbeUnavailable: .notTested
         case .allServerHealthChecksPassed, .serverTransferInvalid: .measured
+        case .streamScalingPlateau, .fullDuplexInterference: .derived
         default:
             switch dimension {
             case .crossServer, .ipFamily, .interfaceCompare, .radioCompare, .baseline: .derived

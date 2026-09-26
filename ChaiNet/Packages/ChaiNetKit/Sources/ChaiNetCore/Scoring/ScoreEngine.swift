@@ -21,6 +21,8 @@ public struct QualityScores: Codable, Sendable, Hashable {
 
 public enum ScoreMetric: String, Codable, Sendable, Hashable, CaseIterable {
     case download, upload, latency, jitter, loss, downloadBloat, uploadBloat, downloadStability, uploadStability
+    /// Worst control-latency inflation over the stress phases (full duplex, sustained, burst…).
+    case stressLoadBloat
 }
 
 /// A hard ceiling applied after weighting — e.g. "5 % loss makes gaming bad no matter how
@@ -55,8 +57,10 @@ public struct ScoreProfile: Sendable, Hashable, Codable {
 
     /// Gaming: responsiveness dominates; bandwidth barely matters.
     public static let gaming = ScoreProfile(
-        weights: [.latency: 0.30, .jitter: 0.20, .loss: 0.25, .downloadBloat: 0.075, .uploadBloat: 0.075, .download: 0.05, .upload: 0.05],
+        weights: [.latency: 0.30, .jitter: 0.20, .loss: 0.25, .downloadBloat: 0.075, .uploadBloat: 0.075, .download: 0.05, .upload: 0.05,
+                  .stressLoadBloat: 0.10],
         caps: [ScoreCap(metric: .loss, threshold: 2, maximumScore: 50), ScoreCap(metric: .loss, threshold: 5, maximumScore: 25),
+               ScoreCap(metric: .stressLoadBloat, threshold: 100, maximumScore: 60), ScoreCap(metric: .stressLoadBloat, threshold: 150, maximumScore: 45),
                ScoreCap(metric: .jitter, threshold: 50, maximumScore: 40), ScoreCap(metric: .latency, threshold: 100, maximumScore: 55),
                ScoreCap(metric: .latency, threshold: 150, maximumScore: 35)])
 
@@ -68,8 +72,9 @@ public struct ScoreProfile: Sendable, Hashable, Codable {
 
     /// Voice: jitter & loss (audio gaps) > latency (talk-over) > bandwidth (tiny).
     public static let voice = ScoreProfile(
-        weights: [.latency: 0.25, .jitter: 0.30, .loss: 0.30, .upload: 0.05, .uploadBloat: 0.05, .downloadBloat: 0.05],
-        caps: [ScoreCap(metric: .loss, threshold: 5, maximumScore: 25), ScoreCap(metric: .jitter, threshold: 80, maximumScore: 30)])
+        weights: [.latency: 0.25, .jitter: 0.30, .loss: 0.30, .upload: 0.05, .uploadBloat: 0.05, .downloadBloat: 0.05, .stressLoadBloat: 0.08],
+        caps: [ScoreCap(metric: .loss, threshold: 5, maximumScore: 25), ScoreCap(metric: .jitter, threshold: 80, maximumScore: 30),
+               ScoreCap(metric: .stressLoadBloat, threshold: 150, maximumScore: 50)])
 
     /// Upload / creator (OBS, video calls, cloud backup): uplink capacity and its steadiness.
     public static let upload = ScoreProfile(
@@ -113,6 +118,7 @@ public struct ScoreEngine: ScoreEngineProtocol {
         case .uploadBloat: m.uploadBloatMs
         case .downloadStability: m.downloadStability
         case .uploadStability: m.uploadStability
+        case .stressLoadBloat: m.stressLoadInflationMs
         }
     }
 
@@ -123,13 +129,14 @@ public struct ScoreEngine: ScoreEngineProtocol {
         case .latency: .latency
         case .jitter: .jitter
         case .loss: .loss
-        case .downloadBloat, .uploadBloat: .bufferbloat
+        case .downloadBloat, .uploadBloat, .stressLoadBloat: .bufferbloat
         case .downloadStability, .uploadStability: .identity
         }
     }
 
     public func score(_ metrics: MetricSnapshot, profile: ScoreProfile) -> Int? {
-        let totalWeight = profile.weights.values.reduce(0, +)
+        // Stress-only metrics refine the score when measured but never count toward coverage.
+        let totalWeight = profile.weights.filter { $0.key != .stressLoadBloat }.values.reduce(0, +)
         guard totalWeight > 0 else { return nil }
 
         var weighted = 0.0

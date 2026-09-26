@@ -195,7 +195,7 @@ final class ScientificRigorTests: XCTestCase {
         let r = Fixture.result(.wifi, download: 300, upload: 20, latency: 15, loss: 3)
         let analysis = RawDataExporter.analysis(for: r)
         let text = RawDataExporter.text(r, analysis: analysis, appVersion: "2.2.0", platform: "iOS")
-        XCTAssertTrue(text.contains("schema_version=2"))
+        XCTAssertTrue(text.contains("schema_version=3"))
         XCTAssertTrue(text.contains("cause,status,evidence_score_0_100,confidence_band,claim_type,"))
         XCTAssertFalse(text.contains("cause,status,confidence,"))
         XCTAssertTrue(text.contains("evidence_score_0_100 is uncalibrated evidence strength, not a probability"))
@@ -215,7 +215,7 @@ final class ScientificRigorTests: XCTestCase {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(RawDataExport.self, from: data)
-        XCTAssertEqual(decoded.version, 2)
+        XCTAssertEqual(decoded.version, 3)
         XCTAssertNotNil(decoded.derived)
     }
 

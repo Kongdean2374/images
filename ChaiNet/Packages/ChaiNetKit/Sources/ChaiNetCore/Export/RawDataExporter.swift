@@ -51,7 +51,7 @@ public enum RawDataExporter {
     /// scoped loss verdicts, evidence scores instead of probability-like confidence, spike
     /// definition, per-lookup DNS rows, per-endpoint HTTP/3 status, scoped MTU, traceroute
     /// analysis, upload measurement source, data limits. Every v1 key is still written.
-    public static let version = 2
+    public static let version = 3
 
     public static func derived(for r: TestResult) -> RawDataDerived {
         var d = RawDataDerived()
@@ -204,7 +204,7 @@ public enum RawDataExporter {
         o.append("ChaiNet Raw Data Export v\(version)")
         o.append("# Plain-text, English, explicit units. Every raw sample follows the summaries. Intended for engineers / AI analysis.")
         o.append("# Values the iOS platform does not expose are written as 'unavailable' (never simulated).")
-        o.append("# schema_version 2: v1 keys are kept; new keys are additive. claim_type = measured_fact | derived_observation | heuristic_inference | not_measured.")
+        o.append("# schema_version 3: v1 / v2 keys are kept; new keys and sections are additive. claim_type = measured_fact | derived_observation | heuristic_inference | not_measured.")
         o.append("# evidence_score_0_100 / confidence_band are uncalibrated evidence strength, NOT probabilities.")
 
         sec("meta")
@@ -448,6 +448,7 @@ public enum RawDataExporter {
                 sec(agg.0.rawValue)
                 kv("scope", "stress_aggregate_of_valid_transfers (per-node / per-round detail: [stress_transfers_per_server])")
                 kv("valid_transfers", "\(st.transfers(agg.0).count)"); kv("invalid_transfers", "\(st.invalidTransfers().filter { $0.direction == agg.0 }.count)")
+                kv("measurement_type", "standard_throughput (normal speed test; stress results are in [stress_saturation] and following sections)")
                 kv("headline_scope", st.headlineScope(agg.0)); kv("headline_mbps", n(st.headlineMbps(agg.0)))
                 let comparable = agg.1?.comparable ?? true
                 kv("median_across_nodes_mbps", comparable ? n(agg.1?.medianMbps) : "not_comparable")
@@ -527,6 +528,151 @@ public enum RawDataExporter {
             sec("quality_obs_upload")
             kv("sustained_p10_mbps", n(ob.sustainedMbps)); kv("recommended_bitrate_kbps", n(ob.recommendedBitrateKbps, 0))
             for p in ob.presets { kv("preset.\(p.preset.name.split(separator: " ").first ?? "")", "\(p.verdict.rawValue) bitrate_kbps=\(n(p.preset.bitrateKbps, 0))") }
+        }
+
+        // v3: stress phases (standard throughput stays in [download] / [upload] and the headline).
+        if let L = r.stressLoad {
+            func loadStats(_ p: String, _ t: LoadStats?) {
+                guard let t else { kv("\(p)measured", "false"); return }
+                kv("\(p)avg_mbps", n(t.averageMbps)); kv("\(p)initial_mbps", n(t.initialMbps)); kv("\(p)final_mbps", n(t.finalMbps))
+                kv("\(p)median_mbps", t.samplingArtifact ? "unavailable" : n(t.medianMbps))
+                kv("\(p)p10_mbps", t.samplingArtifact ? "unavailable" : n(t.p10Mbps))
+                kv("\(p)p95_mbps", t.samplingArtifact ? "unavailable" : n(t.p95Mbps))
+                kv("\(p)peak_mbps", t.samplingArtifact ? "unavailable" : n(t.peakMbps))
+                kv("\(p)throughput_degradation_percent", n(t.degradationPercent, 1))
+                kv("\(p)bytes", "\(t.bytes)"); kv("\(p)duration_s", n(t.durationSeconds, 2))
+            }
+            func loadLatency(_ p: String, _ l: LatencyUnderLoad?) {
+                guard let l else { kv("\(p)latency", "unavailable"); return }
+                kv("\(p)latency_median_ms", n(l.medianMs)); kv("\(p)latency_p95_ms", n(l.p95Ms)); kv("\(p)latency_p99_ms", n(l.p99Ms))
+                kv("\(p)jitter_ms", n(l.jitterMs)); kv("\(p)loss_percent", n(l.lossPercent)); kv("\(p)latency_samples", "\(l.sampleCount)")
+                kv("\(p)idle_control_latency_ms", n(l.idleMedianMs)); kv("\(p)latency_inflation_ms", n(l.inflationMs))
+            }
+            let probeLine = L.monitor.map { "\($0.probe.method) \($0.probe.target) (comparison_group_id=\($0.probe.comparisonGroupID))" } ?? "unavailable"
+            sec("stress_saturation")
+            o.append("# Stress / saturation throughput. NOT the normal speed-test result: headline speeds are in [download] / [upload] (standard throughput).")
+            kv("measurement_type", "stress_saturation_throughput"); kv("control_probe", probeLine)
+            kv("idle_control_latency_ms", n(L.idleControlMedianMs))
+            kv("standard_download_mbps", n(L.standardDownloadMbps)); kv("standard_upload_mbps", n(L.standardUploadMbps))
+            kv("max_stress_download_mbps", n(L.maxStressDownloadMbps)); kv("max_stress_upload_mbps", n(L.maxStressUploadMbps))
+            kv("max_stress_definition", "highest phase average (ramp stage / sustained / full duplex / multi-destination aggregate), never an instantaneous burst")
+            if let ramp = L.streamRamp {
+                kv("saturation_detected", b(ramp.saturationDetected)); kv("saturation_stream_count", ramp.saturationStreamCount.map(String.init) ?? "null")
+                kv("optimal_stream_count", ramp.optimalStreamCount.map(String.init) ?? "null"); kv("max_observed_stream_count", "\(ramp.maxObservedStreamCount)")
+                kv("saturation_throughput_mbps", n(ramp.saturationThroughputMbps)); kv("marginal_gain_percent", n(ramp.marginalGainPercent, 2))
+                kv("stream_scaling_efficiency_0_100", n(ramp.scalingEfficiency0_100, 1))
+                kv("connection_efficiency_mbps_per_stream", n(ramp.connectionEfficiencyMbpsPerStream, 2))
+                kv("peak_mbps", n(ramp.stages.map(\.throughput.averageMbps).max())); kv("sustained_mbps", n(L.sustainedDownload?.throughput?.averageMbps))
+
+                sec("stress_stream_ramp")
+                kv("method", ramp.method); kv("target_node", ramp.targetNodeID); kv("direction", ramp.direction.rawValue)
+                kv("rule", "saturation = stage before two consecutive stages with gain < \(Fmt.d(StreamRampResult.plateauGainPercent, 0))% or a decline; optimal = fewest streams >= 97% of best average")
+                o.append("stream_count,avg_mbps,median_mbps,p10_mbps,p95_mbps,peak_mbps,latency_under_load_ms,packet_loss_under_load_percent,previous_stage_gain_percent,efficiency_gain_percent")
+                for st in ramp.stages {
+                    let t = st.throughput, art = t.samplingArtifact
+                    let firstAvg = ramp.stages.first?.throughput.averageMbps ?? 0
+                    let eff = firstAvg > 0 ? (t.averageMbps - firstAvg) / firstAvg * 100 : nil
+                    o.append([ "\(st.streamCount)", n(t.averageMbps), art ? "unavailable" : n(t.medianMbps), art ? "unavailable" : n(t.p10Mbps),
+                               art ? "unavailable" : n(t.p95Mbps), art ? "unavailable" : n(t.peakMbps), n(st.latency?.medianMs),
+                               n(st.latency?.lossPercent), n(st.gainPercent, 2), n(eff, 1)].joined(separator: ","))
+                }
+            }
+            if let s = L.sustainedDownload {
+                sec("stress_sustained_download")
+                kv("phase", "sustainedDownloadStress"); kv("method", s.method); kv("target_node", s.targetNodeID); kv("streams", "\(s.streams)")
+                kv("planned_s", n(s.plannedSeconds, 1)); loadStats("", s.throughput); loadLatency("", s.latency)
+                kv("network_path_changes", "\(s.pathChanges)"); kv("thermal_state_start", s.thermalStateStart ?? "unavailable")
+                kv("thermal_state_end", s.thermalStateEnd ?? "unavailable"); kv("error", s.error ?? "none")
+                o.append("# Thermal state is environment context only; a change is never proof of thermal throttling of the network.")
+            }
+            if let s = L.sustainedUpload {
+                sec("stress_sustained_upload")
+                kv("phase", "sustainedUploadStress"); kv("method", s.method); kv("target_node", s.targetNodeID); kv("streams", "\(s.streams)")
+                kv("planned_s", n(s.plannedSeconds, 1)); loadStats("", s.throughput); loadLatency("", s.latency)
+                kv("network_path_changes", "\(s.pathChanges)"); kv("thermal_state_start", s.thermalStateStart ?? "unavailable")
+                kv("thermal_state_end", s.thermalStateEnd ?? "unavailable"); kv("error", s.error ?? "none")
+            }
+            if let fd = L.fullDuplex {
+                sec("stress_full_duplex")
+                kv("target_node", fd.targetNodeID); kv("download_streams", "\(fd.downloadStreams)"); kv("upload_streams", "\(fd.uploadStreams)")
+                kv("download_mbps", n(fd.download?.averageMbps)); kv("upload_mbps", n(fd.upload?.averageMbps))
+                kv("full_duplex_download_mbps", n(fd.download?.averageMbps)); kv("full_duplex_upload_mbps", n(fd.upload?.averageMbps))
+                kv("download_only_reference_mbps", n(fd.downloadOnlyReferenceMbps)); kv("upload_only_reference_mbps", n(fd.uploadOnlyReferenceMbps))
+                kv("download_degradation_percent", n(fd.downloadDegradationPercent, 1)); kv("upload_degradation_percent", n(fd.uploadDegradationPercent, 1))
+                kv("download_degradation_under_full_duplex_percent", n(fd.downloadDegradationPercent, 1))
+                kv("upload_degradation_under_full_duplex_percent", n(fd.uploadDegradationPercent, 1))
+                loadLatency("full_duplex_", fd.latency)
+                kv("latency_inflation_ms", n(fd.latency?.inflationMs))
+                kv("bytes_downloaded", "\(fd.download?.bytes ?? 0)"); kv("bytes_uploaded", "\(fd.upload?.bytes ?? 0)")
+                kv("queue_location", fd.queueLocation)
+            }
+            if let impact = L.crossLoadImpact {
+                sec("stress_cross_load_impact")
+                kv("download_only_mbps", n(impact.downloadOnlyMbps)); kv("upload_only_mbps", n(impact.uploadOnlyMbps))
+                kv("full_duplex_download_mbps", n(impact.fullDuplexDownloadMbps)); kv("full_duplex_upload_mbps", n(impact.fullDuplexUploadMbps))
+                kv("dl_loss_due_to_ul_percent", n(impact.downloadLossDueToUploadPercent, 1)); kv("ul_loss_due_to_dl_percent", n(impact.uploadLossDueToDownloadPercent, 1))
+                kv("idle_latency_ms", n(impact.idleLatencyMs)); kv("download_loaded_latency_ms", n(impact.downloadLoadedLatencyMs))
+                kv("upload_loaded_latency_ms", n(impact.uploadLoadedLatencyMs)); kv("full_duplex_loaded_latency_ms", n(impact.fullDuplexLoadedLatencyMs))
+                kv("comparison_group_id", L.monitor?.probe.comparisonGroupID ?? "unavailable")
+            }
+            if let bu = L.burst {
+                sec("stress_burst")
+                kv("target_node", bu.targetNodeID); kv("method", bu.method); kv("cycles", "\(bu.cycles.count)")
+                kv("median_recovery_time_ms", n(bu.medianRecoveryTimeMs, 0)); kv("p95_recovery_time_ms", n(bu.p95RecoveryTimeMs, 0))
+                kv("worst_recovery_time_ms", n(bu.worstRecoveryTimeMs, 0)); kv("unrecovered_cycles", "\(bu.unrecoveredCycles)")
+                kv("burst_latency_inflation_ms", n(bu.latencyInflationMs)); kv("burst_loss_percent", n(bu.lossPercent))
+                kv("burst_stability_score", n(bu.stabilityScore, 0))
+                o.append("cycle,load_s,idle_s,burst_start_latency_ms,peak_loaded_latency_ms,burst_throughput_mbps,throughput_ramp_time_ms,queue_build_time_ms,recovery_time_ms,post_burst_latency_ms,packet_loss_percent,bytes")
+                for c in bu.cycles {
+                    o.append(["\(c.index)", n(c.loadSeconds, 1), n(c.idleSeconds, 1), n(c.burstStartLatencyMs), n(c.peakLoadedLatencyMs),
+                              n(c.throughputMbps), n(c.throughputRampTimeMs, 0), n(c.queueBuildTimeMs, 0), n(c.recoveryTimeMs, 0),
+                              n(c.postBurstLatencyMs), n(c.lossPercent), "\(c.bytes)"].joined(separator: ","))
+                }
+                o.append("# recovery_time_ms=null means latency was not back within baseline + max(5 ms, 10%) inside the idle window (not simulated).")
+            }
+            if let md = L.multiDestination {
+                sec("stress_multi_destination")
+                kv("aggregate_download_mbps", n(md.aggregateMbps)); kv("best_single_standard_download_mbps", n(md.bestSingleStandardMbps))
+                kv("comparison_method_equivalent", b(md.methodEquivalent))
+                kv("single_destination_limitation_possible", b(md.singleDestinationLimitationPossible))
+                loadLatency("aggregate_loaded_", md.latency)
+                o.append("destination,provider,method,stream_count,mbps,bytes")
+                for d in md.destinations {
+                    o.append([d.nodeID, d.provider.rawValue, d.method, "\(d.streamCount)", n(d.throughput?.averageMbps), "\(d.throughput?.bytes ?? 0)"].joined(separator: ","))
+                }
+                o.append("# Aggregate saturation load only; different protocols / stream counts: not a provider benchmark. A higher aggregate only makes a single-destination limitation *possible* (server, CDN, route, protocol or stream count).")
+            }
+            if !L.recoveries.isEmpty {
+                sec("stress_recovery")
+                o.append("kind,after_phase,planned_s,baseline_ms,median_ms,recovery_time_10pct_ms,recovery_time_20pct_ms,recovery_complete,loss_percent,jitter_ms,recovery_spikes")
+                for rc in L.recoveries {
+                    o.append([rc.kind, rc.afterPhase, n(rc.plannedSeconds, 1), n(rc.baselineMedianMs), n(rc.medianMs), n(rc.recoveryTime10PercentMs, 0),
+                              n(rc.recoveryTime20PercentMs, 0), b(rc.complete), n(rc.lossPercent), n(rc.jitterMs), "\(rc.spikeCount)"].joined(separator: ","))
+                }
+                if let f = L.finalRecovery {
+                    kv("recovery_time_10pct_ms", n(f.recoveryTime10PercentMs, 0)); kv("recovery_time_20pct_ms", n(f.recoveryTime20PercentMs, 0))
+                    kv("recovery_complete", b(f.complete))
+                }
+            }
+            let sc = L.scores
+            sec("stress_scores_0_100")
+            func sv(_ v: Int?) -> String { v.map(String.init) ?? "null" }
+            kv("saturation_stability", sv(sc.saturationStability)); kv("full_duplex", sv(sc.fullDuplex)); kv("burst_resilience", sv(sc.burstResilience))
+            kv("recovery", sv(sc.recovery)); kv("loaded_latency", sv(sc.loadedLatency)); kv("stress_endurance", sv(sc.stressEndurance))
+            kv("summary", L.summarySentence(standardDownloadMbps: L.standardDownloadMbps, standardUploadMbps: L.standardUploadMbps))
+            if let env = L.environment {
+                sec("thermal_environment")
+                kv("thermal_state_start", env.thermalStart ?? "unavailable"); kv("thermal_state_peak", env.thermalPeak ?? "unavailable")
+                kv("thermal_state_end", env.thermalEnd ?? "unavailable")
+                kv("thermal_state_change_offsets", env.thermalChangeOffsets.map { Fmt.d($0, 1) }.joined(separator: ","))
+                kv("battery_percent_start", env.batteryStart.map { Fmt.d($0, 0) } ?? "unavailable")
+                kv("battery_percent_end", env.batteryEnd.map { Fmt.d($0, 0) } ?? "unavailable")
+                kv("low_power_mode", env.samples.last?.lowPowerMode.map { $0 ? "true" : "false" } ?? "unavailable")
+                kv("radio_access_technology_changes", env.radioChangeOffsets.map { Fmt.d($0, 1) }.joined(separator: ","))
+                kv("interface_changes", env.interfaceChangeOffsets.map { Fmt.d($0, 1) }.joined(separator: ","))
+                o.append("# Correlation only: a thermal-state change never proves thermal throttling of the network.")
+            }
+            for note in L.notes { kv("stress_note", note) }
         }
 
         if let d = r.dns {
@@ -713,6 +859,45 @@ public enum RawDataExporter {
         }
 
         // Raw samples last (largest part).
+        if let L = r.stressLoad {
+            func loadRaw(_ name: String, _ samples: [SpeedSample], direction: TransferDirection, phase: String, target: String, method: String, streams: Int) {
+                guard !samples.isEmpty else { return }
+                sec(name)
+                o.append("offset_s,phase,target,method,stream_count,direction,interval_bytes,cumulative_bytes,mbps")
+                for x in samples {
+                    o.append([Fmt.d(x.offset, 3), phase, target, method, "\(streams)", direction.rawValue, "\(x.intervalBytes)", "\(x.cumulativeBytes)", Fmt.d(x.mbps, 3)].joined(separator: ","))
+                }
+            }
+            for st in L.streamRamp?.stages ?? [] {
+                loadRaw("raw.stress.stream_ramp.s\(st.streamCount)", st.samples, direction: .download, phase: "streamRamp",
+                        target: L.streamRamp?.targetNodeID ?? "", method: "HTTP", streams: st.streamCount)
+            }
+            if let s = L.sustainedDownload { loadRaw("raw.stress.sustained_download", s.samples, direction: .download, phase: "sustainedDownload", target: s.targetNodeID, method: "HTTP", streams: s.streams) }
+            if let s = L.sustainedUpload { loadRaw("raw.stress.sustained_upload", s.samples, direction: .upload, phase: "sustainedUpload", target: s.targetNodeID, method: "HTTP", streams: s.streams) }
+            if let fd = L.fullDuplex {
+                loadRaw("raw.stress.full_duplex.download", fd.downloadSamples, direction: .download, phase: "fullDuplex", target: fd.targetNodeID, method: "HTTP", streams: fd.downloadStreams)
+                loadRaw("raw.stress.full_duplex.upload", fd.uploadSamples, direction: .upload, phase: "fullDuplex", target: fd.targetNodeID, method: "HTTP", streams: fd.uploadStreams)
+            }
+            for c in L.burst?.cycles ?? [] {
+                loadRaw("raw.stress.burst.c\(c.index)", c.samples, direction: .download, phase: "burst", target: L.burst?.targetNodeID ?? "", method: "HTTP", streams: L.burst?.streams ?? 0)
+            }
+            for d in L.multiDestination?.destinations ?? [] {
+                loadRaw("raw.stress.multi_destination.\(d.nodeID)", d.samples, direction: .download, phase: "multiDestination", target: d.nodeID, method: d.method, streams: d.streamCount)
+            }
+            for rc in L.recoveries { csvSamples("raw.stress.recovery.\(rc.kind).\(rc.afterPhase)", rc.samples) }
+            if let m = L.monitor, !m.samples.isEmpty {
+                sec("raw.stress.continuous_monitor")
+                kv("target", m.probe.target); kv("method", m.probe.method); kv("comparison_group_id", m.probe.comparisonGroupID)
+                o.append("global_offset_s,phase_id,phase,phase_offset_s,load_type,download_mbps,upload_mbps,latency_ms,packet_loss_event,thermal_state,network_interface")
+                for x in m.samples {
+                    o.append([Fmt.d(x.globalOffset, 3), x.phaseID, x.phase, Fmt.d(x.phaseOffset, 3), x.loadType.rawValue,
+                              x.downloadMbps.map { Fmt.d($0, 1) } ?? "", x.uploadMbps.map { Fmt.d($0, 1) } ?? "",
+                              x.rttMs.map { Fmt.d($0, 3) } ?? "lost", x.rttMs == nil ? "true" : "false",
+                              x.thermalState ?? "unavailable", x.interface ?? "unavailable"].joined(separator: ","))
+                }
+            }
+        }
+
         speedSamples("raw.download_samples_100ms", r.download)
         speedSamples("raw.upload_samples_100ms", r.upload)
         csvSamples("raw.idle_latency", r.idleSamples)

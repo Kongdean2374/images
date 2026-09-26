@@ -198,26 +198,33 @@ extension TestRunner {
             }
         }
 
+        // Continuous control monitor (one fixed-target probe for the whole test; every phase is a
+        // slice of it) and the device-environment recorder (thermal / battery / interface / radio).
+        let environment = EnvironmentRecorder(clock: clock, scale: scale, networkInfo: networkInfo)
+        environment.start()
+        let monitor = ContinuousLatencyMonitor(probe: controlProbe(), descriptor: controlDescriptor, intervalSeconds: 0.25,
+                                               clock: clock, scale: scale, environment: environment)
+        monitor.start()
+        defer {
+            monitor.cancel()
+            environment.cancel()
+        }
+
         // 2. Warm-up (connections, radio promotion) — samples discarded.
         hc = begin(.warmUp, total: total)
+        monitor.enter("warmUp", phase: .warmUp, load: .idle)
         _ = await sampleReference(seconds: 3, phase: .preparing)
         end(.warmUp, hc, planned: 3)
 
-        // 3. Idle latency (pre-load).
+        // 3. Idle latency (pre-load): reference path + the control monitor's idle window.
         emit(.phase(.idleLatency))
         let idlePlanned = plan.phases.first { $0.kind == .idleLatency }?.seconds ?? 5
         hc = begin(.idleLatency, total: total)
-        let idleControlProbe = controlProbe()
-        let controlCount = count(idlePlanned, pps: 4, minimum: 5), controlInterval = interval(0.25)
-        let controlIdleTask = Task { () -> [LatencySample] in
-            guard let probe = idleControlProbe else { return [] }
-            do { try await probe.prepare() } catch { return [] }
-            let samples = await LatencySampler.collect(probe: probe, count: controlCount, interval: controlInterval, timeout: 2)
-            await probe.close()
-            return samples
-        }
+        let idleStart = monitor.enter("idle", phase: .idleLatency, load: .idle)
         let preSamples = await sampleReference(seconds: idlePlanned, phase: .idleLatency)
-        let controlIdleSamples = await controlIdleTask.value
+        await monitor.waitForSamples(since: idleStart, count: 5)
+        let controlIdleSamples = monitor.latencySamples(from: idleStart, to: monitor.now)
+        let idleControlMedian = LatencyStatistics.compute(from: controlIdleSamples).rtt?.median
         try Task.checkCancellation()
         result.idleSamples = preSamples
         result.idleLatency = LatencyStatistics.compute(from: preSamples)
@@ -232,10 +239,7 @@ extension TestRunner {
         }
         // Traffic projection from observed throughput (the pre-test estimate assumes fixed rates).
         var projection = StressTrafficProjection(original: c.stressTrafficEstimate)
-        var plannedTransferSeconds: [TransferDirection: Double] = [
-            .download: plan.phases.filter { $0.kind == .downloadStress }.reduce(0) { $0 + $1.seconds },
-            .upload: plan.phases.filter { $0.kind == .uploadStress }.reduce(0) { $0 + $1.seconds },
-        ]
+        let plannedTransferSeconds: [TransferDirection: Double] = [.download: plan.loadSeconds.download, .upload: plan.loadSeconds.upload]
         var doneTransferSeconds: [TransferDirection: Double] = [:]
         func observedMbps(_ d: TransferDirection) -> Double? {
             let valid = transfers.filter { $0.direction == d && $0.isValid }
@@ -287,10 +291,12 @@ extension TestRunner {
                 hc = begin(kind, round: round, node: attempt == 1 ? node.name : "\(node.name)（重試）", total: total)
                 let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, seconds * scale),
                                                     autoDuration: nil, fixedStreams: ndt7 ? nil : plan.streams, byteCap: remaining)
-                let t = try await stressTransfer(config, engine: ndt7 ? self.ndt7 : self.speed, node: node, round: round,
+                let t0 = monitor.enter("standard.\(node.id).\(direction.rawValue).a\(attempt)", phase: kind, load: .standard)
+                var t = try await stressTransfer(config, engine: ndt7 ? self.ndt7 : self.speed, node: node, round: round,
                                                  method: ndt7 ? "NDT7 WebSocket x1" : "HTTP x\(plan.streams)",
-                                                 loadedProbe: referenceProbe(), controlProbe: controlProbe(), bytes: bytes,
+                                                 loadedProbe: referenceProbe(), controlProbe: nil, bytes: bytes,
                                                  attempt: attempt, progress: lastProgress, emit: emit)
+                t.controlLoadedSamples = monitor.latencySamples(from: t0, to: monitor.now)
                 transfers.append(t)
                 if t.isValid || attempt == 2 {
                     doneTransferSeconds[direction, default: 0] += seconds
@@ -324,11 +330,13 @@ extension TestRunner {
             // Cooldown / post-load recovery: how fast queues drain once the load stops.
             let recovery = plan.phases(round: round).first { $0.kind == .postLoadRecovery }?.seconds ?? 4
             hc = begin(.postLoadRecovery, round: round, total: total)
+            monitor.enter("postLoadRecovery.standard", phase: .postLoadRecovery, load: .recovery)
             let post = await sampleReference(seconds: recovery, phase: .idleLatency)
             postSamples.append(post)
             postStats.append(LatencyStatistics.compute(from: post))
             end(.postLoadRecovery, hc, planned: recovery, round: round)
 
+            monitor.enter("crossServerValidation", phase: .crossServerValidation, load: .diagnostics)
             let cross = plan.phases(round: round).first { $0.kind == .crossServerValidation }?.seconds ?? 3
             emit(.phase(.crossValidation))
             hc = begin(.crossServerValidation, round: round, total: total)
@@ -345,18 +353,182 @@ extension TestRunner {
             try Task.checkCancellation()
         }
 
-        // 5. Packet-loss stress: 50 pps ICMP stress probe + independent 5 pps control probes, concurrently.
+        // 5. Light diagnostics: DNS / TCP / TLS / HTTP / QUIC.
+        emit(.phase(.dns))
+        monitor.enter("dnsProtocols", phase: .dnsProtocols, load: .diagnostics)
+        let dnsPlanned = plan.phases.first { $0.kind == .dnsProtocols }?.seconds ?? 10
+        hc = begin(.dnsProtocols, total: total)
+        let resolvers = c.dnsResolvers
+        LiveNarration.dnsStart(resolvers: resolvers.count, domains: DNSBenchmarkEngine.defaultDomains.count, emit: emit)
+        result.dns = try await guarded(Self.dnsWatchdog, "DNS 測試", &result.notes) {
+            try await self.dns.run(resolvers: resolvers, domains: DNSBenchmarkEngine.defaultDomains) { LiveNarration.dnsResolver($0, emit: emit) }
+        }
+        emit(.phase(.protocols))
+        let protocolURL = primary?.pingURL() ?? URL(string: "https://www.apple.com")!
+        LiveNarration.protocolStart(host: protocolURL.host() ?? "", emit: emit)
+        result.protocolProbe = try await guarded(Self.protocolWatchdog, "協定分析", &result.notes) {
+            try await self.protocols.run(url: protocolURL)
+        }
+        if let p = result.protocolProbe { LiveNarration.protocolResult(p, emit: emit) }
+        end(.dnsProtocols, hc, planned: dnsPlanned)
+        emit(.partial(result))
+
+        // 6. IPv4 / IPv6.
+        emit(.phase(.ipFamilies))
+        monitor.enter("ipFamilies", phase: .ipFamilies, load: .diagnostics)
+        let ipPlanned = plan.phases.first { $0.kind == .ipFamilies }?.seconds ?? 4
+        hc = begin(.ipFamilies, total: total)
+        let familyHost = primary?.host ?? latencyNode?.host ?? "www.apple.com"
+        let familyProbes = count(ipPlanned, pps: 5, minimum: 5)
+        LiveNarration.ipFamiliesStart(host: familyHost, emit: emit)
+        result.ipFamilyComparison = try await guarded(max(30, ipPlanned * 3), "IPv4 / IPv6 比較", &result.notes) {
+            await self.ipFamilies.run(host: familyHost, port: 443, probes: familyProbes, live: LiveNarration.sink(.ipFamilies, emit))
+        }
+        if let f = result.ipFamilyComparison { LiveNarration.ipFamiliesResult(f, emit: emit) }
+        end(.ipFamilies, hc, planned: ipPlanned)
+
+        // 7. Route / MTU.
+        let routePlanned = plan.phases.first { $0.kind == .routeMTU }?.seconds ?? 15
+        hc = begin(.routeMTU, total: total)
+        monitor.enter("routeMTU", phase: .routeMTU, load: .diagnostics)
+        let icmpTarget = primary?.icmpHost ?? primary?.host ?? "1.1.1.1"
+        emit(.phase(.mtu))
+        LiveNarration.mtuStart(host: icmpTarget, emit: emit)
+        result.mtu = try await guarded(Self.mtuWatchdog, "MTU 測試", &result.notes) {
+            try await self.mtu.run(host: icmpTarget, live: LiveNarration.sink(.mtu, emit))
+        }
+        emit(.phase(.traceroute))
+        LiveNarration.traceStart(host: icmpTarget, emit: emit)
+        result.traceroute = try await guarded(Self.tracerouteWatchdog, "路由追蹤", &result.notes) {
+            try await self.traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) }
+        }
+        end(.routeMTU, hc, planned: routePlanned)
+        try Task.checkCancellation()
+
+        // 8. Stress phases (same engines as the toolbox): ramp → sustained ↓ → recovery → sustained ↑
+        //    → recovery → full duplex → recovery → burst → multi-destination → final recovery.
+        var report = StressLoadReport()
+        report.idleControlMedianMs = idleControlMedian
+        let ctx = StressLoadContext(speed: speed, ndt7: ndt7, monitor: monitor, environment: environment, bytes: bytes,
+                                    limits: dataLimits, scale: scale, emit: emit, progress: lastProgress)
+        func standardRate(_ node: StressNode?, _ d: TransferDirection) -> Double? {
+            guard let node else { return nil }
+            return transfers.filter { $0.nodeID == node.id && $0.direction == d && $0.isValid }.compactMap { $0.speed?.bestAverageMbps }.max()
+        }
+        let httpNode = plan.throughputNodes.first { $0.provider != .mlab }
+        report.standardDownloadMbps = standardRate(httpNode, .download)
+        report.standardUploadMbps = standardRate(httpNode, .upload)
+        func planned(_ kind: StressPhaseKind, round: Int? = nil) -> Double {
+            plan.phases.first { $0.kind == kind && (round == nil || $0.round == round) }?.seconds ?? 0
+        }
+        func loadDone(_ kind: StressPhaseKind, seconds: Double) {
+            doneTransferSeconds[.download, default: 0] += seconds * kind.loadShare.download
+            doneTransferSeconds[.upload, default: 0] += seconds * kind.loadShare.upload
+            refreshProjection()
+        }
+        func capHit() -> Bool {
+            if ctx.capReached.current { return true }
+            let b = bytes.current
+            return dataLimits.remaining(.download, down: b.down, up: b.up).map { $0 <= 0 } == true
+                && dataLimits.remaining(.upload, down: b.down, up: b.up).map { $0 <= 0 } == true
+        }
+        /// Runs one phase; a load phase after a data cap is recorded as skipped (never simulated).
+        func stressPhase(_ kind: StressPhaseKind, node: StressNode?, round: Int? = nil,
+                         _ body: () async throws -> String?) async throws {
+            let seconds = planned(kind, round: round)
+            if kind.isLoadPhase, capHit() {
+                records.append(StressPhaseRecord(kind: kind, round: round, nodeID: node?.id, plannedSeconds: seconds, startOffset: clock.elapsed / scale,
+                                                 actualSeconds: 0, note: "skipped: dataCapReached"))
+                return
+            }
+            hc = begin(kind, round: round, node: node?.name, total: total)
+            let note = try await body()
+            end(kind, hc, planned: seconds, round: round, node: node?.id, note: note)
+            if kind.isLoadPhase { loadDone(kind, seconds: seconds) }
+            emit(.partial(result))
+        }
+        func shortRecovery(after phase: String, round: Int) async throws {
+            try await stressPhase(.shortRecovery, node: nil, round: round) {
+                let r = try await RecoveryEngine().run(ctx, kind: "short", afterPhase: phase, seconds: planned(.shortRecovery, round: round),
+                                                       idleBaselineMs: idleControlMedian)
+                report.recoveries.append(r)
+                return r.complete ? nil : "recovery_complete=false"
+            }
+        }
+        if let httpNode, let server = httpNode.server {
+            try await stressPhase(.streamRamp, node: httpNode) {
+                report.streamRamp = try await StreamRampEngine().run(ctx, node: httpNode, server: server,
+                                                                     stages: plan.rampStages ?? StreamRampResult.defaultStages,
+                                                                     stageSeconds: plan.rampStageSeconds ?? 3, idleBaselineMs: idleControlMedian)
+                return report.streamRamp.map { r in
+                    r.saturationDetected ? "saturation_stream_count=\(r.saturationStreamCount ?? 0)" : "saturation not reached up to \(r.maxObservedStreamCount) streams"
+                }
+            }
+            let streams = report.streamRamp?.recommendedStreams ?? plan.streams
+            let uploadStreams = min(streams, plan.streams)
+            try await stressPhase(.sustainedDownload, node: httpNode) {
+                report.sustainedDownload = try await SustainedLoadEngine().run(ctx, node: httpNode, server: server, direction: .download, streams: streams,
+                                                                               seconds: planned(.sustainedDownload), idleBaselineMs: idleControlMedian)
+                return report.sustainedDownload?.error
+            }
+            try await shortRecovery(after: "sustainedDownload", round: 1)
+            try await stressPhase(.sustainedUpload, node: httpNode) {
+                report.sustainedUpload = try await SustainedLoadEngine().run(ctx, node: httpNode, server: server, direction: .upload, streams: uploadStreams,
+                                                                             seconds: planned(.sustainedUpload), idleBaselineMs: idleControlMedian)
+                return report.sustainedUpload?.error
+            }
+            try await shortRecovery(after: "sustainedUpload", round: 2)
+            try await stressPhase(.fullDuplex, node: httpNode) {
+                report.fullDuplex = try await FullDuplexStressEngine().run(
+                    ctx, node: httpNode, server: server, downloadStreams: streams, uploadStreams: uploadStreams, seconds: planned(.fullDuplex),
+                    idleBaselineMs: idleControlMedian,
+                    downloadOnlyMbps: report.sustainedDownload?.throughput?.averageMbps ?? report.standardDownloadMbps,
+                    uploadOnlyMbps: report.sustainedUpload?.throughput?.averageMbps ?? report.standardUploadMbps)
+                return nil
+            }
+            try await shortRecovery(after: "fullDuplex", round: 3)
+            try await stressPhase(.burst, node: httpNode) {
+                report.burst = try await BurstStressEngine().run(ctx, node: httpNode, server: server, streams: streams, cycles: plan.burstCycles ?? 5,
+                                                                 loadSeconds: plan.burstLoadSeconds ?? 3, idleSeconds: plan.burstIdleSeconds ?? 2,
+                                                                 idleBaselineMs: idleControlMedian)
+                return "\(report.burst?.cycles.count ?? 0) cycles"
+            }
+            if plan.phases.contains(where: { $0.kind == .multiDestination }) {
+                try await stressPhase(.multiDestination, node: nil) {
+                    let best = plan.throughputNodes.compactMap { standardRate($0, .download) }.max()
+                    report.multiDestination = try await MultiDestinationStressEngine().run(ctx, targets: plan.throughputNodes, streams: streams,
+                                                                                            seconds: planned(.multiDestination),
+                                                                                            idleBaselineMs: idleControlMedian, bestSingleStandardMbps: best)
+                    return "comparison_method_equivalent=\(report.multiDestination?.methodEquivalent == true)"
+                }
+            }
+        }
+        // Final recovery right after the last heavy load (before the low-rate loss / monitoring phases).
+        try await stressPhase(.finalRecovery, node: nil) {
+            let r = try await RecoveryEngine().run(ctx, kind: "final", afterPhase: report.multiDestination != nil ? "multiDestination" : "burst",
+                                                   seconds: planned(.finalRecovery), idleBaselineMs: idleControlMedian)
+            report.recoveries.append(r)
+            return "recovery_complete=\(r.complete)"
+        }
+        if ctx.capReached.current, !dataCapReached {
+            dataCapReached = true
+            result.notes.append("已達流量上限（\(ByteCountFormatter.string(fromByteCount: bytes.current.down + bytes.current.up, countStyle: .decimal))），停止其餘負載階段；低流量診斷繼續執行。")
+        }
+
+        // 9. Packet-loss stress: 50 pps ICMP stress probe + independent 5 pps control probes, concurrently.
         emit(.phase(.packetLoss))
         let lossPlanned = plan.phases.first { $0.kind == .packetLossStress }?.seconds ?? 10
         hc = begin(.packetLossStress, total: total)
+        monitor.enter("packetLossStress", phase: .packetLossStress, load: .packetLoss)
         let (stressProbe, controls) = await lossStress(plan: plan, seconds: lossPlanned, count: count, interval: interval, emit: emit)
         try Task.checkCancellation()
         end(.packetLossStress, hc, planned: lossPlanned, note: "\(controls.count) 個對照探測")
 
-        // 6. Stability monitoring on the reference path.
+        // 10. Stability monitoring on the reference path.
         emit(.phase(.monitoring))
         let monPlanned = plan.phases.first { $0.kind == .monitoring }?.seconds ?? 10
         hc = begin(.monitoring, total: total)
+        monitor.enter("monitoring", phase: .monitoring, load: .idle)
         do {
             let probe = referenceProbe()
             let engine = ContinuousPingEngine(networkInfo: networkInfo)
@@ -377,98 +549,23 @@ extension TestRunner {
         end(.monitoring, hc, planned: monPlanned)
         emit(.partial(result))
 
-        // 7. DNS / TCP / TLS / HTTP / QUIC.
-        emit(.phase(.dns))
-        let dnsPlanned = plan.phases.first { $0.kind == .dnsProtocols }?.seconds ?? 10
-        hc = begin(.dnsProtocols, total: total)
-        let resolvers = c.dnsResolvers
-        LiveNarration.dnsStart(resolvers: resolvers.count, domains: DNSBenchmarkEngine.defaultDomains.count, emit: emit)
-        result.dns = try await guarded(Self.dnsWatchdog, "DNS 測試", &result.notes) {
-            try await self.dns.run(resolvers: resolvers, domains: DNSBenchmarkEngine.defaultDomains) { LiveNarration.dnsResolver($0, emit: emit) }
-        }
-        emit(.phase(.protocols))
-        let protocolURL = primary?.pingURL() ?? URL(string: "https://www.apple.com")!
-        LiveNarration.protocolStart(host: protocolURL.host() ?? "", emit: emit)
-        result.protocolProbe = try await guarded(Self.protocolWatchdog, "協定分析", &result.notes) {
-            try await self.protocols.run(url: protocolURL)
-        }
-        if let p = result.protocolProbe { LiveNarration.protocolResult(p, emit: emit) }
-        end(.dnsProtocols, hc, planned: dnsPlanned)
-        emit(.partial(result))
-
-        // 8. IPv4 / IPv6.
-        emit(.phase(.ipFamilies))
-        let ipPlanned = plan.phases.first { $0.kind == .ipFamilies }?.seconds ?? 4
-        hc = begin(.ipFamilies, total: total)
-        let familyHost = primary?.host ?? latencyNode?.host ?? "www.apple.com"
-        let familyProbes = count(ipPlanned, pps: 5, minimum: 5)
-        LiveNarration.ipFamiliesStart(host: familyHost, emit: emit)
-        result.ipFamilyComparison = try await guarded(max(30, ipPlanned * 3), "IPv4 / IPv6 比較", &result.notes) {
-            await self.ipFamilies.run(host: familyHost, port: 443, probes: familyProbes, live: LiveNarration.sink(.ipFamilies, emit))
-        }
-        if let f = result.ipFamilyComparison { LiveNarration.ipFamiliesResult(f, emit: emit) }
-        end(.ipFamilies, hc, planned: ipPlanned)
-
-        // 9. Route / MTU.
-        let routePlanned = plan.phases.first { $0.kind == .routeMTU }?.seconds ?? 15
-        hc = begin(.routeMTU, total: total)
-        let icmpTarget = primary?.icmpHost ?? primary?.host ?? "1.1.1.1"
-        emit(.phase(.mtu))
-        LiveNarration.mtuStart(host: icmpTarget, emit: emit)
-        result.mtu = try await guarded(Self.mtuWatchdog, "MTU 測試", &result.notes) {
-            try await self.mtu.run(host: icmpTarget, live: LiveNarration.sink(.mtu, emit))
-        }
-        emit(.phase(.traceroute))
-        LiveNarration.traceStart(host: icmpTarget, emit: emit)
-        result.traceroute = try await guarded(Self.tracerouteWatchdog, "路由追蹤", &result.notes) {
-            try await self.traceroute.run(host: icmpTarget, maxHops: 30, probesPerHop: 3) { emit(.traceHop($0)) }
-        }
-        end(.routeMTU, hc, planned: routePlanned)
-        try Task.checkCancellation()
-
-        // 10. Recycle unused budget (phases that finished early) into more stress work so the actual
-        //     duration stays close to the configured one.
+        // 11. Final extended observation: the remaining budget, from the continuous monitor.
         let deadline = requested.requestedSeconds * scale
-        let template = plan.phases(round: 1).filter { $0.kind == .downloadStress || $0.kind == .uploadStress }
-        let roundCost = plan.phases(round: 1).reduce(0) { $0 + $1.seconds } * scale
-        var extraRounds = 0
         var extendedSamples: [LatencySample] = []
-        let recycleStart = clock.elapsed
-        recycle: while true {
-            try Task.checkCancellation()
-            switch StressBudget.next(remaining: deadline - clock.elapsed, roundCost: template.isEmpty ? 0 : roundCost,
-                                     extraRoundsDone: extraRounds) {
-            case .extraRound where dataCapReached:
-                // No more throughput once a data cap is hit: spend the time on low-data monitoring.
-                extraRounds = StressBudget.maxExtraRounds
-            case .extraRound:
-                extraRounds += 1
-                let round = plan.rounds + extraRounds
-                for phase in template {
-                    plannedTransferSeconds[phase.kind == .downloadStress ? .download : .upload, default: 0] += phase.seconds
-                }
-                for phase in template {
-                    guard let node = plan.nodes.first(where: { $0.id == phase.nodeID }), let server = node.server else { continue }
-                    try await runTransfer(node, server, phase.kind == .downloadStress ? .download : .upload, round: round,
-                                          seconds: phase.seconds, kind: phase.kind, note: "recycled budget")
-                }
-                let recovery = plan.phases(round: 1).first { $0.kind == .postLoadRecovery }?.seconds ?? 4
-                hc = begin(.postLoadRecovery, round: round, total: total)
-                let post = await sampleReference(seconds: recovery, phase: .idleLatency)
-                postSamples.append(post)
-                postStats.append(LatencyStatistics.compute(from: post))
-                end(.postLoadRecovery, hc, planned: recovery, round: round, note: "recycled budget")
-            case .extendedMonitoring(let seconds):
-                emit(.phase(.monitoring))
-                hc = begin(.extendedMonitoring, total: total)
-                extendedSamples = await sampleReference(seconds: seconds / scale, phase: .monitoring)
-                end(.extendedMonitoring, hc, planned: seconds / scale, note: "recycled budget")
-                break recycle
-            case .done:
-                break recycle
-            }
+        var recycled = 0.0
+        let remainingBudget = deadline - clock.elapsed
+        if remainingBudget >= 3 * scale {
+            let seconds = min(remainingBudget / scale - 1, 120)
+            emit(.phase(.monitoring))
+            hc = begin(.extendedMonitoring, total: total)
+            let t0 = monitor.enter("finalObservation", phase: .extendedMonitoring, load: .idle)
+            try await ctx.pause(seconds)
+            extendedSamples = monitor.latencySamples(from: t0, to: monitor.now)
+            end(.extendedMonitoring, hc, planned: seconds, note: "final observation (continuous monitor)")
+            recycled = seconds
         }
-        let recycled = (clock.elapsed - recycleStart) / scale
+        report.monitor = await monitor.stop()
+        report.environment = await environment.stop()
 
         // Assemble.
         emit(.phase(.analyzing))
@@ -485,7 +582,11 @@ extension TestRunner {
         finalSummary.trafficEstimate = c.stressTrafficEstimate
         finalSummary.trafficProjection = projection
         finalSummary.dataCapReached = dataCapReached
+        // Actual usage = every byte moved (standard + stress phases); headline speeds stay standard-only.
+        finalSummary.totalDownloadBytes = max(finalSummary.totalDownloadBytes, bytes.current.down)
+        finalSummary.totalUploadBytes = max(finalSummary.totalUploadBytes, bytes.current.up)
         result.stress = finalSummary
+        result.stressLoad = report
         // Generic sections describe the stress aggregate, never one node's last transfer: no single
         // download / upload timeline; loaded latency = pooled samples of load-valid transfers only.
         result.download = nil

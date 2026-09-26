@@ -5,20 +5,35 @@ final class StressPlanTests: XCTestCase {
     let nodes = [StressNode.throughputNode(for: ServerDescriptor.builtIn[0]), StressNode.throughputNode(for: .mlabNDT7)]
         + StressNode.latencyOnlyDefaults
 
-    func testRoundsScaleWithDuration() {
-        XCTAssertEqual(StressTestPlan.rounds(for: 60), 1)
-        XCTAssertEqual(StressTestPlan.rounds(for: 180), 1)
-        XCTAssertEqual(StressTestPlan.rounds(for: 300), 2)
-        XCTAssertEqual(StressTestPlan.rounds(for: 600), 2)
-        XCTAssertEqual(StressTestPlan.rounds(for: 900), 3)
+    /// v3.0: one standard round (normal speed-test result); the former repeat rounds became stress phases.
+    func testOneStandardRoundThenStressPhases() {
+        for t in StressTestPlan.presets {
+            XCTAssertEqual(StressTestPlan.rounds(for: t), 1)
+            let p = StressTestPlan.make(totalSeconds: t, nodes: nodes)
+            XCTAssertEqual(p.phases.filter { $0.kind == .downloadStress }.count, 2, "Cloudflare + M-Lab once")
+            XCTAssertEqual(p.phases.filter { $0.kind == .postLoadRecovery }.count, 1)
+            for kind: StressPhaseKind in [.streamRamp, .sustainedDownload, .sustainedUpload, .fullDuplex, .burst, .multiDestination, .finalRecovery] {
+                XCTAssertEqual(p.phases.filter { $0.kind == kind }.count, 1, "\(kind) @ \(t)")
+            }
+            XCTAssertEqual(p.phases.filter { $0.kind == .shortRecovery }.count, 3)
+            XCTAssertEqual(p.rampStages, [1, 2, 4, 8, 16, 24, 32])
+            XCTAssertTrue((3...10).contains(p.burstCycles ?? 0))
+            XCTAssertGreaterThanOrEqual(p.phases.first { $0.kind == .finalRecovery }!.seconds, 15)
+        }
     }
 
-    func testLongerTestsAddRoundsNotJustLongerTransfers() {
-        let short = StressTestPlan.make(totalSeconds: 180, nodes: nodes)
+    /// Extra time beyond 300 s goes to sustained / full duplex / final recovery, not to repeated speed tests.
+    func testExtraTimeGoesToSustainedLoadAndRecovery() {
+        let base = StressTestPlan.make(totalSeconds: 300, nodes: nodes)
         let long = StressTestPlan.make(totalSeconds: 900, nodes: nodes)
-        XCTAssertGreaterThan(long.phases.filter { $0.kind == .downloadStress }.count, short.phases.filter { $0.kind == .downloadStress }.count)
-        XCTAssertEqual(long.phases.filter { $0.kind == .postLoadRecovery }.count, 3)
-        XCTAssertEqual(long.phases(round: 2).filter { $0.kind == .uploadStress }.count, 2)
+        func sec(_ p: StressTestPlan, _ k: StressPhaseKind) -> Double { p.phases.filter { $0.kind == k }.reduce(0) { $0 + $1.seconds } }
+        for k: StressPhaseKind in [.sustainedDownload, .sustainedUpload, .fullDuplex, .finalRecovery] {
+            XCTAssertGreaterThan(sec(long, k), sec(base, k) + 30, "\(k)")
+        }
+        XCTAssertEqual(long.phases.filter { $0.kind == .downloadStress }.count, base.phases.filter { $0.kind == .downloadStress }.count)
+        // 300 s default: sustained download ≈ 25–30 s, core phases all present.
+        XCTAssertGreaterThanOrEqual(sec(base, .sustainedDownload), 25)
+        XCTAssertLessThanOrEqual(sec(base, .sustainedDownload), 32)
     }
 
     func testIntensityNeverDepends() {
@@ -57,7 +72,8 @@ final class StressPlanTests: XCTestCase {
 
     func testTrafficEstimate() {
         let p = StressTestPlan.make(totalSeconds: 300, nodes: nodes)
-        let dlSeconds = p.phases.filter { $0.kind == .downloadStress }.reduce(0) { $0 + $1.seconds }
+        let dlSeconds = p.loadSeconds.download
+        XCTAssertGreaterThan(dlSeconds, p.phases.filter { $0.kind == .downloadStress }.reduce(0) { $0 + $1.seconds }, "stress phases count too")
         let e = p.trafficEstimate(downloadMbps: 100, uploadMbps: 20)
         XCTAssertEqual(Double(e.downloadBytes), dlSeconds * 12_500_000, accuracy: 1)
         XCTAssertEqual(e.totalBytes, e.downloadBytes + e.uploadBytes)

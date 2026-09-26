@@ -14,6 +14,8 @@ public enum TestKind: String, Codable, Sendable, Hashable, CaseIterable {
     case interfaceCompare
     case extremeFullTest
     case extremeStressTest
+    /// A single stress engine run from the toolbox (same engines as the Extreme Stress Test).
+    case stressTool
 
     public var displayName: String {
         switch self {
@@ -30,6 +32,7 @@ public enum TestKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .interfaceCompare: "Wi-Fi / 行動網路比較"
         case .extremeFullTest: "完整測試（極限）"
         case .extremeStressTest: "極限壓力測試"
+        case .stressTool: "壓力測試元件"
         }
     }
 }
@@ -145,6 +148,9 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
     public var fullTestPlan: FullTestPlan?
     /// Extreme Stress Test: per-node, per-round results, loss confirmation, traffic totals.
     public var stress: StressSummary?
+    /// v3.0 stress phases (stream ramp, sustained, full duplex, burst, multi-destination, recovery,
+    /// continuous monitor, environment). Set by the Extreme Stress Test and the toolbox stress tools.
+    public var stressLoad: StressLoadReport?
 
     public var scores: QualityScores
     public var findings: [DiagnosticFinding]
@@ -231,6 +237,7 @@ public struct TestResult: Codable, Sendable, Hashable, Identifiable {
             m.ttfbMs = probe.http?.ttfbMs
         }
         m.pathMTU = mtu?.pathMTU
+        m.stressLoadInflationMs = stressLoad?.worstLoadInflationMs.map { max(0, $0) }
         if let stress {
             // Stress: cross-provider medians of valid transfers, reliable stability only, confirmed
             // (multi-probe) loss and loaded latency from transfers that really loaded the link.
