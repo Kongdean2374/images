@@ -33,16 +33,31 @@ struct WorkoutSummaryView: View {
     @State private var inspection: [HealthKitManager.StoredField] = []
     @StateObject private var health = HealthKitManager.shared
 
-    private var splits: [SplitSegment] { StatsEngine.splits(for: session) }
-    private var paceZones: [PaceZoneSlice] {
-        PaceZoneEngine.distribution(points: points, averagePace: session.averagePace)
-    }
-    private var sessionEfforts: [BestEffort] {
-        session.hasRoute ? BestEffortEngine.evaluate(session: session) : []
-    }
-    private var points: [RoutePoint] { session.sortedPoints }
-    private var coordinates: [CLLocationCoordinate2D] {
-        points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+    // 這幾項都要走訪整條軌跡（排序、滑動視窗），以前是 computed property，
+    // SwiftUI 每次重繪就全部重算一遍，軌跡點一多整頁就卡。改成進場算一次。
+    @State private var cachedSplits: [SplitSegment] = []
+    @State private var cachedPoints: [RoutePoint] = []
+    @State private var cachedCoordinates: [CLLocationCoordinate2D] = []
+    @State private var cachedPaceZones: [PaceZoneSlice] = []
+    @State private var cachedEfforts: [BestEffort] = []
+
+    private var splits: [SplitSegment] { cachedSplits }
+    private var paceZones: [PaceZoneSlice] { cachedPaceZones }
+    private var sessionEfforts: [BestEffort] { cachedEfforts }
+    private var points: [RoutePoint] { cachedPoints }
+    private var coordinates: [CLLocationCoordinate2D] { cachedCoordinates }
+
+    /// 進場時一次算完所有繁重的統計
+    private func buildCaches() {
+        let sorted = session.sortedPoints
+        cachedPoints = sorted
+        cachedCoordinates = sorted.map {
+            CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+        }
+        cachedSplits = StatsEngine.splits(for: session)
+        cachedPaceZones = PaceZoneEngine.distribution(points: sorted,
+                                                      averagePace: session.averagePace)
+        cachedEfforts = session.hasRoute ? BestEffortEngine.evaluate(session: session) : []
     }
 
     var body: some View {
@@ -92,6 +107,7 @@ struct WorkoutSummaryView: View {
             }
         }
         .task {
+            buildCaches()
             weatherNote = session.weatherNote ?? ""
             if let t = session.temperature { temperatureText = String(format: "%.0f", t) }
             rpe = session.rpe ?? 0

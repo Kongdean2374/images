@@ -61,6 +61,7 @@ struct HistoryListView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @State private var filter: WorkoutType?
+    @State private var pendingDelete: WorkoutSession?
     @State private var searchText = ""
     @State private var exportURL: URL?
     @State private var showExportShare = false
@@ -103,8 +104,7 @@ struct HistoryListView: View {
                             .buttonStyle(.plain)
                             .contextMenu {
                                 Button(role: .destructive) {
-                                    context.delete(session)
-                                    try? context.save()
+                                    pendingDelete = session
                                 } label: {
                                     Label("刪除", systemImage: "trash")
                                 }
@@ -130,6 +130,23 @@ struct HistoryListView: View {
             .padding(.bottom, 24)
         }
         .screenBackground()
+        .confirmationDialog("刪除這筆紀錄？",
+                            isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button("刪除", role: .destructive) {
+                guard let target = pendingDelete else { return }
+                context.delete(target)
+                try? context.save()
+                pendingDelete = nil
+                CueService.shared.notify(.success)
+            }
+            Button("取消", role: .cancel) { pendingDelete = nil }
+        } message: {
+            if let target = pendingDelete {
+                Text("\(target.displayTitle)　\(Fmt.dateTime(target.startDate))\n刪除後無法復原。")
+            }
+        }
         .navigationTitle("運動紀錄")
         .searchable(text: $searchText, prompt: "搜尋紀錄")
         .toolbar {

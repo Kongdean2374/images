@@ -15,29 +15,76 @@ struct AnalyticsView: View {
     @State private var showExport = false
     @State private var isExporting = false
 
-    private var buckets: [TrendBucket] {
-        StatsEngine.trend(sessions: sessions, range: range)
+    /// 所有重運算的結果都先算好放這裡。
+    ///
+    /// 以前這些全是 computed property，SwiftUI 每次重繪 body 就整批重算一遍，
+    /// 其中 BestEffortEngine 要對所有軌跡點跑滑動視窗，紀錄一多就明顯卡頓。
+    /// 改成只在進場與資料實際變動時算一次。
+    private struct Analytics {
+        var buckets: [TrendBucket] = []
+        var comparableGroups: [String: [WorkoutSession]] = [:]
+        var routeClusters: [RouteCluster] = []
+        var weatherPoints: [StatsEngine.WeatherPoint] = []
+        var racePredictions: [RacePrediction] = []
+        var balance = IntensityBalance()
+        var loadReport = TrainingLoadReport()
+        var integrity = IntegrityReport()
+        var cadenceStats: (average: Double, best: Double, samples: Int)?
+        var cadenceSeries: [CadencePoint] = []
+        var typeShares: [TypeShare] = []
+        var hasDurationData = false
+        var hasPaceData = false
+        var hasIntensityData = false
     }
 
-    private var comparableGroups: [String: [WorkoutSession]] {
-        StatsEngine.comparableGroups(sessions: sessions)
+    @State private var cache = Analytics()
+    /// 上次計算時的資料指紋，變了才重算
+    @State private var cacheKey = ""
+
+    private var currentKey: String {
+        "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")-\(range.rawValue)"
     }
 
-    private var routeClusters: [RouteCluster] {
-        RouteClusterEngine.cluster(sessions: sessions)
+    private func rebuildCacheIfNeeded() {
+        guard cacheKey != currentKey else { return }
+        cacheKey = currentKey
+        guard !sessions.isEmpty else {
+            cache = Analytics()
+            return
+        }
+
+        var next = Analytics()
+        next.buckets = StatsEngine.trend(sessions: sessions, range: range)
+        next.comparableGroups = StatsEngine.comparableGroups(sessions: sessions)
+        next.routeClusters = RouteClusterEngine.cluster(sessions: sessions)
+        next.weatherPoints = StatsEngine.weatherCorrelation(sessions: sessions)
+        next.racePredictions = RacePredictionEngine.predictions(
+            from: BestEffortEngine.evaluate(sessions: sessions))
+        next.balance = IntensityBalanceEngine.evaluate(sessions: sessions)
+        next.loadReport = TrainingLoadEngine.report(sessions: sessions)
+        next.integrity = DataIntegrity.report(sessions: sessions)
+        next.cadenceStats = DataIntegrity.cadenceStats(sessions: sessions)
+        next.typeShares = StatsEngine.typeDistribution(sessions: sessions)
+        next.cadenceSeries = Array(sessions.compactMap { session -> CadencePoint? in
+            guard let cadence = session.cadence, cadence > 40, cadence < 250 else { return nil }
+            return CadencePoint(date: session.startDate, cadence: cadence)
+        }
+        .sorted { $0.date < $1.date }
+        .suffix(40))
+        next.hasDurationData = sessions.contains { $0.duration > 60 }
+        next.hasPaceData = sessions.contains { ($0.averagePace ?? 0) > 0 }
+        next.hasIntensityData = sessions.contains { ($0.intensityScore ?? 0) > 0 }
+        cache = next
     }
 
-    private var weatherPoints: [StatsEngine.WeatherPoint] {
-        StatsEngine.weatherCorrelation(sessions: sessions)
-    }
-
-    /// 沒有任何資料的區塊一律不顯示，不要放一張全是 0 的圖表
-    private var hasDurationData: Bool { sessions.contains { $0.duration > 60 } }
-    private var hasPaceData: Bool { sessions.contains { ($0.averagePace ?? 0) > 0 } }
-    private var hasIntensityData: Bool { sessions.contains { ($0.intensityScore ?? 0) > 0 } }
-    private var racePredictions: [RacePrediction] {
-        RacePredictionEngine.predictions(from: BestEffortEngine.evaluate(sessions: sessions))
-    }
+    private var buckets: [TrendBucket] { cache.buckets }
+    private var comparableGroups: [String: [WorkoutSession]] { cache.comparableGroups }
+    private var routeClusters: [RouteCluster] { cache.routeClusters }
+    private var weatherPoints: [StatsEngine.WeatherPoint] { cache.weatherPoints }
+    private var racePredictions: [RacePrediction] { cache.racePredictions }
+    private var hasDurationData: Bool { cache.hasDurationData }
+    private var hasPaceData: Bool { cache.hasPaceData }
+    private var hasIntensityData: Bool { cache.hasIntensityData }
 
     var body: some View {
         ScrollView {
@@ -49,7 +96,7 @@ struct AnalyticsView: View {
                     trendCard
                     if hasDurationData { trainingLoadCard }
                     if hasPaceData {
-                        IntensityBalanceCard(balance: IntensityBalanceEngine.evaluate(sessions: sessions))
+                        IntensityBalanceCard(balance: cache.balance)
                     }
                     if !racePredictions.isEmpty {
                         RacePredictionCard(predictions: racePredictions, unit: settings.unit)
@@ -68,6 +115,9 @@ struct AnalyticsView: View {
             .padding(.bottom, 28)
         }
         .screenBackground()
+        .onAppear { rebuildCacheIfNeeded() }
+        .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
+        .onChange(of: range) { _, _ in rebuildCacheIfNeeded() }
         .navigationTitle("圖表分析")
         .sheet(isPresented: $showExport) {
             if let exportURL {
@@ -94,9 +144,7 @@ struct AnalyticsView: View {
 
     // MARK: 訓練負荷
 
-    private var loadReport: TrainingLoadReport {
-        TrainingLoadEngine.report(sessions: sessions)
-    }
+    private var loadReport: TrainingLoadReport { cache.loadReport }
 
     private var trainingLoadCard: some View {
         let report = loadReport
@@ -176,7 +224,7 @@ struct AnalyticsView: View {
 
     @ViewBuilder
     private var cadenceCard: some View {
-        if let stats = DataIntegrity.cadenceStats(sessions: sessions) {
+        if let stats = cache.cadenceStats {
             GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("步頻分析")
@@ -196,19 +244,12 @@ struct AnalyticsView: View {
         }
     }
 
-    private var cadenceSeries: [CadencePoint] {
-        let points = sessions.compactMap { session -> CadencePoint? in
-            guard let cadence = session.cadence, cadence > 40, cadence < 250 else { return nil }
-            return CadencePoint(date: session.startDate, cadence: cadence)
-        }
-        .sorted { $0.date < $1.date }
-        return Array(points.suffix(40))
-    }
+    private var cadenceSeries: [CadencePoint] { cache.cadenceSeries }
 
     // MARK: 資料完整性
 
     private var integrityCard: some View {
-        let report = DataIntegrity.report(sessions: sessions)
+        let report = cache.integrity
         return GlassCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
@@ -538,7 +579,7 @@ struct AnalyticsView: View {
                 Text("運動類型分佈")
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
-                TypeDistributionChart(shares: StatsEngine.typeDistribution(sessions: sessions))
+                TypeDistributionChart(shares: cache.typeShares)
             }
         }
     }

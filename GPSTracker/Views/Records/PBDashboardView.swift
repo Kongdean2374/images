@@ -8,8 +8,19 @@ struct PBDashboardView: View {
     @State private var shine = false
     @State private var showBadges = false
 
-    private var records: PersonalRecords {
-        StatsEngine.personalRecords(sessions: sessions)
+    /// 重運算的結果先算好，不要每次重繪都跑一遍滑動視窗
+    @State private var cachedRecords = PersonalRecords()
+    @State private var cachedEfforts: [BestEffort] = []
+    @State private var cacheKey = ""
+
+    private var records: PersonalRecords { cachedRecords }
+
+    private func rebuildCacheIfNeeded() {
+        let key = "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")"
+        guard cacheKey != key else { return }
+        cacheKey = key
+        cachedRecords = StatsEngine.personalRecords(sessions: sessions)
+        cachedEfforts = BestEffortEngine.evaluate(sessions: sessions)
     }
 
     var body: some View {
@@ -29,6 +40,8 @@ struct PBDashboardView: View {
             }
         }
         .screenBackground()
+        .onAppear { rebuildCacheIfNeeded() }
+        .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
         .navigationTitle("成就")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -46,7 +59,7 @@ struct PBDashboardView: View {
                 } else {
                     totalsCard
                     streakCard
-                    BestEffortsCard(efforts: BestEffortEngine.evaluate(sessions: sessions),
+                    BestEffortsCard(efforts: cachedEfforts,
                                     unit: settings.unit)
                     if records.fastestPace != nil {
                         recordCard(title: "最快平均配速",

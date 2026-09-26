@@ -7,8 +7,17 @@ struct HistoryInsightsView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
     @EnvironmentObject private var settings: AppSettings
 
-    private var insights: HistoryInsights {
-        HistoryInsightsEngine.build(sessions: sessions)
+    /// 一次算好，避免每次重繪都重新走訪所有紀錄
+    @State private var cached = HistoryInsights()
+    @State private var cacheKey = ""
+
+    private var insights: HistoryInsights { cached }
+
+    private func rebuildCacheIfNeeded() {
+        let key = "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")"
+        guard cacheKey != key else { return }
+        cacheKey = key
+        cached = HistoryInsightsEngine.build(sessions: sessions)
     }
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -35,6 +44,8 @@ struct HistoryInsightsView: View {
             .padding(.bottom, 28)
         }
         .screenBackground()
+        .onAppear { rebuildCacheIfNeeded() }
+        .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
         .navigationTitle("歷史總覽")
         .navigationBarTitleDisplayMode(.inline)
     }

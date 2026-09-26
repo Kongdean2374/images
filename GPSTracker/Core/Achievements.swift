@@ -192,12 +192,15 @@ enum AchievementEngine {
                                goals: [Double],
                                details: [String]) -> [Achievement] {
         let tiers: [AchievementTier] = [.bronze, .silver, .gold, .platinum]
+        // 防呆：目標數量若跟階層或說明對不上，不要直接越界崩潰
         return goals.enumerated().map { index, goal in
-            Achievement(id: "\(idPrefix)-\(index)",
-                        title: "\(title)・\(tiers[index].displayName)",
-                        detail: details[index],
+            let tier = tiers[min(index, tiers.count - 1)]
+            let detail = index < details.count ? details[index] : ""
+            return Achievement(id: "\(idPrefix)-\(index)",
+                        title: "\(title)・\(tier.displayName)",
+                        detail: detail,
                         icon: icon,
-                        tier: tiers[index],
+                        tier: tier,
                         category: category,
                         current: current,
                         goal: goal,
