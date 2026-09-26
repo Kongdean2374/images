@@ -142,6 +142,10 @@ public struct RootCauseAnalyzer: RootCauseAnalyzing {
         if !codes.isDisjoint(with: Self.limitedComparisonCodes), model.observedCondition.map({ !codes.contains($0) }) ?? true {
             confidence = min(confidence, Self.limitedComparisonCap)
         }
+        // Not reproduced with the same protocol / configuration or by a server-level measurement.
+        if !model.reproducedBy.isEmpty, codes.isDisjoint(with: model.reproducedBy) {
+            confidence = min(confidence, model.unreproducedCap)
+        }
 
         if !rulingOut.isEmpty {
             // Controls that only cover the broad form of the cause (one target / transport) can't

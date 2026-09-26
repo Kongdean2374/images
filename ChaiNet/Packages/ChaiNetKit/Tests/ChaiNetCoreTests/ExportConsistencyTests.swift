@@ -213,7 +213,8 @@ final class ExportConsistencyTests: XCTestCase {
         XCTAssertFalse([Likelihood.likely, .supported].contains(a.hypotheses.first { $0.cause == .ispOrCarrierCongestion }!.likelihood))
 
         let text = RawDataExporter.text(r, analysis: a, appVersion: "2.2.1", platform: "iOS")
-        XCTAssertTrue(text.contains("cloudflareSpecificPathIssue=possible"))
+        XCTAssertTrue(text.contains("endpointSpecificPathIssue.1.1.1.1=possible"))
+        XCTAssertFalse(text.contains("cloudflareSpecificPathIssue"), "1.1.1.1 ICMP must not be generalised to the provider's other services")
         XCTAssertTrue(text.contains("generalServerOrRouteIssue="))
         XCTAssertTrue(text.contains("loss_verdict=endpointSpecificLossObserved"))
     }

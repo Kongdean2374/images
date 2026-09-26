@@ -1,15 +1,14 @@
 import SwiftUI
 import ChaiNetCore
 
-/// Real-time throughput chart redrawn every display frame (up to 120 Hz on ProMotion).
-///
-/// Stability rules (so drawn data never "shakes"):
+/// Real-time throughput chart: a plain line chart, redrawn when data arrives.
 ///
 ///     bins    fixed, time-aligned buckets of `binSeconds` (0.5 s, doubling for long tests);
 ///             a completed bucket = bytes × 8 / duration and never changes afterwards
-///     head    the eased live readout at the interpolated current time (the only moving point)
-///     y-axis  niceCeiling(max(P90 of completed buckets × 1.25, head × 1.15)) eased over ~0.3 s —
-///             a single start-up burst can't pin the axis at 1–2 Gbps; values above it are clipped
+///     head    the current readout at the latest sample time (the only point that moves)
+///     line    straight segments between points (no spline smoothing, no glow, no marker)
+///     y-axis  niceCeiling(max(P90 of completed buckets × 1.25, head × 1.15)) — a single start-up
+///             burst can't pin the axis at 1–2 Gbps; values above it are clipped at the top
 struct LiveThroughputChart: View {
     /// Raw 100 ms samples of the current transfer.
     let samples: [SpeedSample]
@@ -21,16 +20,12 @@ struct LiveThroughputChart: View {
     /// Minimum bucket width (upload progress batching needs wider buckets).
     var minimumBinSeconds: Double = 0.5
     var height: CGFloat = 180
-    /// Current readout (Mbps) for the head at a given frame time.
-    var head: (Date) -> Double? = { _ in nil }
-
-    @State private var scale = LiveScale()
+    /// Current readout (Mbps) drawn at the latest sample time.
+    var head: Double?
 
     var body: some View {
-        TimelineView(.animation) { context in
-            Canvas { g, size in
-                draw(in: &g, size: size, now: context.date)
-            }
+        Canvas { g, size in
+            draw(in: &g, size: size)
         }
         .frame(height: height)
         .accessibilityLabel("即時速度圖表")
@@ -63,19 +58,14 @@ struct LiveThroughputChart: View {
         return b
     }
 
-    private func draw(in g: inout GraphicsContext, size: CGSize, now: Date) {
+    private func draw(in g: inout GraphicsContext, size: CGSize) {
         let leftPad: CGFloat = 4, rightPad: CGFloat = 44, topPad: CGFloat = 10, bottomPad: CGFloat = 18
         let plot = CGRect(x: leftPad, y: topPad, width: size.width - leftPad - rightPad, height: size.height - topPad - bottomPad)
 
-        // Current time between the last two samples (the head moves smoothly, data doesn't).
-        var tNow = samples.last?.offset ?? 0
-        if samples.count >= 2, let at = lastSampleAt {
-            let prev = samples[samples.count - 2].offset, last = samples[samples.count - 1].offset
-            tNow = prev + (last - prev) * min(1, max(0, now.timeIntervalSince(at) / max(last - prev, 0.05)))
-        }
+        let tNow = samples.last?.offset ?? 0
         let b = Self.binSeconds(duration: max(tNow, 1), width: plot.width, minimum: minimumBinSeconds)
-        let bins = Self.bins(samples, binSeconds: b).filter { $0.t <= tNow + 1e-6 }
-        let headMbps = head(now)
+        let bins = Self.bins(samples, binSeconds: b)
+        let headMbps = head
 
         // Robust range: typical speed, not the single highest burst.
         let sorted = bins.map(\.mbps).sorted()
@@ -83,7 +73,7 @@ struct LiveThroughputChart: View {
         let robustMbps = max(typical * 1.25, (headMbps ?? 0) * 1.15)
         let resolved = SpeedFormatter.resolve(unit, mbps: max(robustMbps, 0.001))
         let k = resolved.perMbps
-        let yMax = scale.step(toward: LiveScale.niceCeiling(max(robustMbps * k, 0.1)), now: now)
+        let yMax = LiveScale.niceCeiling(max(robustMbps * k, 0.1))
         let tMax = max(5, tNow)
 
         // Grid + labels.
@@ -123,7 +113,7 @@ struct LiveThroughputChart: View {
                        startPoint: CGPoint(x: 0, y: plot.minY), endPoint: CGPoint(x: 0, y: plot.maxY)))
             }
         } else {
-            let curve = Self.smoothPath(xy)
+            let curve = Self.linePath(xy)
             if style == .area {
                 var fill = curve
                 fill.addLine(to: CGPoint(x: xy.last!.x, y: plot.maxY))
@@ -132,11 +122,7 @@ struct LiveThroughputChart: View {
                 g.fill(fill, with: .linearGradient(Gradient(colors: [color.opacity(0.40), color.opacity(0.02)]),
                                                    startPoint: CGPoint(x: 0, y: plot.minY), endPoint: CGPoint(x: 0, y: plot.maxY)))
             }
-            g.drawLayer { layer in
-                layer.addFilter(.blur(radius: 4))
-                layer.stroke(curve, with: .color(color.opacity(0.45)), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-            }
-            g.stroke(curve, with: .color(color), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+            g.stroke(curve, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }
 
         if let avg = averageMbps, avg > 0 {
@@ -147,34 +133,14 @@ struct LiveThroughputChart: View {
             g.stroke(line, with: .color(.secondary.opacity(0.7)), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             g.draw(Text("平均").font(.caption2).foregroundStyle(.secondary), at: CGPoint(x: plot.minX + 2, y: y - 2), anchor: .bottomLeading)
         }
-
-        if let tip = xy.last {
-            let phase = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
-            let halo = 5 + 9 * phase
-            g.fill(Path(ellipseIn: CGRect(x: tip.x - halo, y: tip.y - halo, width: halo * 2, height: halo * 2)),
-                   with: .color(color.opacity(0.35 * (1 - phase))))
-            g.fill(Path(ellipseIn: CGRect(x: tip.x - 4, y: tip.y - 4, width: 8, height: 8)), with: .color(color))
-            g.fill(Path(ellipseIn: CGRect(x: tip.x - 1.8, y: tip.y - 1.8, width: 3.6, height: 3.6)), with: .color(.white))
-        }
     }
 
-    /// Catmull-Rom spline (tension 1/6) through the points, clamped to the plot baseline.
-    static func smoothPath(_ p: [CGPoint]) -> Path {
+    /// Straight segments between the points (an honest chart line, no smoothing).
+    static func linePath(_ p: [CGPoint]) -> Path {
         var path = Path()
         guard let first = p.first else { return path }
         path.move(to: first)
-        guard p.count > 2 else {
-            p.dropFirst().forEach { path.addLine(to: $0) }
-            return path
-        }
-        let floorY = p.map(\.y).max() ?? first.y
-        for i in 0..<(p.count - 1) {
-            let p0 = p[max(i - 1, 0)], p1 = p[i], p2 = p[i + 1], p3 = p[min(i + 2, p.count - 1)]
-            let t: CGFloat = 1 / 6
-            let c1 = CGPoint(x: p1.x + (p2.x - p0.x) * t, y: min(floorY, p1.y + (p2.y - p0.y) * t))
-            let c2 = CGPoint(x: p2.x - (p3.x - p1.x) * t, y: min(floorY, p2.y - (p3.y - p1.y) * t))
-            path.addCurve(to: p2, control1: c1, control2: c2)
-        }
+        p.dropFirst().forEach { path.addLine(to: $0) }
         return path
     }
 

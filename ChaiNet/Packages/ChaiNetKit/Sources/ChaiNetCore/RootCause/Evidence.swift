@@ -86,6 +86,9 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
     case noConfirmedGeneralLoss
     /// The endpoint(s) with loss also answer clearly slower than independent peers (same method).
     case endpointLatencyElevatedVsPeers
+    /// One independent validation endpoint (not a speed-test server) behaves differently from its
+    /// peers in latency-probe results only (ICMP / TCP). Scoped to that endpoint address.
+    case endpointSpecificBehaviorObserved
     case latencySpikesFrequent
     // Bufferbloat
     case downloadBufferbloat, uploadBufferbloat, noBufferbloat
@@ -181,7 +184,7 @@ public enum EvidenceCode: String, Codable, Sendable, Hashable, CaseIterable {
         case .singleServerAnomalous, .multipleServersAnomalous, .allServersAnomalous, .allServersNormal, .regionSpecificAnomaly,
              .serverThroughputOutlierLow, .crossServerConsistentThroughput, .higherLatencyRelativeToPeers,
              .largeCrossProviderThroughputVariance, .crossProviderThroughputConsistent, .allServerHealthChecksPassed, .serverTransferInvalid,
-             .crossProviderObservedRange, .methodDependentThroughputDifference, .endpointLatencyElevatedVsPeers:
+             .crossProviderObservedRange, .methodDependentThroughputDifference, .endpointLatencyElevatedVsPeers, .endpointSpecificBehaviorObserved:
             .crossServer
         case .ipv6DegradedOnly, .ipv4DegradedOnly, .ipFamiliesEquivalent, .ipv6Unavailable:
             .ipFamily

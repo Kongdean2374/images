@@ -271,6 +271,31 @@ final class StressTestRunnerTests: XCTestCase {
         XCTAssertTrue(r.notes.contains { $0.contains("行動網路預設流量保護") })
     }
 
+    /// The pre-test estimate is updated from observed throughput after round 1, and exceeding it warns.
+    func testTrafficProjectionUpdatesAndWarns() async throws {
+        let nodes = TestRunner.defaultStressNodes(servers: ServerDescriptor.builtIn)
+        var config = TestRunConfiguration(kind: .extremeStressTest, items: [], candidateServers: ServerDescriptor.builtIn,
+                                          settings: AppSettings(), onCellular: false)
+        config.stressPlan = StressTestPlan.make(totalSeconds: 300, nodes: nodes)
+        config.stressTimeScale = 0.001
+        config.stressDataLimits = .withHardCap(1_000_000_000_000)
+        config.stressTrafficEstimate = TrafficEstimate(downloadBytes: 1, uploadBytes: 1, assumedDownloadMbps: 0.001, assumedUploadMbps: 0.001)
+        var final: TestResult?
+        var projections: [Int64] = []
+        for try await e in TestRunner.mock(sampleDelay: 0).run(config) {
+            if case .completed(let r) = e { final = r }
+            if case .stressProgress(let p) = e, let v = p.projectedBytes { projections.append(v) }
+        }
+        let p = try XCTUnwrap(final?.stress?.trafficProjection)
+        XCTAssertEqual(p.originalEstimateBytes, 2)
+        XCTAssertNotNil(p.updatedEstimateBytes)
+        XCTAssertEqual(p.updatedBasis, "afterRound1ObservedThroughput")
+        XCTAssertNotNil(p.observedDownloadMbps)
+        XCTAssertEqual(p.warning, "projectedExceedsOriginalEstimate")
+        XCTAssertFalse(projections.isEmpty, "live progress carries the projection")
+        XCTAssertTrue(final!.notes.contains { $0.contains("高於測試前預估範圍") })
+    }
+
     func testUnlimitedRunNeverReportsCap() async throws {
         let (r, _) = try await run(TestRunner.mock(sampleDelay: 0), seconds: 60)
         XCTAssertNotEqual(r.stress?.dataCapReached, true)

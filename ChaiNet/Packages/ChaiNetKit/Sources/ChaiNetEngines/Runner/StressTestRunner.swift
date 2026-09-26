@@ -11,6 +11,8 @@ public struct StressProgress: Sendable, Hashable {
     public var elapsed: Double
     public var downloadBytes: Int64
     public var uploadBytes: Int64
+    /// Total traffic projected from the throughput observed so far (nil before the first transfer).
+    public var projectedBytes: Int64? = nil
 }
 
 /// Probes to arbitrary stress-test nodes (control probes, health checks). Injected for tests.
@@ -116,12 +118,13 @@ extension TestRunner {
         let bytes = LockedValue<(down: Int64, up: Int64)>((0, 0))
         // Last progress event, re-emitted with fresh byte counters during transfers (live data usage).
         let lastProgress = LockedValue<StressProgress?>(nil)
+        let projectedTotal = LockedValue<Int64?>(nil)
 
         func begin(_ kind: StressPhaseKind, round: Int? = nil, node: String? = nil, total: Int) -> (Double, Int64, Int64) {
             phaseIndex += 1
             let b = bytes.current
             let p = StressProgress(kind: kind, round: round, nodeName: node, phaseIndex: phaseIndex, phaseCount: total,
-                                   elapsed: clock.elapsed, downloadBytes: b.down, uploadBytes: b.up)
+                                   elapsed: clock.elapsed, downloadBytes: b.down, uploadBytes: b.up, projectedBytes: projectedTotal.current)
             lastProgress.withLock { $0 = p }
             emit(.stressProgress(p))
             return (clock.elapsed, b.down, b.up)
@@ -227,6 +230,41 @@ extension TestRunner {
         if dataLimits.policy == "cellularDefault" {
             result.notes.append("行動網路預設流量保護：警告 500 MB、強烈警告 750 MB、硬上限 1.5 GB（可於設定中明確選擇「不限」）。")
         }
+        // Traffic projection from observed throughput (the pre-test estimate assumes fixed rates).
+        var projection = StressTrafficProjection(original: c.stressTrafficEstimate)
+        var plannedTransferSeconds: [TransferDirection: Double] = [
+            .download: plan.phases.filter { $0.kind == .downloadStress }.reduce(0) { $0 + $1.seconds },
+            .upload: plan.phases.filter { $0.kind == .uploadStress }.reduce(0) { $0 + $1.seconds },
+        ]
+        var doneTransferSeconds: [TransferDirection: Double] = [:]
+        func observedMbps(_ d: TransferDirection) -> Double? {
+            let valid = transfers.filter { $0.direction == d && $0.isValid }
+            let seconds = valid.reduce(0.0) { $0 + ($1.speed?.summary.duration ?? 0) }
+            return seconds > 0 ? Double(valid.reduce(Int64(0)) { $0 + $1.bytes }) * 8 / seconds / 1_000_000 : nil
+        }
+        func refreshProjection() {
+            var rates: [TransferDirection: Double] = [:]
+            for d in TransferDirection.allCases { rates[d] = observedMbps(d) }
+            guard !rates.isEmpty else { return }
+            var remaining: [TransferDirection: Double] = [:]
+            for d in TransferDirection.allCases { remaining[d] = (plannedTransferSeconds[d] ?? 0) - (doneTransferSeconds[d] ?? 0) }
+            let used = bytes.current
+            let projected = StressTrafficProjection.project(usedBytes: used.down + used.up, remainingSeconds: remaining, observedMbps: rates)
+            projectedTotal.withLock { $0 = projected }
+            projection.latestProjectionBytes = projected
+            projection.observedDownloadMbps = rates[.download] ?? projection.observedDownloadMbps
+            projection.observedUploadMbps = rates[.upload] ?? projection.observedUploadMbps
+            guard projection.warning == nil else { return }
+            let fmt = { (b: Int64) in ByteCountFormatter.string(fromByteCount: b, countStyle: .decimal) }
+            if let cap = dataLimits.hardCapBytes, projected > cap {
+                projection.warning = "projectedExceedsHardCap"
+                result.notes.append("依實測速度，預估總流量約 \(fmt(projected))，將超過硬上限 \(fmt(cap))；達上限時會自動停止吞吐量階段，低流量診斷照常完成。")
+            } else if dataLimits.policy != "explicitUnlimited" && dataLimits.policy != "unlimitedNonCellular",
+                      let high = projection.originalRangeHighBytes, projected > high {
+                projection.warning = "projectedExceedsOriginalEstimate"
+                result.notes.append("依實測速度，預估總流量約 \(fmt(projected))，高於測試前預估範圍上限 \(fmt(high))。")
+            }
+        }
         // One node × direction transfer; an invalid result (error page, tiny body, 429…) is retried
         // once after a short pause. Every attempt is kept; only valid ones reach statistics.
         func runTransfer(_ node: StressNode, _ server: ServerDescriptor, _ direction: TransferDirection, round: Int,
@@ -254,6 +292,10 @@ extension TestRunner {
                                                  loadedProbe: referenceProbe(), controlProbe: controlProbe(), bytes: bytes,
                                                  attempt: attempt, progress: lastProgress, emit: emit)
                 transfers.append(t)
+                if t.isValid || attempt == 2 {
+                    doneTransferSeconds[direction, default: 0] += seconds
+                    refreshProjection()
+                }
                 let why = t.validity.flatMap { $0.valid ? nil : "\($0.reason?.rawValue ?? "invalid")：\($0.detail ?? "")" }
                 end(kind, hc, planned: seconds, round: round, node: node.id,
                     note: [note, why.map { "invalid（\($0)）" }].compactMap { $0 }.joined(separator: "；").nilIfEmpty)
@@ -273,6 +315,11 @@ extension TestRunner {
                 guard let node = plan.nodes.first(where: { $0.id == phase.nodeID }), let server = node.server else { continue }
                 let direction: TransferDirection = phase.kind == .downloadStress ? .download : .upload
                 try await runTransfer(node, server, direction, round: round, seconds: phase.seconds, kind: phase.kind)
+            }
+            if round == 1 {
+                refreshProjection()
+                projection.updatedEstimateBytes = projection.latestProjectionBytes
+                projection.updatedBasis = "afterRound1ObservedThroughput"
             }
             // Cooldown / post-load recovery: how fast queues drain once the load stops.
             let recovery = plan.phases(round: round).first { $0.kind == .postLoadRecovery }?.seconds ?? 4
@@ -398,6 +445,9 @@ extension TestRunner {
                 extraRounds += 1
                 let round = plan.rounds + extraRounds
                 for phase in template {
+                    plannedTransferSeconds[phase.kind == .downloadStress ? .download : .upload, default: 0] += phase.seconds
+                }
+                for phase in template {
                     guard let node = plan.nodes.first(where: { $0.id == phase.nodeID }), let server = node.server else { continue }
                     try await runTransfer(node, server, phase.kind == .downloadStress ? .download : .upload, round: round,
                                           seconds: phase.seconds, kind: phase.kind, note: "recycled budget")
@@ -433,6 +483,7 @@ extension TestRunner {
         var finalSummary = summary
         finalSummary.dataLimits = dataLimits
         finalSummary.trafficEstimate = c.stressTrafficEstimate
+        finalSummary.trafficProjection = projection
         finalSummary.dataCapReached = dataCapReached
         result.stress = finalSummary
         // Generic sections describe the stress aggregate, never one node's last transfer: no single

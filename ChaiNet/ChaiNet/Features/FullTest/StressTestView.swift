@@ -84,7 +84,7 @@ struct StressTestView: View {
         let network = app.currentNetwork
         let cls = network.map(NetworkClass.init(snapshot:)) ?? .unknown
         let rates = StressTestPlan.assumedMbps(history: app.history.results(limit: 200), networkClass: cls)
-        let traffic = plan.trafficEstimate(downloadMbps: rates.download, uploadMbps: rates.upload)
+        let traffic = plan.trafficEstimate(downloadMbps: rates.download, uploadMbps: rates.upload, networkClass: cls)
 
         VStack(alignment: .leading, spacing: 8) {
             Label("最大強度 · 多節點 · 多輪", systemImage: "flame.fill").font(.headline).foregroundStyle(Theme.critical)
@@ -131,6 +131,10 @@ struct StressTestView: View {
             KeyValueRow(key: "上傳", value: Format.bytes(traffic.uploadBytes))
             KeyValueRow(key: "合計", value: Format.bytes(traffic.totalBytes), valueColor: Theme.critical)
             KeyValueRow(key: "預估範圍", value: "\(Format.bytes(traffic.lowBytes)) – \(Format.bytes(traffic.highBytes))", valueColor: Theme.critical)
+            if let cd = traffic.ceilingDownloadMbps, let cu = traffic.ceilingUploadMbps {
+                Text("範圍上限以此網路類型的高速情況（下載 \(Format.number(cd, digits: 0)) / 上傳 \(Format.number(cu, digits: 0)) Mbps）估算；測試中會依實測速度更新預估。")
+                    .font(.caption2).foregroundStyle(Theme.textSecondary)
+            }
             Text(rates.fromHistory
                  ? "依此網路類型最近結果（下載 \(Format.number(rates.download, digits: 0)) / 上傳 \(Format.number(rates.upload, digits: 0)) Mbps）估算；實際流量依網路速度而定。"
                  : "尚無此網路類型的紀錄，以典型速度（下載 \(Format.number(rates.download, digits: 0)) / 上傳 \(Format.number(rates.upload, digits: 0)) Mbps）估算；實際可能更多。")
@@ -279,6 +283,11 @@ private struct StressProgressHeader: View {
                 if let p = vm.stressProgress {
                     Text("階段 \(p.phaseIndex) / \(p.phaseCount) · 已用流量 ↓ \(Format.bytes(p.downloadBytes)) ↑ \(Format.bytes(p.uploadBytes))")
                         .font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                    if let projected = p.projectedBytes {
+                        let over = limits.hardCapBytes.map { projected > $0 } ?? false
+                        Text("依實測速度預估總流量：約 \(Format.bytes(projected))" + (over ? "（將超過硬上限，達上限時自動停止吞吐量階段）" : ""))
+                            .font(.caption2.monospacedDigit()).foregroundStyle(over ? Theme.warning : Theme.textSecondary)
+                    }
                     usage(down: p.downloadBytes, up: p.uploadBytes)
                 }
             }

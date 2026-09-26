@@ -56,6 +56,11 @@ public struct HypothesisModel: Sendable {
     /// When this measured condition is present the hypothesis is `.supported` (the condition is a
     /// fact; its mechanism / location stays a hypothesis).
     public var observedCondition: EvidenceCode?
+    /// When non-empty: without at least one of these (a reproduction with the same protocol /
+    /// stream configuration, or an independent server-level measurement) the confidence is
+    /// capped at `unreproducedCap` — a single endpoint's ICMP behaviour can't make it "high".
+    public var reproducedBy: Set<EvidenceCode> = []
+    public var unreproducedCap: Double = 1
 
     public static let incompleteCap = 0.6
     public static let defaultPrior = -1.5
@@ -193,13 +198,27 @@ public enum HypothesisCatalog {
             ruledOutBy: [.allServersAnomalous], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.crossServer], confidenceCap: 0.9,
             verificationTests: [.testAlternateServers, .runTraceroute], limitations: [],
-            ruleOutBlockedBy: [.serverTransferInvalid]),
+            ruleOutBlockedBy: [.serverTransferInvalid],
+            reproducedBy: [.serverUnhealthy, .serverTransferInvalid, .serverThroughputOutlierLow, .multipleServersAnomalous],
+            unreproducedCap: 0.6),
 
         HypothesisModel(
-            cause: .endpointSpecificPathIssue, layer: .server, title: "特定端點 / 業者路徑問題",
-            explanation: "只有特定業者的端點（例如 Cloudflare）出現遺失，且延遲明顯高於其他獨立端點，而 Google / Apple 等對照正常：問題可能在通往該業者的路徑或其邊緣節點。ICMP 遺失也可能是端點對 ICMP 限速，因此最多只到「可能」，不代表該業者路由故障。",
+            cause: .icmpRateLimitingOrPolicy, layer: .server, title: "端點 ICMP 限速 / ICMP 政策",
+            explanation: "只有 ICMP（Ping）探測在特定端點出現遺失或延遲，可能是該端點對 ICMP 限速或降低優先順序；這不代表同業者的 HTTP / TCP 服務或路由異常。",
+            prior: HypothesisModel.defaultPrior,
+            weights: [.possibleICMPRateLimiting: 1.5, .endpointSpecificLossObserved: 0.8, .endpointSpecificBehaviorObserved: 0.4,
+                      .intermediateHopICMPDeprioritized: 0.3, .lossHigh: -1.0, .lossSevere: -1.0],
+            ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
+            scope: .all, requiredDimensions: [.loss], confidenceCap: 0.6,
+            verificationTests: [.testAlternateServers, .repeatAtDifferentTime],
+            limitations: ["iPhone 端無法得知端點的 ICMP 政策；需以 TCP / HTTP 量測同一端點確認。"]),
+
+        HypothesisModel(
+            cause: .endpointSpecificPathIssue, layer: .server, title: "特定端點路由行為（僅限受測位址）",
+            explanation: "只有特定端點位址（例如 1.1.1.1）出現遺失，且延遲明顯高於其他獨立端點：可能是通往該 Anycast 位址的路由或其邊緣節點。僅限該位址與該探測方式，不代表同業者其他服務（例如 speed.cloudflare.com 的 HTTP 路徑）也異常；ICMP 限速另列為獨立假設，因此最多只到「可能」。",
             prior: HypothesisModel.defaultPrior,
             weights: [.endpointSpecificLossObserved: 1.5, .endpointLatencyElevatedVsPeers: 0.8, .singleServerAnomalous: 0.8,
+                      .endpointSpecificBehaviorObserved: 0.4,
                       .regionSpecificAnomaly: 0.5, .possibleICMPRateLimiting: -0.3, .allServersAnomalous: -1.5],
             ruledOutBy: [], requiresAny: [], notApplicableWhen: [],
             scope: .all, requiredDimensions: [.loss], confidenceCap: 0.65,

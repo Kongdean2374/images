@@ -15,12 +15,15 @@ public struct LatencyProvenance: Codable, Sendable, Hashable {
     /// "serverLatencyProbe", "referenceProbe" or "independentControlProbe".
     public var measurementSource: String
     public var comparisonGroup: String
+    /// Same target + protocol + method + IP family id (see `ProbeDescriptor.comparisonGroupID`).
+    public var comparisonGroupID: String?
 
     public static let primaryEndpointGroup = "primaryEndpointLatency"
     public static let bufferbloatControlGroup = "bufferbloatControl"
 
     public init(probe: ProbeDescriptor, measurementSource: String, comparisonGroup: String) {
         self.probe = probe
+        self.comparisonGroupID = probe.comparisonGroupID
         self.measurementSource = measurementSource
         self.comparisonGroup = comparisonGroup
     }

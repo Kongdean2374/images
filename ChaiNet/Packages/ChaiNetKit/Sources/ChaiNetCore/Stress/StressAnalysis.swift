@@ -210,6 +210,10 @@ public struct ProbeDescriptor: Codable, Sendable, Hashable {
     /// "IPv4", "IPv6" or "system" (resolver-chosen).
     public var ipFamily: String
 
+    /// Stable id of "same target + protocol + method + IP family": only values sharing it may be
+    /// subtracted or compared (e.g. "icmpEcho|ICMP|8.8.8.8|IPv4").
+    public var comparisonGroupID: String { "\(method)|\(protocolName)|\(target)|\(ipFamily)" }
+
     public init(target: String, method: String, protocolName: String, ipFamily: String) {
         self.target = target
         self.method = method
@@ -363,6 +367,8 @@ public struct StressSummary: Codable, Sendable, Hashable {
     public var dataCapReached: Bool?
     /// Traffic estimate shown before the start (point estimate; range = ±30 %); nil before v2.2.1.
     public var trafficEstimate: TrafficEstimate?
+    /// Original / updated (observed-rate) / latest projection; nil before v2.4.0.
+    public var trafficProjection: StressTrafficProjection?
     /// Independent control probe (fixed target never under load) sampled idle and during every load.
     public var controlProbe: ProbeDescriptor?
     public var controlIdleSamples: [LatencySample]?

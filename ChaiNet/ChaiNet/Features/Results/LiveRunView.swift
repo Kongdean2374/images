@@ -100,7 +100,6 @@ private struct ThroughputLivePanel: View {
             HStack(spacing: 8) {
                 Label(direction == .download ? "下載" : "上傳", systemImage: direction == .download ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
                     .font(.headline).foregroundStyle(color)
-                PulsingDot(color: color)
                 Spacer()
                 Text(String(format: "%.1f 秒", elapsed)).font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
             }
@@ -124,27 +123,16 @@ private struct ThroughputLivePanel: View {
             LiveThroughputChart(samples: samples, lastSampleAt: vm.lastSampleAt[direction], unit: s.primarySpeedUnit, color: color,
                                 style: s.chartStyle, averageMbps: summary?.averageMbps,
                                 minimumBinSeconds: Double(SpeedCalculator.batching(samples).windowSamples) * 0.1, height: 180,
-                                head: { vm.animatedMbps(direction, at: $0) })
-            let ready = elapsed >= 2
-            // Short-window statistics are unreliable while progress reports arrive in bursts.
-            let reliable = summary?.shortWindowReliable ?? true
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), alignment: .leading, spacing: 10) {
+                                head: vm.displayMbps[direction])
+            let ready = elapsed >= 2 && (summary?.shortWindowReliable ?? true)
+            HStack(alignment: .top, spacing: 12) {
                 LiveStat(title: "平均", value: Format.speed(summary?.averageMbps, settings: s))
-                LiveStat(title: "中位數", value: ready && reliable ? Format.speed(summary?.medianMbps, settings: s) : "計算中")
-                LiveStat(title: "峰值", value: ready && reliable ? Format.speed(summary?.peakMbps, settings: s) : "計算中")
-                LiveStat(title: "P10（持續）", value: ready && reliable ? Format.speed(summary?.p10Mbps, settings: s) : "計算中")
-                LiveStat(title: "穩定度", value: ready && reliable ? Format.number(summary?.stability.score, digits: 0) : "計算中")
-                LiveStat(title: "已傳輸", value: samples.last.map { Format.bytes($0.cumulativeBytes) } ?? Format.dash)
+                LiveStat(title: "中位數", value: ready ? Format.speed(summary?.medianMbps, settings: s) : "計算中")
                 LiveStat(title: "負載延遲", value: loaded.sent > 0 ? Format.ms(loaded.rtt?.median) : Format.dash)
-                LiveStat(title: "負載抖動", value: loaded.sent > 1 ? Format.ms(loaded.rtt?.jitter, digits: 1) : Format.dash)
-                LiveStat(title: "連線數", value: vm.streams[direction].map { "\($0) 條" } ?? Format.dash)
+                LiveStat(title: "已傳輸", value: samples.last.map { Format.bytes($0.cumulativeBytes) } ?? Format.dash)
             }
-            Glossary(lines: [
-                "平均：總傳輸量 ÷ 時間。中位數：一半時間比它快、一半比它慢，不受瞬間尖峰影響。",
-                "P10（持續）：90% 的時間都能達到的速度，代表穩定可用的下限。峰值：最快的 0.5 秒。",
-                "穩定度：0–100，速度起伏越小越高。負載延遲 / 抖動：傳輸同時量測的 Ping 與其變動，數值升高代表網路在排隊（bufferbloat）。",
-                "曲線每 0.5 秒一段、畫出後不再變動；縱軸依一般速度自動縮放，單次尖峰不會把刻度拉高。",
-            ])
+            Text("中位數：一半時間比它快、一半比它慢，不受瞬間尖峰影響。負載延遲：傳輸同時量測的 Ping，明顯升高代表網路在排隊。")
+                .font(.caption2).foregroundStyle(Theme.textSecondary.opacity(0.85))
         }
         .cardStyle()
     }
@@ -160,6 +148,7 @@ private struct LiveStat: View {
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .transaction { $0.animation = nil }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -172,43 +161,21 @@ private struct LatencyLivePanel: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Label(title, systemImage: "dot.radiowaves.left.and.right").font(.headline).foregroundStyle(Theme.latency)
-                PulsingDot(color: Theme.latency)
                 Spacer()
                 Text("\(stats.sent) 個探測").font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
                 LiveStat(title: "中位數", value: Format.ms(stats.rtt?.median))
-                LiveStat(title: "平均", value: Format.ms(stats.rtt?.average))
-                LiveStat(title: "最低", value: Format.ms(stats.rtt?.minimum))
                 LiveStat(title: "P95", value: Format.ms(stats.rtt?.p95))
-                LiveStat(title: "P99", value: Format.ms(stats.rtt?.p99))
                 LiveStat(title: "抖動", value: Format.ms(stats.rtt?.jitter, digits: 1))
-                LiveStat(title: "標準差", value: Format.ms(stats.rtt?.standardDeviation, digits: 1))
                 LiveStat(title: "遺失", value: stats.sent > 0 ? Format.percent(stats.loss.lossPercent) : Format.dash)
             }
             LatencyChart(samples: samples.sorted { $0.sequence < $1.sequence }, height: 140)
                 .animation(.easeOut(duration: 0.25), value: samples.count)
-            Glossary(lines: [
-                "中位數：一半的 Ping 比它低，最能代表平常的延遲。最低：線路本身的延遲下限。",
-                "P95 / P99：95% / 99% 的 Ping 都低於此值，反映偶發的卡頓；與中位數差越大越不穩定。",
-                "抖動：相鄰兩次 Ping 的平均差距，影響通話與遊戲。標準差：整體起伏程度。遺失：沒有回應的比例（紅色 × 標記）。",
-            ])
+            Text("中位數：平常的延遲。P95：95% 的 Ping 低於此值，反映偶發卡頓。抖動：延遲的變動，影響通話與遊戲。")
+                .font(.caption2).foregroundStyle(Theme.textSecondary.opacity(0.85))
         }
         .cardStyle()
-    }
-}
-
-/// Small grey explanations of the terms shown above (kept out of the way).
-private struct Glossary: View {
-    let lines: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(lines, id: \.self) { line in
-                Text(line).font(.caption2).foregroundStyle(Theme.textSecondary.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 }
 

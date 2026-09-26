@@ -146,10 +146,48 @@ public struct TrafficEstimate: Codable, Sendable, Hashable {
     public var uploadBytes: Int64
     public var assumedDownloadMbps: Double
     public var assumedUploadMbps: Double
+    /// Upper bound: what a fast link of this network type could move in the same transfer time
+    /// (nil in estimates made before v2.4.0).
+    public var ceilingBytes: Int64?
+    public var ceilingDownloadMbps: Double?
+    public var ceilingUploadMbps: Double?
     public var totalBytes: Int64 { downloadBytes + uploadBytes }
-    /// Range shown to the user: real rates vary, so ±30 % around the point estimate.
+    /// Range shown to the user: 70 % of the conservative point estimate up to
+    /// max(130 % of it, the network type's fast-link ceiling).
     public var lowBytes: Int64 { Int64(Double(totalBytes) * 0.7) }
-    public var highBytes: Int64 { Int64(Double(totalBytes) * 1.3) }
+    public var highBytes: Int64 { max(Int64(Double(totalBytes) * 1.3), ceilingBytes ?? 0) }
+}
+
+/// Traffic projection during an Extreme Stress Test: the pre-test estimate, the estimate updated
+/// from the throughput actually observed (after round 1) and the actual usage.
+///
+///     projected = bytes used so far + Σ_direction remaining planned transfer seconds × observed Mbps / 8
+///     observed Mbps = Σ bytes / Σ duration of valid transfers of that direction
+public struct StressTrafficProjection: Codable, Sendable, Hashable {
+    public var originalEstimateBytes: Int64?
+    public var originalRangeLowBytes: Int64?
+    public var originalRangeHighBytes: Int64?
+    public var updatedEstimateBytes: Int64?
+    /// e.g. "afterRound1"
+    public var updatedBasis: String?
+    public var observedDownloadMbps: Double?
+    public var observedUploadMbps: Double?
+    /// Latest live projection (includes budget-recycled extra rounds once they start).
+    public var latestProjectionBytes: Int64?
+    public var warning: String?
+
+    public init(original: TrafficEstimate?) {
+        originalEstimateBytes = original?.totalBytes
+        originalRangeLowBytes = original?.lowBytes
+        originalRangeHighBytes = original?.highBytes
+    }
+
+    public static func project(usedBytes: Int64, remainingSeconds: [TransferDirection: Double],
+                               observedMbps: [TransferDirection: Double]) -> Int64 {
+        var extra = 0.0
+        for (d, seconds) in remainingSeconds { extra += max(0, seconds) * (observedMbps[d] ?? 0) * 1_000_000 / 8 }
+        return usedBytes + Int64(extra)
+    }
 }
 
 /// Mobile-data safety limits for the stress test (all optional; nil = no limit).
@@ -354,12 +392,31 @@ public struct StressTestPlan: Codable, Sendable, Hashable {
     }
 
     /// Expected bytes if the link sustains the given rates for every transfer phase.
-    public func trafficEstimate(downloadMbps: Double, uploadMbps: Double) -> TrafficEstimate {
+    public func trafficEstimate(downloadMbps: Double, uploadMbps: Double, networkClass: NetworkClass? = nil) -> TrafficEstimate {
         let dl = phases.filter { $0.kind == .downloadStress }.reduce(0) { $0 + $1.seconds }
         let ul = phases.filter { $0.kind == .uploadStress }.reduce(0) { $0 + $1.seconds }
-        return TrafficEstimate(downloadBytes: Int64(dl * downloadMbps * 1_000_000 / 8),
-                               uploadBytes: Int64(ul * uploadMbps * 1_000_000 / 8),
-                               assumedDownloadMbps: downloadMbps, assumedUploadMbps: uploadMbps)
+        var e = TrafficEstimate(downloadBytes: Int64(dl * downloadMbps * 1_000_000 / 8),
+                                uploadBytes: Int64(ul * uploadMbps * 1_000_000 / 8),
+                                assumedDownloadMbps: downloadMbps, assumedUploadMbps: uploadMbps)
+        if let networkClass {
+            let c = Self.ceilingMbps(for: networkClass)
+            let cd = max(c.download, downloadMbps), cu = max(c.upload, uploadMbps)
+            e.ceilingDownloadMbps = cd
+            e.ceilingUploadMbps = cu
+            e.ceilingBytes = Int64((dl * cd + ul * cu) * 1_000_000 / 8)
+        }
+        return e
+    }
+
+    /// Fast-link rates per network type for the upper end of the range (high-band 5G / Wi-Fi 6/7
+    /// can far exceed the conservative point estimate).
+    public static func ceilingMbps(for networkClass: NetworkClass) -> (download: Double, upload: Double) {
+        switch networkClass {
+        case .nr: (1600, 250)
+        case .wifi, .wired: (1200, 600)
+        case .lte: (350, 100)
+        case .cellularOther, .unknown: (1200, 250)
+        }
     }
 
     /// Rates for the traffic estimate: median of the last (≤ 10) results measured on the same

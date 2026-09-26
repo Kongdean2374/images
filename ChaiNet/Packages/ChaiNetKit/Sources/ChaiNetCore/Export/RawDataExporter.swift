@@ -118,6 +118,7 @@ public enum RawDataExporter {
             guard let p else { return }
             kv("probe_target", p.probe.target); kv("probe_method", p.probe.method); kv("probe_protocol", p.probe.protocolName)
             kv("probe_ip_family", p.probe.ipFamily); kv("measurement_source", p.measurementSource); kv("comparison_group", p.comparisonGroup)
+            kv("comparison_group_id", p.probe.comparisonGroupID)
             if let c = comparableWithIdle {
                 kv("comparable_with_latency_idle", b(c))
                 if !c { o.append("# Not the same probe as [latency_idle] (different target / method): do NOT subtract or compare these two sections. Idle vs loaded for bufferbloat: [bufferbloat_control_idle] vs this section.") }
@@ -232,7 +233,24 @@ public enum RawDataExporter {
             kv("throughput_phases_s", n(st.plan.estimatedSeconds - st.plan.diagnosticSeconds, 1))
             if let e = st.trafficEstimate {
                 kv("estimated_data_usage_bytes", "\(e.totalBytes)"); kv("estimated_data_usage_range_bytes", "\(e.lowBytes)-\(e.highBytes)")
-                kv("estimate_assumed_mbps", "download=\(n(e.assumedDownloadMbps, 0)) upload=\(n(e.assumedUploadMbps, 0))")
+                kv("estimate_assumed_mbps", "download=\(n(e.assumedDownloadMbps, 0)) upload=\(n(e.assumedUploadMbps, 0)) (conservative point estimate)")
+                if let cd = e.ceilingDownloadMbps, let cu = e.ceilingUploadMbps {
+                    kv("estimate_range_ceiling_mbps", "download=\(n(cd, 0)) upload=\(n(cu, 0)) (fast-link upper bound for this network type)")
+                }
+            }
+            if let p = st.trafficProjection {
+                func v(_ x: Int64?) -> String { x.map(String.init) ?? "null" }
+                kv("original_estimate_bytes", v(p.originalEstimateBytes))
+                kv("original_estimate_range_bytes", "\(v(p.originalRangeLowBytes))-\(v(p.originalRangeHighBytes))")
+                kv("updated_estimate_bytes", v(p.updatedEstimateBytes)); kv("updated_estimate_basis", p.updatedBasis ?? "null")
+                kv("observed_download_mbps", n(p.observedDownloadMbps)); kv("observed_upload_mbps", n(p.observedUploadMbps))
+                kv("latest_projection_bytes", v(p.latestProjectionBytes))
+                kv("actual_usage_bytes", "\(st.totalBytes)")
+                if let o = p.originalEstimateBytes, o > 0 {
+                    kv("actual_vs_original_estimate_percent", n(Double(st.totalBytes - o) / Double(o) * 100, 1))
+                }
+                kv("projection_warning", p.warning ?? "none")
+                o.append("# updated_estimate = bytes used after round 1 + remaining planned transfer seconds x observed Mbps (budget-recycled extra rounds are added to latest_projection only when they start).")
             }
             kv("http_streams_per_transfer", "\(st.plan.streams)"); kv("ndt7_streams_per_transfer", "1")
             kv("transfer_s_per_node_direction_round", n(st.plan.transferSeconds, 1))
@@ -334,30 +352,60 @@ public enum RawDataExporter {
             kv("valid_controls", "\(lc.validControlCount)"); kv("lossy_controls", "\(lc.lossyControlCount)")
             kv("affected_targets", (lc.affectedTargets ?? []).joined(separator: ",")); kv("clean_targets", (lc.cleanTargets ?? []).joined(separator: ","))
             kv("loss_verdict_values", "confirmedGeneralPacketLoss|endpointSpecificLossObserved|possibleICMPRateLimiting|noConfirmedGeneralPacketLoss|inconclusive")
+            // Two measurement groups, never subtracted across: the reference endpoint (primary
+            // speed server's own probe) and the independent bufferbloat control (fixed target).
+            let refProbe = st.referenceProbe
             sec("stress_latency_recovery")
-            kv("pre_load_median_ms", n(st.preLoadLatency?.rtt?.median)); kv("pre_load_p95_ms", n(st.preLoadLatency?.rtt?.p95))
-            kv("pre_load_jitter_ms", n(st.preLoadLatency?.rtt?.jitter))
+            o.append("# Reference endpoint latency only (comparison_group_id below). Loaded values probe the reference endpoint while ANY node is loaded;")
+            o.append("# they are not the bufferbloat measure. Idle-vs-loaded deltas are only in [stress_bufferbloat_comparison] (same target + protocol + method).")
+            kv("reference_probe_target", refProbe?.target ?? "unknown"); kv("reference_probe_method", refProbe?.method ?? "unknown")
+            kv("reference_probe_protocol", refProbe?.protocolName ?? "unknown")
+            kv("comparison_group_id", refProbe?.comparisonGroupID ?? "unknown")
+            kv("reference_preload_median_ms", n(st.preLoadLatency?.rtt?.median)); kv("reference_preload_p95_ms", n(st.preLoadLatency?.rtt?.p95))
+            kv("reference_preload_jitter_ms", n(st.preLoadLatency?.rtt?.jitter))
             for d in TransferDirection.allCases {
                 let valid = !st.loadValidTransfers(d).isEmpty
                 kv("\(d.rawValue)_load_valid", b(valid))
-                kv("loaded_\(d.rawValue)_median_ms", valid ? n(st.loadedLatencyMs(d)) : "unavailable")
-                kv("\(d.rawValue)_loaded_latency_increase_ms", valid ? n(st.loadedLatencyIncreaseMs(d)) : "unavailable")
-                if !valid { kv("\(d.rawValue)_grade", "unavailable"); kv("\(d.rawValue)_grade_reason", "insufficientLoad") }
+                kv("transfer_endpoint_loaded_\(d.rawValue)_median_ms", valid ? n(LatencyStatistics.compute(from: st.pooledLoadedSamples(d)).rtt?.median ?? st.loadedLatencyMs(d)) : "unavailable")
             }
-            kv("loaded_latency_inflation_ms", n(st.bufferbloatMs)); kv("queue_location", "unknown")
-            for c in TransferDirection.allCases.compactMap({ st.bufferbloatComparison($0) }) {
+            for (i, post) in st.postLoadLatency.enumerated() {
+                kv("reference_post_load_round_\(i + 1)_median_ms", n(post.rtt?.median)); kv("reference_post_load_round_\(i + 1)_p95_ms", n(post.rtt?.p95))
+            }
+            kv("reference_post_load_recovery_delta_ms", n(st.recoveryDeltaMs))
+            kv("throughput_degradation_first_to_last_round_percent", n(st.throughputDegradationPercent))
+            kv("renamed_keys", "pre_load_median_ms>reference_preload_median_ms,pre_load_p95_ms>reference_preload_p95_ms,pre_load_jitter_ms>reference_preload_jitter_ms,loaded_<dir>_median_ms>transfer_endpoint_loaded_<dir>_median_ms,<dir>_loaded_latency_increase_ms>control_<dir>_increase_ms,loaded_latency_inflation_ms>control_max_increase_ms,post_load_round_N_*>reference_post_load_round_N_*,post_load_recovery_delta_ms>reference_post_load_recovery_delta_ms")
+
+            sec("stress_bufferbloat_comparison")
+            o.append("# The only idle-vs-loaded pairs in this export that may be subtracted: same target + protocol + method (comparison_group_id).")
+            let comparisons = TransferDirection.allCases.compactMap { st.bufferbloatComparison($0) }
+            let fromControl = comparisons.first?.source == "independentControlProbe"
+            let pre = fromControl ? "control" : "reference_limited"
+            if let first = comparisons.first {
+                kv("comparison_source", first.source); kv("comparison_group_id", first.probe.comparisonGroupID)
+                kv("probe_target", first.probe.target); kv("probe_method", first.probe.method); kv("probe_protocol", first.probe.protocolName)
+                kv("\(pre)_idle_median_ms", n(first.idleMedianMs))
+            } else {
+                kv("comparison_source", "unavailable")
+            }
+            for d in TransferDirection.allCases {
+                if let c = comparisons.first(where: { $0.direction == d }) {
+                    kv("\(pre)_\(d.rawValue)_loaded_median_ms", n(c.loadedMedianMs)); kv("\(pre)_\(d.rawValue)_increase_ms", n(c.increaseMs))
+                } else {
+                    kv("\(pre)_\(d.rawValue)_increase_ms", "unavailable")
+                    kv("\(d.rawValue)_grade", "unavailable"); kv("\(d.rawValue)_grade_reason", "insufficientLoad")
+                }
+            }
+            kv("\(pre)_max_increase_ms", n(st.bufferbloatMs)); kv("queue_location", "unknown")
+            for c in comparisons {
                 let p = "\(c.direction.rawValue)_comparison"
                 kv("\(p).source", c.source); kv("\(p).probe_target", c.probe.target); kv("\(p).probe_method", c.probe.method)
                 kv("\(p).probe_protocol", c.probe.protocolName); kv("\(p).probe_ip_family", c.probe.ipFamily)
+                kv("\(p).comparison_group_id", c.probe.comparisonGroupID)
                 kv("\(p).idle_sample_count", "\(c.idleSampleCount)"); kv("\(p).loaded_sample_count", "\(c.loadedSampleCount)")
                 kv("\(p).idle_median_ms", n(c.idleMedianMs)); kv("\(p).loaded_median_ms", n(c.loadedMedianMs)); kv("\(p).increase_ms", n(c.increaseMs))
                 kv("\(p).comparison_target_same", b(c.comparisonTargetSame)); kv("\(p).comparison_method_same", b(c.comparisonMethodSame))
                 kv("\(p).comparison_quality", c.quality.rawValue); kv("\(p).note", c.note)
             }
-            for (i, post) in st.postLoadLatency.enumerated() {
-                kv("post_load_round_\(i + 1)_median_ms", n(post.rtt?.median)); kv("post_load_round_\(i + 1)_p95_ms", n(post.rtt?.p95))
-            }
-            kv("post_load_recovery_delta_ms", n(st.recoveryDeltaMs)); kv("throughput_degradation_first_to_last_round_percent", n(st.throughputDegradationPercent))
         }
 
         let net = r.network
@@ -414,7 +462,7 @@ public enum RawDataExporter {
                 sec("bufferbloat_control_idle")
                 kv("target", probe.target); kv("probe_method", probe.method); kv("probe_protocol", probe.protocolName)
                 kv("probe_ip_family", probe.ipFamily); kv("measurement_source", "independentControlProbe")
-                kv("comparison_group", LatencyProvenance.bufferbloatControlGroup)
+                kv("comparison_group", LatencyProvenance.bufferbloatControlGroup); kv("comparison_group_id", probe.comparisonGroupID)
                 kv("sample_count", "\(ctl.sent)"); kv("received", "\(ctl.received)")
                 kv("median_ms", n(ctl.rtt?.median)); kv("p95_ms", n(ctl.rtt?.p95)); kv("jitter_ms", n(ctl.rtt?.jitter))
                 kv("loss_percent", n(ctl.loss.lossPercent))
@@ -629,11 +677,17 @@ public enum RawDataExporter {
             if let g = a.hypotheses.first(where: { $0.cause == .serverOrRouteSpecific }) {
                 kv("generalServerOrRouteIssue", "\(g.likelihood.rawValue) (alias of serverOrRouteSpecific)")
             }
+            // Scoped to the probed address + method: 1.1.1.1 over ICMP says nothing about
+            // speed.cloudflare.com over HTTPS, even though both belong to one provider.
             if let e = a.hypotheses.first(where: { $0.cause == .endpointSpecificPathIssue }) {
-                for provider in r.stress?.affectedProviders ?? [] {
-                    kv("\(provider)SpecificPathIssue", "\(e.likelihood.rawValue) (endpointSpecificPathIssue; ICMP loss may be endpoint rate limiting)")
+                for target in r.stress?.lossConfirmation.affectedTargets ?? [] {
+                    kv("endpointSpecificPathIssue.\(target)", "\(e.likelihood.rawValue) (scope=this address + ICMP only; not inferred for other services of the same provider)")
                 }
             }
+            if let i = a.hypotheses.first(where: { $0.cause == .icmpRateLimitingOrPolicy }) {
+                kv("icmpRateLimitingOrPolicy", "\(i.likelihood.rawValue) (separate from server / route behaviour)")
+            }
+            kv("hypothesis_separation", "serverOrRouteSpecific=test-server behaviour (needs same-protocol / server-level reproduction for > medium); endpointSpecificPathIssue=route to one probed address; icmpRateLimitingOrPolicy=ICMP handling only")
             kv("recommended_next_tests", a.recommendedTests.map(\.test.rawValue).joined(separator: ","))
         }
 

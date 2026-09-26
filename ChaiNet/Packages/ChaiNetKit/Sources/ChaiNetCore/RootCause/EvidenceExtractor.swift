@@ -261,7 +261,7 @@ public struct EvidenceExtractor: Sendable {
                 add(.noConfirmedGeneralLoss, "獨立對照端點 \(clean) 無遺失：無廣泛性封包遺失證據（\(controlText)）", lc.confirmedLossPercent, "%")
                 if let e = st.elevatedAffectedEndpoints {
                     let list = e.endpoints.map { "\($0.target) \(Fmt.d($0.medianMs, 0)) ms" }.joined(separator: "、")
-                    add(.endpointLatencyElevatedVsPeers, "遺失端點延遲亦明顯高於獨立對照端點（\(list)，對照中位數 \(Fmt.d(e.peerMedianMs, 0)) ms；同為低頻 ICMP）",
+                    add(.endpointLatencyElevatedVsPeers, "遺失端點延遲亦明顯高於獨立對照端點（\(list)，對照中位數 \(Fmt.d(e.peerMedianMs, 0)) ms；同為低頻 ICMP；僅限這些位址，不代表同業者其他服務或 HTTP 路徑）",
                         e.endpoints.map { $0.medianMs }.max(), "ms")
                 }
             case .noLoss, .noConfirmedGeneralPacketLoss:
@@ -476,6 +476,9 @@ public struct EvidenceExtractor: Sendable {
 
     // MARK: Cross-test
 
+    /// Entry methods that mean "a speed-test server measured by the test itself".
+    static let serverMethods: Set<String> = ["speed test", "multi-server"]
+
     func crossEvidence(_ cross: CrossTestReport, measured: inout Set<EvidenceDimension>) -> [DiagnosticEvidence] {
         var out: [DiagnosticEvidence] = []
         var measuredNote = ""
@@ -491,7 +494,15 @@ public struct EvidenceExtractor: Sendable {
         case .allNormal:
             out.append(DiagnosticEvidence(code: .allServersNormal, statement: "\(total) 個獨立伺服器 / 端點的延遲與遺失皆正常（延遲探測，不含吞吐量）\(measuredNote)"))
         case .singleServerAnomalous:
-            out.append(DiagnosticEvidence(code: .singleServerAnomalous, statement: "僅 1 個伺服器異常：\(anomalousNames.joined(separator: "；"))，其他 \(total - 1) 個正常"))
+            // An independent validation endpoint (e.g. 1.1.1.1 over ICMP) is not the speed-test
+            // server: its behaviour is endpoint-specific, never evidence about the test server / route.
+            let anomalous = s.entries.first(where: \.isAnomalous)
+            if let a = anomalous, !Self.serverMethods.contains(a.method) {
+                out.append(DiagnosticEvidence(code: .endpointSpecificBehaviorObserved,
+                    statement: "僅獨立驗證端點 \(a.name)（\(a.method)）與其他端點不同：\(a.reasons.joined(separator: "、"))；只限此位址與此探測方式，不代表測速伺服器或同業者其他服務異常"))
+            } else {
+                out.append(DiagnosticEvidence(code: .singleServerAnomalous, statement: "僅 1 個伺服器異常：\(anomalousNames.joined(separator: "；"))，其他 \(total - 1) 個正常"))
+            }
         case .multipleServersAnomalous:
             out.append(DiagnosticEvidence(code: .multipleServersAnomalous, statement: "\(anomalousNames.count)/\(total) 個伺服器異常：\(anomalousNames.joined(separator: "；"))"))
         case .allServersAnomalous:

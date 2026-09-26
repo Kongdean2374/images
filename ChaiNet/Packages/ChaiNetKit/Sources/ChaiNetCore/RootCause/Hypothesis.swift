@@ -17,6 +17,9 @@ public enum RootCause: String, Codable, Sendable, Hashable, CaseIterable {
     /// Loss / elevated latency toward one provider's endpoints only (e.g. Cloudflare) while
     /// independent peers are clean. Exported as `<provider>SpecificPathIssue`.
     case endpointSpecificPathIssue
+    /// Loss / delay seen only by ICMP toward an endpoint: rate limiting or ICMP policy, not a
+    /// service or route fault.
+    case icmpRateLimitingOrPolicy
     case serverCapacityLimit
     case routingTransit
     case ipv6RoutingIssue
