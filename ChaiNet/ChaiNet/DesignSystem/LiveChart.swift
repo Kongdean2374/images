@@ -3,17 +3,26 @@ import ChaiNetCore
 
 /// Real-time throughput chart redrawn every display frame (up to 120 Hz on ProMotion).
 ///
-/// Samples arrive every 100 ms; between samples the head of the curve is interpolated from the
-/// previous to the newest sample, so the line grows continuously instead of jumping. The y-axis
-/// eases toward its new range and the x-axis stretches smoothly with elapsed time.
+/// Stability rules (so drawn data never "shakes"):
+///
+///     bins    fixed, time-aligned buckets of `binSeconds` (0.5 s, doubling for long tests);
+///             a completed bucket = bytes × 8 / duration and never changes afterwards
+///     head    the eased live readout at the interpolated current time (the only moving point)
+///     y-axis  niceCeiling(max(P90 of completed buckets × 1.25, head × 1.15)) eased over ~0.3 s —
+///             a single start-up burst can't pin the axis at 1–2 Gbps; values above it are clipped
 struct LiveThroughputChart: View {
+    /// Raw 100 ms samples of the current transfer.
     let samples: [SpeedSample]
     let lastSampleAt: Date?
     let unit: SpeedUnit
     let color: Color
     var style: ChartStyle = .area
     var averageMbps: Double?
+    /// Minimum bucket width (upload progress batching needs wider buckets).
+    var minimumBinSeconds: Double = 0.5
     var height: CGFloat = 180
+    /// Current readout (Mbps) for the head at a given frame time.
+    var head: (Date) -> Double? = { _ in nil }
 
     @State private var scale = LiveScale()
 
@@ -27,25 +36,57 @@ struct LiveThroughputChart: View {
         .accessibilityLabel("即時速度圖表")
     }
 
+    struct Bin: Equatable { var t: Double; var mbps: Double }
+
+    /// Completed, time-aligned buckets. Bucket i covers (i·b, (i+1)·b]; plotted at its end.
+    static func bins(_ samples: [SpeedSample], binSeconds b: Double) -> [Bin] {
+        guard let last = samples.last, b > 0 else { return [] }
+        let completed = Int((last.offset / b).rounded(.down))
+        guard completed > 0 else { return [] }
+        var bytes = [Int64](repeating: 0, count: completed)
+        var duration = [Double](repeating: 0, count: completed)
+        for s in samples {
+            let i = Int(((s.offset - 1e-9) / b).rounded(.down))
+            guard i >= 0, i < completed else { continue }
+            bytes[i] += s.intervalBytes
+            duration[i] += s.intervalDuration
+        }
+        return (0..<completed).compactMap { i in
+            duration[i] > 0 ? Bin(t: Double(i + 1) * b, mbps: Double(bytes[i]) * 8 / duration[i] / 1_000_000) : nil
+        }
+    }
+
+    /// 0.5, 1, 2, 4 … s so that at most ~1 bucket per 3 pt is drawn.
+    static func binSeconds(duration: Double, width: CGFloat, minimum: Double) -> Double {
+        var b = max(0.5, minimum)
+        while duration / b > Double(max(width, 60)) / 3 { b *= 2 }
+        return b
+    }
+
     private func draw(in g: inout GraphicsContext, size: CGSize, now: Date) {
-        let resolved = SpeedFormatter.resolve(unit, mbps: samples.map(\.mbps).max() ?? 1)
-        let k = resolved.perMbps
         let leftPad: CGFloat = 4, rightPad: CGFloat = 44, topPad: CGFloat = 10, bottomPad: CGFloat = 18
         let plot = CGRect(x: leftPad, y: topPad, width: size.width - leftPad - rightPad, height: size.height - topPad - bottomPad)
 
-        // Points up to an interpolated head between the last two samples.
-        var points: [(t: Double, v: Double)] = samples.map { ($0.offset, $0.mbps * k) }
-        if points.count >= 2, let last = samples.last, let at = lastSampleAt {
-            let prev = points[points.count - 2]
-            let head = points[points.count - 1]
-            let progress = min(1, max(0, now.timeIntervalSince(at) / max(last.intervalDuration, 0.05)))
-            points[points.count - 1] = (prev.t + (head.t - prev.t) * progress, prev.v + (head.v - prev.v) * progress)
+        // Current time between the last two samples (the head moves smoothly, data doesn't).
+        var tNow = samples.last?.offset ?? 0
+        if samples.count >= 2, let at = lastSampleAt {
+            let prev = samples[samples.count - 2].offset, last = samples[samples.count - 1].offset
+            tNow = prev + (last - prev) * min(1, max(0, now.timeIntervalSince(at) / max(last - prev, 0.05)))
         }
-        let tMax = max(5, points.last?.t ?? 5)
-        let target = LiveScale.niceCeiling((points.map(\.v).max() ?? 0) * 1.15)
-        let yMax = scale.step(toward: target, now: now)
+        let b = Self.binSeconds(duration: max(tNow, 1), width: plot.width, minimum: minimumBinSeconds)
+        let bins = Self.bins(samples, binSeconds: b).filter { $0.t <= tNow + 1e-6 }
+        let headMbps = head(now)
 
-        // Grid + y labels.
+        // Robust range: typical speed, not the single highest burst.
+        let sorted = bins.map(\.mbps).sorted()
+        let typical = sorted.isEmpty ? 0 : (sorted.count >= 3 ? Percentile.value(0.9, sorted: sorted)! : sorted.last!)
+        let robustMbps = max(typical * 1.25, (headMbps ?? 0) * 1.15)
+        let resolved = SpeedFormatter.resolve(unit, mbps: max(robustMbps, 0.001))
+        let k = resolved.perMbps
+        let yMax = scale.step(toward: LiveScale.niceCeiling(max(robustMbps * k, 0.1)), now: now)
+        let tMax = max(5, tNow)
+
+        // Grid + labels.
         let gridColor = Color.secondary.opacity(0.18)
         for i in 0...3 {
             let v = yMax * Double(i) / 3
@@ -63,21 +104,22 @@ struct LiveThroughputChart: View {
         g.draw(Text("\(Int(tMax.rounded())) 秒").font(.caption2.monospacedDigit()).foregroundStyle(.secondary),
                at: CGPoint(x: plot.maxX, y: plot.maxY + 3), anchor: .topTrailing)
 
-        guard !points.isEmpty else {
+        func position(_ t: Double, _ mbps: Double) -> CGPoint {
+            CGPoint(x: plot.minX + plot.width * CGFloat(t / tMax),
+                    y: plot.maxY - plot.height * CGFloat(min(mbps * k, yMax) / max(yMax, 0.001)))
+        }
+        var xy = [CGPoint(x: plot.minX, y: plot.maxY)] + bins.map { position($0.t, $0.mbps) }
+        if let headMbps, tNow > (bins.last?.t ?? 0) { xy.append(position(tNow, headMbps)) }
+        guard xy.count >= 2 else {
             g.draw(Text("等待資料…").font(.footnote).foregroundStyle(.secondary), at: CGPoint(x: plot.midX, y: plot.midY))
             return
         }
-        func position(_ p: (t: Double, v: Double)) -> CGPoint {
-            CGPoint(x: plot.minX + plot.width * CGFloat(p.t / tMax),
-                    y: plot.maxY - plot.height * CGFloat(min(p.v, yMax) / max(yMax, 0.001)))
-        }
-        let xy = Self.decimate(points.map(position), width: plot.width)
 
         if style == .bar {
-            let w = max(1.5, plot.width / CGFloat(max(xy.count, 1)) * 0.7)
-            for p in xy {
-                let r = CGRect(x: p.x - w / 2, y: p.y, width: w, height: plot.maxY - p.y)
-                g.fill(Path(roundedRect: r, cornerRadius: w / 2), with: .linearGradient(Gradient(colors: [color, color.opacity(0.35)]),
+            let w = max(1.5, plot.width * CGFloat(b / tMax) * 0.7)
+            for p in xy.dropFirst() {
+                let r = CGRect(x: p.x - w, y: p.y, width: w, height: plot.maxY - p.y)
+                g.fill(Path(roundedRect: r, cornerRadius: min(w / 2, 3)), with: .linearGradient(Gradient(colors: [color, color.opacity(0.35)]),
                        startPoint: CGPoint(x: 0, y: plot.minY), endPoint: CGPoint(x: 0, y: plot.maxY)))
             }
         } else {
@@ -87,19 +129,18 @@ struct LiveThroughputChart: View {
                 fill.addLine(to: CGPoint(x: xy.last!.x, y: plot.maxY))
                 fill.addLine(to: CGPoint(x: xy.first!.x, y: plot.maxY))
                 fill.closeSubpath()
-                g.fill(fill, with: .linearGradient(Gradient(colors: [color.opacity(0.42), color.opacity(0.02)]),
+                g.fill(fill, with: .linearGradient(Gradient(colors: [color.opacity(0.40), color.opacity(0.02)]),
                                                    startPoint: CGPoint(x: 0, y: plot.minY), endPoint: CGPoint(x: 0, y: plot.maxY)))
             }
-            // Soft glow under the stroke.
             g.drawLayer { layer in
-                layer.addFilter(.blur(radius: 5))
-                layer.stroke(curve, with: .color(color.opacity(0.55)), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                layer.addFilter(.blur(radius: 4))
+                layer.stroke(curve, with: .color(color.opacity(0.45)), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
-            g.stroke(curve, with: .color(color), style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+            g.stroke(curve, with: .color(color), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
         }
 
         if let avg = averageMbps, avg > 0 {
-            let y = plot.maxY - plot.height * CGFloat(min(avg * k, yMax) / max(yMax, 0.001))
+            let y = position(0, avg).y
             var line = Path()
             line.move(to: CGPoint(x: plot.minX, y: y))
             line.addLine(to: CGPoint(x: plot.maxX, y: y))
@@ -107,34 +148,17 @@ struct LiveThroughputChart: View {
             g.draw(Text("平均").font(.caption2).foregroundStyle(.secondary), at: CGPoint(x: plot.minX + 2, y: y - 2), anchor: .bottomLeading)
         }
 
-        // Pulsing head.
-        if let head = xy.last {
+        if let tip = xy.last {
             let phase = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
             let halo = 5 + 9 * phase
-            g.fill(Path(ellipseIn: CGRect(x: head.x - halo, y: head.y - halo, width: halo * 2, height: halo * 2)),
+            g.fill(Path(ellipseIn: CGRect(x: tip.x - halo, y: tip.y - halo, width: halo * 2, height: halo * 2)),
                    with: .color(color.opacity(0.35 * (1 - phase))))
-            g.fill(Path(ellipseIn: CGRect(x: head.x - 4, y: head.y - 4, width: 8, height: 8)), with: .color(color))
-            g.fill(Path(ellipseIn: CGRect(x: head.x - 1.8, y: head.y - 1.8, width: 3.6, height: 3.6)), with: .color(.white))
+            g.fill(Path(ellipseIn: CGRect(x: tip.x - 4, y: tip.y - 4, width: 8, height: 8)), with: .color(color))
+            g.fill(Path(ellipseIn: CGRect(x: tip.x - 1.8, y: tip.y - 1.8, width: 3.6, height: 3.6)), with: .color(.white))
         }
     }
 
-    /// At most ~1 point per 1.5 px (keeps long tests cheap to draw each frame); the head is kept.
-    static func decimate(_ points: [CGPoint], width: CGFloat) -> [CGPoint] {
-        let limit = max(2, Int(width / 1.5))
-        guard points.count > limit, let last = points.last else { return points }
-        let stride = Double(points.count) / Double(limit)
-        var out: [CGPoint] = []
-        out.reserveCapacity(limit + 1)
-        var i = 0.0
-        while Int(i) < points.count - 1 {
-            out.append(points[Int(i)])
-            i += stride
-        }
-        out.append(last)
-        return out
-    }
-
-    /// Monotone-ish Catmull-Rom spline through the points (no overshoot below zero).
+    /// Catmull-Rom spline (tension 1/6) through the points, clamped to the plot baseline.
     static func smoothPath(_ p: [CGPoint]) -> Path {
         var path = Path()
         guard let first = p.first else { return path }
@@ -155,7 +179,7 @@ struct LiveThroughputChart: View {
     }
 
     static func label(_ v: Double) -> String {
-        v >= 100 ? String(format: "%.0f", v) : (v >= 10 ? String(format: "%.0f", v) : String(format: "%.1f", v))
+        v >= 10 ? String(format: "%.0f", v) : (v >= 1 ? String(format: "%.1f", v) : String(format: "%.2f", v))
     }
 }
 
@@ -166,9 +190,10 @@ final class LiveScale {
 
     func step(toward target: Double, now: Date) -> Double {
         defer { last = now }
-        guard let last, value > 0 else { value = max(target, 1); return value }
+        guard let last, value > 0 else { value = target; return value }
         let dt = min(0.1, max(0, now.timeIntervalSince(last)))
-        value += (target - value) * (1 - exp(-dt * 7))
+        // Grow quickly (the line must not leave the chart), shrink a little slower.
+        value += (target - value) * (1 - exp(-dt * (target > value ? 12 : 6)))
         return value
     }
 
