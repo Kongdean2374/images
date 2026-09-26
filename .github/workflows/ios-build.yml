@@ -1,0 +1,126 @@
+name: Build Unsigned IPA
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths-ignore:
+      - '**/*.jpg'
+      - '**/*.png'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Archive & package
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          ls /Applications | grep -i xcode || true
+
+      - name: Regenerate Xcode project
+        run: |
+          python3 Scripts/generate_xcodeproj.py
+          xcodebuild -list -project GPSTracker.xcodeproj
+
+      - name: Archive (unsigned)
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project GPSTracker.xcodeproj \
+            -scheme GPSTracker \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/GPSTracker.xcarchive" \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            ENABLE_BITCODE=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            OTHER_SWIFT_FLAGS="\$(inherited) -Xfrontend -warn-long-function-bodies=400 -Xfrontend -warn-long-expression-type-checking=400" \
+            -showBuildTimingSummary \
+            | tee "$RUNNER_TEMP/build.log"
+
+      - name: Package unsigned IPA
+        id: package
+        run: |
+          set -e
+          APP_PATH="$RUNNER_TEMP/GPSTracker.xcarchive/Products/Applications/GPSTracker.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "找不到 .app：$APP_PATH"
+            ls -R "$RUNNER_TEMP/GPSTracker.xcarchive/Products" || true
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/"
+          # 側載自簽用：移除 CI 產生的空簽名資訊
+          rm -rf "$RUNNER_TEMP/Payload/GPSTracker.app/_CodeSignature" || true
+          mkdir -p build
+          IPA_NAME="GPSTracker-unsigned-${{ github.run_number }}.ipa"
+          (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/build/$IPA_NAME" Payload)
+          echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "ipa_path=build/$IPA_NAME" >> "$GITHUB_OUTPUT"
+          ls -lh "build/$IPA_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPSTracker-unsigned-ipa
+          path: build/*.ipa
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
+
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA_PATH: ${{ steps.package.outputs.ipa_path }}
+          RUN_NUMBER: ${{ github.run_number }}
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="build-$RUN_NUMBER"
+          NOTES="$RUNNER_TEMP/notes.md"
+          {
+            echo "未簽名 IPA，供側載自簽安裝使用。"
+            echo ""
+            echo "- Commit: $COMMIT_SHA"
+            echo "- 分支: $BRANCH_NAME"
+            echo "- 最低系統需求: iOS 17"
+            echo "- 安裝方式: 用 Sideloadly / AltStore / TrollStore 等工具自簽安裝"
+            echo ""
+            echo "簽名憑證與 provisioning profile 皆未進入 CI 環境。"
+          } > "$NOTES"
+          gh release create "$TAG" "$IPA_PATH" \
+            --target "$COMMIT_SHA" \
+            --title "GPS 軌跡記錄器 未簽名 IPA (build $RUN_NUMBER)" \
+            --notes-file "$NOTES"
+          gh release view "$TAG" --json url,assets
