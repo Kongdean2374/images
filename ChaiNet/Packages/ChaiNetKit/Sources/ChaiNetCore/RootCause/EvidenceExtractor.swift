@@ -449,18 +449,21 @@ public struct EvidenceExtractor: Sendable {
             }
             if let fd = L.fullDuplex {
                 measured.insert(.throughput)
-                let worst = [fd.downloadDegradationPercent, fd.uploadDegradationPercent].compactMap { $0 }.max()
+                let worst: Double? = [fd.downloadDegradationPercent, fd.uploadDegradationPercent].compactMap { $0 }.max()
                 if let worst, worst >= 25 {
                     add(.fullDuplexInterference, "上下行同時滿載：下載降 \(Fmt.d(fd.downloadDegradationPercent ?? 0, 0))%、上傳降 \(Fmt.d(fd.uploadDegradationPercent ?? 0, 0))%（相對單向，同節點同方法）", worst, "%")
                 }
             }
-            let inflations = [L.sustainedDownload?.latency?.inflationMs, L.sustainedUpload?.latency?.inflationMs, L.fullDuplex?.latency?.inflationMs].compactMap { $0 }
+            let inflations: [Double] = [L.sustainedDownload?.latency?.inflationMs, L.sustainedUpload?.latency?.inflationMs, L.fullDuplex?.latency?.inflationMs].compactMap { $0 }
             if let w = inflations.max(), w >= Self.loadedInflationThresholdMs {
                 measured.insert(.bufferbloat)
                 add(.loadCorrelatedLatencyInflation, "負載時控制延遲上升 \(Fmt.d(w, 0)) ms（同一固定目標與方法：\(L.monitor?.probe.target ?? "control")；佇列位置未知）", w, "ms")
             }
-            let idleLoss = L.monitor.map { m in m.samples.filter { $0.loadType == .idle } }.map { s in s.isEmpty ? 0 : Double(s.filter { $0.rttMs == nil }.count) / Double(s.count) * 100 } ?? 0
-            let loadLoss = [L.sustainedDownload?.latency?.lossPercent, L.sustainedUpload?.latency?.lossPercent, L.fullDuplex?.latency?.lossPercent].compactMap { $0 }.max()
+            let idleSamples: [MonitorSample] = (L.monitor?.samples ?? []).filter { $0.loadType == .idle }
+            let idleLost: Int = idleSamples.filter { $0.rttMs == nil }.count
+            let idleLoss: Double = idleSamples.isEmpty ? 0 : Double(idleLost) / Double(idleSamples.count) * 100
+            let lossCandidates: [Double?] = [L.sustainedDownload?.latency?.lossPercent, L.sustainedUpload?.latency?.lossPercent, L.fullDuplex?.latency?.lossPercent]
+            let loadLoss: Double? = lossCandidates.compactMap { $0 }.max()
             if let loadLoss, loadLoss >= 1, idleLoss < 0.5 {
                 add(.loadCorrelatedLoss, "負載時控制探測遺失 \(Fmt.d(loadLoss, 1))%，閒置時 \(Fmt.d(idleLoss, 1))%（同一探測）", loadLoss, "%")
             }
