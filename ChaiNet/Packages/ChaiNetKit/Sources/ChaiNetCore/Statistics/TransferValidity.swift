@@ -23,6 +23,8 @@ public struct TransferDiagnostics: Codable, Sendable, Hashable {
     public var errorSamples: [String] = []
     /// Bytes moved per parallel stream.
     public var perStreamBytes: [Int64] = []
+    /// Times all connections were rebuilt because no bytes moved for a few seconds (nil = never / older result).
+    public var stallRestarts: Int?
 
     public init() {}
 

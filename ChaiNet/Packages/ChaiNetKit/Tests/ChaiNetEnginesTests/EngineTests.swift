@@ -286,6 +286,30 @@ final class StressTestRunnerTests: XCTestCase {
         }
     }
 
+    /// The reported case: Cloudflare stops answering (HTTP 429) mid stress test. The load must not
+    /// sit at 0 Mbps — it continues on M-Lab NDT7, is labelled as a fallback, and later loads skip
+    /// the blocked endpoint.
+    func testBlockedHTTPEndpointFallsBackInsteadOfStalling() async throws {
+        struct Blocked: SpeedTestEngineProtocol {
+            func run(_ configuration: SpeedTestConfiguration) -> AsyncThrowingStream<SpeedTestEvent, Error> {
+                AsyncThrowingStream { $0.finish(throwing: EngineError.server("rateLimited: HTTP 429")) }
+            }
+        }
+        let monitor = ContinuousLatencyMonitor(probe: nil, descriptor: nil, clock: Stopwatch(), scale: 0.001)
+        let ctx = StressLoadContext(speed: Blocked(), ndt7: MockSpeedTestEngine(mbps: 300), monitor: monitor, environment: nil,
+                                    bytes: LockedValue((0, 0)), limits: .unlimited, scale: 0.001, emit: { _ in })
+        let run = try await ctx.runLoad(server: ServerDescriptor.builtIn[0], direction: .download, streams: 16, seconds: 20)
+        XCTAssertTrue(run.fallback)
+        XCTAssertNotNil(ctx.primaryBlocked.current)
+        let speed = try XCTUnwrap(run.speed)
+        XCTAssertGreaterThan(speed.summary.averageMbps, 0)
+        XCTAssertEqual(speed.samples.map(\.offset), speed.samples.map(\.offset).sorted(), "one continuous timeline")
+        XCTAssertTrue(run.method?.contains("NDT7") == true)
+        XCTAssertGreaterThan(ctx.bytes.current.down, 0)
+        let next = try await ctx.runLoad(server: ServerDescriptor.builtIn[0], direction: .upload, streams: 16, seconds: 5)
+        XCTAssertTrue(next.fallback, "later loads skip the blocked endpoint")
+    }
+
     func testOneFailingEndpointDoesNotFailTheTest() async throws {
         var runner = TestRunner.mock(sampleDelay: 0)
         runner.stressProbes = MockStressProbeFactory(unhealthyNodeIDs: ["mlab-ndt7", "quad9-dns"])

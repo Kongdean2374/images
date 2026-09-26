@@ -117,6 +117,10 @@ extension TestRunner {
                                                                     afterPhase: request.kind.rawValue,
                                                                     seconds: request.kind == .recovery ? 25 : 8, idleBaselineMs: idleMedian))
         }
+        if let blocked = ctx.primaryBlocked.current {
+            report.notes.append("http_endpoint_blocked=\(blocked)；之後的負載改用 M-Lab NDT7（單一連線，方法不同，不與 HTTP ×N 直接比較）")
+            result.notes.append("壓力負載期間 HTTP 測速端點停止回應（\(blocked)），其餘負載改用 M-Lab NDT7 繼續。")
+        }
         if ctx.capReached.current { report.notes.append("已達流量上限，負載提前結束。") }
         report.monitor = await monitor.stop()
         report.environment = await environment.stop()

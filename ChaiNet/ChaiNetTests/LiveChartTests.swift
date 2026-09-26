@@ -25,6 +25,17 @@ final class LiveChartTests: XCTestCase {
     }
 
     /// One start-up burst must not keep the axis at 1–2 Gbps for a 50 Mbps link.
+    /// The smooth curve passes through every point and never overshoots (no fake peak above the
+    /// highest value, no dip below zero).
+    func testSmoothCurveDoesNotOvershoot() {
+        let pts = [CGPoint(x: 0, y: 100), CGPoint(x: 10, y: 20), CGPoint(x: 20, y: 0), CGPoint(x: 30, y: 0), CGPoint(x: 40, y: 100)]
+        let box = LiveThroughputChart.linePath(pts).boundingRect
+        XCTAssertGreaterThanOrEqual(box.minY, -0.001)
+        XCTAssertLessThanOrEqual(box.maxY, 100.001)
+        XCTAssertEqual(box.minX, 0, accuracy: 0.001)
+        XCTAssertEqual(box.maxX, 40, accuracy: 0.001)
+    }
+
     func testRobustScaleIgnoresSingleBurst() {
         let bins = LiveThroughputChart.bins(samples(100, mbps: 50, burstAt: 2), binSeconds: 0.5)
         XCTAssertGreaterThan(bins.map(\.mbps).max()!, 300, "the burst is in the data")

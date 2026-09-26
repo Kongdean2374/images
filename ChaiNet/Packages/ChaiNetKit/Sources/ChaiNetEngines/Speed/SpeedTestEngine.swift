@@ -17,6 +17,10 @@ public struct SpeedTestConfiguration: Sendable {
     public var warmupDuration: Double
     /// Bytes requested per download request / sent per upload request.
     public var chunkBytes: Int
+    /// Stress loads: stop early (throw `EngineError.server("rateLimited …" / "stalled …")`) when the
+    /// endpoint answers 429 / 403 or no byte moves for `stallAbortSeconds`, so the caller can switch node.
+    public var abortWhenBlocked: Bool = false
+    public var stallAbortSeconds: Double = 6
 
     public init(server: ServerDescriptor, direction: TransferDirection, maxDuration: Double = 12, autoDuration: AutoDurationPolicy? = nil,
                 fixedStreams: Int? = nil, policy: StreamScalingPolicy = .default, byteCap: Int64? = nil,
@@ -84,17 +88,18 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let baseRequest = request
 
+        // A stream keeps retrying (with back-off) for the whole test instead of giving up after a
+        // few errors — otherwise a short outage left the rest of a long load at 0 Mbps.
         @Sendable func worker(_ stream: TransferStream) async {
             var failures = 0
-            while !Task.isCancelled {
+            while !Task.isCancelled && !stream.isInvalidated {
                 do {
                     try await stream.run(baseRequest, uploading: payload)
                     failures = 0
                 } catch {
-                    if Task.isCancelled { return }
+                    if Task.isCancelled || stream.isInvalidated { return }
                     failures += 1
-                    if failures > 5 { return }
-                    try? await Task.sleep(for: .milliseconds(100 * failures))
+                    try? await Task.sleep(for: .milliseconds(min(2_000, 150 * failures)))
                 }
             }
         }
@@ -103,12 +108,15 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
         var changes: [StreamChange] = []
         var activeCount = 0
         var cancelled = false
+        var blocked: String?
+        var stallRestarts = 0
 
         await withTaskGroup(of: Void.self) { group in
             func addStreams(to target: Int, at offset: Double) {
                 guard target > activeCount else { return }
                 for _ in activeCount..<target {
-                    let stream = TransferStream(counter: counter, timeout: max(10, c.maxDuration), collector: collector)
+                    // Idle timeout (no data for this long fails the request so it is retried on a fresh connection).
+                    let stream = TransferStream(counter: counter, timeout: min(max(4, c.maxDuration), 8), collector: collector)
                     streams.withLock { $0.append(stream) }
                     group.addTask { await worker(stream) }
                 }
@@ -121,6 +129,8 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
 
             var lastBytes: Int64 = 0
             var lastOffset = 0.0
+            var lastProgress = 0.0, lastRestart = 0.0
+            let stallSeconds = min(3, max(0.3, c.maxDuration * 0.2))
             var tick = 1
             let rampWindow = min(5, c.maxDuration * 0.4)
             var nextScaleCheck = 1.0
@@ -139,8 +149,31 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
                                          cumulativeBytes: bytes, activeStreams: activeCount)
                 samples.append(sample)
                 emit(.sample(sample))
+                if bytes > lastBytes { lastProgress = now }
                 lastBytes = bytes
                 lastOffset = now
+
+                // Stall watchdog: no byte for a few seconds → rebuild every connection (new sockets).
+                if now - lastProgress >= stallSeconds, now - lastRestart >= stallSeconds, now + stallSeconds < c.maxDuration {
+                    let target = activeCount
+                    for s in streams.current { s.invalidate() }
+                    activeCount = 0
+                    addStreams(to: target, at: now)
+                    stallRestarts += 1
+                    lastRestart = now
+                }
+                if c.abortWhenBlocked {
+                    let d = collector.snapshot(perStreamBytes: [])
+                    let refused = (d.statusCounts["429"] ?? 0) + (d.statusCounts["403"] ?? 0)
+                    if refused >= 2, now - lastProgress >= min(1.5, stallSeconds) {
+                        blocked = "rateLimited: HTTP \((d.statusCounts["429"] ?? 0) > 0 ? "429" : "403")"
+                        break
+                    }
+                    if now - lastProgress >= min(c.stallAbortSeconds, c.maxDuration * 0.5), now >= 1 {
+                        blocked = "stalled: no data for \(Int(now - lastProgress)) s"
+                        break
+                    }
+                }
 
                 if c.fixedStreams == nil, now >= nextScaleCheck, now <= rampWindow {
                     nextScaleCheck += 1
@@ -163,9 +196,11 @@ public struct URLSessionSpeedTestEngine: SpeedTestEngineProtocol {
         }
 
         if cancelled || Task.isCancelled { throw CancellationError() }
+        if let blocked { throw EngineError.server(blocked) }
         let summary = SpeedCalculator.summarize(samples: samples, streamChanges: changes, warmupDuration: c.warmupDuration)
         var result = SpeedResult(direction: c.direction, samples: samples, summary: summary, streamChanges: changes, wasCancelled: false)
         result.diagnostics = collector.snapshot(perStreamBytes: streams.current.map(\.bytes))
+        if stallRestarts > 0 { result.diagnostics?.stallRestarts = stallRestarts }
         result.measurementSource = c.direction == .download
             ? "client_bytes_received (URLSessionDataDelegate)" : "client_write_completion (URLSessionTaskDelegate didSendBodyData)"
         result.validity = TransferValidator.evaluate(result)

@@ -221,6 +221,10 @@ public struct StressLoadContext: Sendable {
     public var progress: LockedValue<StressProgress?>?
     /// Set once a load was skipped / cut because a data cap was reached.
     public var capReached = LockedValue(false)
+    /// Set once the HTTP endpoint refused (429 / 403) or stalled; later loads go to the fallback node.
+    public var primaryBlocked = LockedValue<String?>(nil)
+    /// Node used when the HTTP endpoint is blocked (M-Lab NDT7, repeated ≤ 10 s runs).
+    public var fallbackServer: ServerDescriptor? = .mlabNDT7
 
     public init(speed: any SpeedTestEngineProtocol, ndt7: any SpeedTestEngineProtocol, monitor: ContinuousLatencyMonitor,
                 environment: EnvironmentRecorder?, bytes: LockedValue<(down: Int64, up: Int64)>, limits: StressDataLimits, scale: Double,
@@ -240,6 +244,10 @@ public struct StressLoadContext: Sendable {
         public var speed: SpeedResult?
         public var error: String?
         public var skippedForCap: Bool
+        /// Method actually used when it differs from the requested one (fallback), else nil.
+        public var method: String? = nil
+        /// True when the load ran on the fallback node because the HTTP endpoint was blocked.
+        public var fallback: Bool = false
     }
 
     public func remaining(_ direction: TransferDirection) -> Int64? {
@@ -249,6 +257,8 @@ public struct StressLoadContext: Sendable {
 
     /// One load of `seconds` (real time; scaled internally). Never starts past a data cap and
     /// caps the running load at the remaining allowance. Endpoint failures are returned, not thrown.
+    /// If the HTTP endpoint rate-limits (429 / 403) or stalls, the rest of the load — and every later
+    /// load — runs on the fallback node instead of sitting at 0 Mbps; the result says so.
     public func runLoad(server: ServerDescriptor, direction: TransferDirection, streams: Int?, seconds: Double,
                         ndt7 useNDT7: Bool = false) async throws -> Run {
         let remaining = remaining(direction)
@@ -256,45 +266,106 @@ public struct StressLoadContext: Sendable {
             capReached.withLock { $0 = true }
             return Run(speed: nil, error: "dataCapReached", skippedForCap: true)
         }
-        let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, seconds * scale), autoDuration: nil,
+        if !useNDT7, let reason = primaryBlocked.current, let fallback = fallbackServer {
+            return try await fallbackLoad(fallback, direction: direction, seconds: seconds, reason: reason)
+        }
+        var config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, seconds * scale), autoDuration: nil,
                                             fixedStreams: useNDT7 ? nil : streams, byteCap: remaining)
-        let engine = useNDT7 ? ndt7 : speed
+        config.abortWhenBlocked = !useNDT7 && fallbackServer != nil
+        let started = Date()
+        do {
+            let (result, last) = try await stream(useNDT7 ? ndt7 : speed, config, direction: direction)
+            if let cap = remaining, last >= cap { capReached.withLock { $0 = true } }
+            return Run(speed: result, error: result == nil ? "未完成" : nil, skippedForCap: false)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch EngineError.server(let message) where message.hasPrefix("rateLimited") || message.hasPrefix("stalled") {
+            primaryBlocked.withLock { $0 = $0 ?? "\(server.name)：\(message)" }
+            emit(.note(direction == .download ? .download : .upload, "\(server.name) 停止回應（\(message)），改用 M-Lab NDT7 繼續負載"))
+            guard let fallback = fallbackServer else { return Run(speed: nil, error: message, skippedForCap: false) }
+            let left = seconds - Date().timeIntervalSince(started) / max(scale, 0.000_1)
+            guard left >= 2 else { return Run(speed: nil, error: message, skippedForCap: false) }
+            return try await fallbackLoad(fallback, direction: direction, seconds: left, reason: message)
+        } catch {
+            return Run(speed: nil, error: error.localizedDescription, skippedForCap: false)
+        }
+    }
+
+    /// Consumes one engine run: live samples (optionally shifted onto a longer timeline), byte
+    /// accounting, live load for the monitor and data-usage progress.
+    private func stream(_ engine: any SpeedTestEngineProtocol, _ config: SpeedTestConfiguration, direction: TransferDirection,
+                        offsetShift: Double = 0, byteShift: Int64 = 0) async throws -> (SpeedResult?, Int64) {
         var result: SpeedResult?
         var last: Int64 = 0
         var lastUsageEmit = Date.distantPast
-        do {
-            for try await event in engine.run(config) {
-                switch event {
-                case .sample(let s):
-                    emit(.speedSample(direction, s))
-                    let delta = s.cumulativeBytes - last
-                    last = s.cumulativeBytes
-                    bytes.withLock { if direction == .download { $0.down += delta } else { $0.up += delta } }
-                    monitor.setLoad(direction, mbps: s.mbps)
-                    if let progress, Date().timeIntervalSince(lastUsageEmit) >= 1 {
-                        lastUsageEmit = Date()
-                        let b = bytes.current
-                        let updated: StressProgress? = progress.withLock { (p: inout StressProgress?) -> StressProgress? in
-                            p?.downloadBytes = b.down
-                            p?.uploadBytes = b.up
-                            return p
-                        }
-                        if let updated { emit(.stressProgress(updated)) }
+        defer { monitor.setLoad(direction, mbps: nil) }
+        for try await event in engine.run(config) {
+            switch event {
+            case .sample(let s):
+                var shown = s
+                shown.offset += offsetShift
+                shown.cumulativeBytes += byteShift
+                emit(.speedSample(direction, shown))
+                let delta = s.cumulativeBytes - last
+                last = s.cumulativeBytes
+                bytes.withLock { if direction == .download { $0.down += delta } else { $0.up += delta } }
+                monitor.setLoad(direction, mbps: s.mbps)
+                if let progress, Date().timeIntervalSince(lastUsageEmit) >= 1 {
+                    lastUsageEmit = Date()
+                    let b = bytes.current
+                    let updated: StressProgress? = progress.withLock { (p: inout StressProgress?) -> StressProgress? in
+                        p?.downloadBytes = b.down
+                        p?.uploadBytes = b.up
+                        return p
                     }
-                case .streamsChanged(let n): emit(.streams(direction, n))
-                case .completed(let r): result = r
+                    if let updated { emit(.stressProgress(updated)) }
                 }
+            case .streamsChanged(let n): emit(.streams(direction, n))
+            case .completed(let r): result = r
             }
-        } catch is CancellationError {
-            monitor.setLoad(direction, mbps: nil)
-            throw CancellationError()
-        } catch {
-            monitor.setLoad(direction, mbps: nil)
-            return Run(speed: result, error: error.localizedDescription, skippedForCap: false)
         }
-        monitor.setLoad(direction, mbps: nil)
-        if let cap = remaining, last >= cap { capReached.withLock { $0 = true } }
-        return Run(speed: result, error: result == nil ? "未完成" : nil, skippedForCap: false)
+        return (result, last)
+    }
+
+    /// Repeated NDT7 runs (the protocol caps one run at 10 s) merged into one timeline.
+    private func fallbackLoad(_ server: ServerDescriptor, direction: TransferDirection, seconds: Double, reason: String) async throws -> Run {
+        var merged: [SpeedSample] = []
+        var offset = 0.0
+        var moved: Int64 = 0
+        var left = seconds
+        var lastError: String?
+        while left >= 2 {
+            try Task.checkCancellation()
+            let remaining = remaining(direction)
+            if let remaining, remaining <= 0 { capReached.withLock { $0 = true }; break }
+            let chunk = min(10, left)
+            let config = SpeedTestConfiguration(server: server, direction: direction, maxDuration: max(1, chunk * scale), autoDuration: nil,
+                                                fixedStreams: nil, byteCap: remaining)
+            do {
+                let (r, last) = try await stream(ndt7, config, direction: direction, offsetShift: offset, byteShift: moved)
+                for var s in r?.samples ?? [] {
+                    s.offset += offset
+                    s.cumulativeBytes += moved
+                    merged.append(s)
+                }
+                offset = merged.last?.offset ?? offset + chunk * scale
+                moved += last
+                if r == nil { lastError = "未完成"; break }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error.localizedDescription
+                break
+            }
+            left -= chunk
+        }
+        let method = "NDT7 WebSocket（fallback: \(reason)）"
+        guard !merged.isEmpty else { return Run(speed: nil, error: lastError ?? reason, skippedForCap: false, method: method, fallback: true) }
+        var result = SpeedResult(direction: direction, samples: merged, summary: SpeedCalculator.summarize(samples: merged, warmupDuration: 1.0),
+                                 streamChanges: [StreamChange(offset: 0, streams: 1)], wasCancelled: false)
+        result.measurementSource = "ndt7 fallback (client counters)"
+        result.validity = TransferValidator.evaluate(result)
+        return Run(speed: result, error: nil, skippedForCap: false, method: method, fallback: true)
     }
 
     /// Waits `seconds` of real time (scaled in tests).
@@ -318,7 +389,8 @@ public struct StreamRampEngine: Sendable {
             ctx.emit(.note(.download, "連線數階梯：\(n) 條連線"))
             let t0 = ctx.monitor.enter("ramp.s\(n)", phase: .streamRamp, load: .download)
             let run = try await ctx.runLoad(server: server, direction: .download, streams: n, seconds: stageSeconds)
-            if run.skippedForCap { break }
+            // A single-stream fallback cannot measure stream scaling: stop the ramp there.
+            if run.skippedForCap || run.fallback { break }
             let warm = min(1, stageSeconds * 0.3)
             guard let speed = run.speed, let stats = LoadStats.make(speed, warmup: warm) else { continue }
             let latency = LatencyUnderLoad.make(ctx.monitor.latencySamples(from: t0 + warm * ctx.scale, to: ctx.monitor.now), idleMedianMs: idleBaselineMs)
@@ -346,7 +418,8 @@ public struct SustainedLoadEngine: Sendable {
         let latency = LatencyUnderLoad.make(ctx.monitor.latencySamples(from: t0 + 1 * ctx.scale, to: end), idleMedianMs: idleBaselineMs)
         let pathChanges = ctx.monitor.samples(from: t0, to: end).map(\.interface)
         let changes = zip(pathChanges, pathChanges.dropFirst()).filter { $0 != $1 }.count
-        return SustainedLoadResult(direction: direction, method: "HTTP x\(streams)", targetNodeID: node.id, streams: streams, plannedSeconds: seconds,
+        return SustainedLoadResult(direction: direction, method: run.method ?? "HTTP x\(streams)", targetNodeID: run.fallback ? "mlab-ndt7" : node.id,
+                                   streams: run.fallback ? 1 : streams, plannedSeconds: seconds,
                                    throughput: LoadStats.make(run.speed), latency: latency, pathChanges: changes,
                                    thermalStateStart: thermalStart, thermalStateEnd: EnvironmentRecorder.thermalState(),
                                    samples: run.speed?.samples ?? [], error: run.skippedForCap ? "dataCapReached" : run.error)

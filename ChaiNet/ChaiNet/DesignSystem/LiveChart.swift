@@ -135,12 +135,48 @@ struct LiveThroughputChart: View {
         }
     }
 
-    /// Straight segments between the points (an honest chart line, no smoothing).
+    /// Smooth monotone cubic curve through the points (Fritsch–Carlson): rounded like a hand-drawn
+    /// line but never overshoots above a peak or below zero, and a segment only depends on its
+    /// neighbours, so already-drawn parts stay still while new data arrives.
     static func linePath(_ p: [CGPoint]) -> Path {
         var path = Path()
         guard let first = p.first else { return path }
         path.move(to: first)
-        p.dropFirst().forEach { path.addLine(to: $0) }
+        guard p.count > 2 else {
+            p.dropFirst().forEach { path.addLine(to: $0) }
+            return path
+        }
+        let n = p.count
+        var d = [CGFloat](repeating: 0, count: n - 1)
+        for i in 0..<(n - 1) {
+            let dx = p[i + 1].x - p[i].x
+            d[i] = dx > 0 ? (p[i + 1].y - p[i].y) / dx : 0
+        }
+        var m = [CGFloat](repeating: 0, count: n)
+        m[0] = d[0]
+        m[n - 1] = d[n - 2]
+        for i in 1..<(n - 1) {
+            m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2
+        }
+        for i in 0..<(n - 1) where d[i] == 0 {
+            m[i] = 0
+            m[i + 1] = 0
+        }
+        for i in 0..<(n - 1) where d[i] != 0 {
+            let a = m[i] / d[i], b = m[i + 1] / d[i]
+            let h = a * a + b * b
+            if h > 9 {
+                let t = 3 / h.squareRoot()
+                m[i] = t * a * d[i]
+                m[i + 1] = t * b * d[i]
+            }
+        }
+        for i in 0..<(n - 1) {
+            let dx = (p[i + 1].x - p[i].x) / 3
+            path.addCurve(to: p[i + 1],
+                          control1: CGPoint(x: p[i].x + dx, y: p[i].y + m[i] * dx),
+                          control2: CGPoint(x: p[i + 1].x - dx, y: p[i + 1].y - m[i + 1] * dx))
+        }
         return path
     }
 

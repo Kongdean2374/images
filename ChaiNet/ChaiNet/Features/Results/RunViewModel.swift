@@ -122,6 +122,15 @@ final class RunViewModel {
         return SpeedCalculator.summarize(samples: s)
     }
 
+    private func resetLive(_ d: TransferDirection) {
+        if d == .download { downloadSamples = [] } else { uploadSamples = [] }
+        displayMbps[d] = nil
+        displaySummary[d] = nil
+        displayFrom[d] = nil
+        displayChangedAt[d] = nil
+        lastSampleAt[d] = nil
+    }
+
     func samples(_ direction: TransferDirection) -> [SpeedSample] {
         direction == .download ? downloadSamples : uploadSamples
     }
@@ -264,6 +273,9 @@ final class RunViewModel {
         case .latencySample(let p, let s):
             latencySamples[p, default: []].append(s)
         case .speedSample(let d, let s):
+            // A sample whose offset goes back in time belongs to a new transfer (next ramp stage,
+            // burst cycle, retry…): start a fresh timeline instead of drawing two runs over each other.
+            if let last = samples(d).last, s.offset < last.offset { resetLive(d) }
             if d == .download { downloadSamples.append(s) } else { uploadSamples.append(s) }
             let now = Date()
             lastSampleAt[d] = now
@@ -286,14 +298,9 @@ final class RunViewModel {
             let newPhase = stressProgress?.phaseIndex != p.phaseIndex
             stressProgress = p
             guard newPhase else { break }
-            for (kind, d) in [(StressPhaseKind.downloadStress, TransferDirection.download), (.uploadStress, .upload)] where p.kind == kind {
-                if d == .download { downloadSamples = [] } else { uploadSamples = [] }
-                displayMbps[d] = nil
-                displaySummary[d] = nil
-                displayFrom[d] = nil
-                displayChangedAt[d] = nil
-                lastSampleAt[d] = nil
-            }
+            let share = p.kind.loadShare
+            if share.download > 0 { resetLive(.download) }
+            if share.upload > 0 { resetLive(.upload) }
         case .liveSample(let p, let series, let sample):
             if liveSeries[p]?[series] == nil { liveSeriesOrder[p, default: []].append(series) }
             liveSeries[p, default: [:]][series, default: []].append(sample)

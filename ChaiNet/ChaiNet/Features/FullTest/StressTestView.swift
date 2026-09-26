@@ -274,10 +274,14 @@ private struct StressProgressHeader: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let elapsed = vm.startedAt.map { context.date.timeIntervalSince($0) } ?? 0
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(title).font(.headline).lineLimit(1)
-                    Spacer()
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title).font(.headline).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
                     Text("\(Self.mmss(elapsed)) / 約 \(Self.mmss(estimated))").font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                        .fixedSize()
+                }
+                if let sub = subtitle {
+                    Text(sub).font(.caption).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
                 }
                 ProgressView(value: min(elapsed / max(estimated, 1), 1)).tint(Theme.critical)
                 if let p = vm.stressProgress {
@@ -320,12 +324,13 @@ private struct StressProgressHeader: View {
         }
     }
 
-    private var title: String {
-        guard let p = vm.stressProgress else { return "極限壓力測試進行中" }
-        var t = p.kind.title
-        if let r = p.round { t += " · 第 \(r) 輪" }
-        if let n = p.nodeName { t += " · \(n)" }
-        return t
+    /// Phase name on its own line (wraps instead of being cut off); round / node below it.
+    private var title: String { vm.stressProgress?.kind.title ?? "極限壓力測試進行中" }
+
+    private var subtitle: String? {
+        guard let p = vm.stressProgress else { return nil }
+        let parts = [p.round.map { "第 \($0) 輪" }, p.nodeName].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     static func mmss(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }

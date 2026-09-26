@@ -126,6 +126,8 @@ final class TransferDelegate: NSObject, URLSessionDataDelegate, @unchecked Senda
 final class TransferStream: @unchecked Sendable {
     let session: URLSession
     let delegate: TransferDelegate
+    private let invalidatedFlag = LockedValue(false)
+    var isInvalidated: Bool { invalidatedFlag.current }
 
     init(counter: ByteCounter, timeout: Double, collector: TransferCollector? = nil) {
         delegate = TransferDelegate(counter: counter, collector: collector)
@@ -156,6 +158,7 @@ final class TransferStream: @unchecked Sendable {
     }
 
     func invalidate() {
+        invalidatedFlag.withLock { $0 = true }
         session.invalidateAndCancel()
         delegate.failAll()
     }
