@@ -34,7 +34,7 @@ public final class EnvironmentRecorder: @unchecked Sendable {
 
     public func sampleOnce() async {
         let thermal = Self.thermalState()
-        let battery = (try? await withDeadline(2, fallback: (level: Double?.none, state: String?.none)) { await EnvironmentRecorder.battery() }) ?? (nil, nil)
+        let battery: (level: Double?, state: String?) = (try? await withDeadline(2, fallback: (level: Double?.none, state: String?.none)) { await EnvironmentRecorder.battery() }) ?? (nil, nil)
         var interface: String?, radio: String?
         if let networkInfo, let snap = (try? await withDeadline(3, fallback: nil) { Optional(await networkInfo.snapshot(includePublicIP: false)) }) ?? nil {
             interface = snap.primaryInterface.rawValue

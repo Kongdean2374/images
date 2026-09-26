@@ -247,8 +247,9 @@ public struct TestRunner: TestRunnerProtocol {
 
         emit(.phase(.preparing))
         let info = networkInfo
-        let snapshot = try await withDeadline(15, fallback: nil) { Optional(await info.snapshot(includePublicIP: true)) }
-            ?? (await info.snapshot(includePublicIP: false))
+        let fetched = try await withDeadline(15, fallback: nil) { Optional(await info.snapshot(includePublicIP: true)) }
+        let snapshot: NetworkSnapshot
+        if let fetched { snapshot = fetched } else { snapshot = await info.snapshot(includePublicIP: false) }
         emit(.network(snapshot))
         guard snapshot.status == .satisfied else { throw EngineError.noNetwork }
         var result = TestResult(kind: c.kind, network: snapshot)
