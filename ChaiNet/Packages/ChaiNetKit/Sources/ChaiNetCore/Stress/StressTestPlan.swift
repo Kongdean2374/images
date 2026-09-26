@@ -151,6 +151,18 @@ public struct TrafficEstimate: Codable, Sendable, Hashable {
     public var ceilingBytes: Int64?
     public var ceilingDownloadMbps: Double?
     public var ceilingUploadMbps: Double?
+
+    public init(downloadBytes: Int64, uploadBytes: Int64, assumedDownloadMbps: Double, assumedUploadMbps: Double,
+                ceilingBytes: Int64? = nil, ceilingDownloadMbps: Double? = nil, ceilingUploadMbps: Double? = nil) {
+        self.downloadBytes = downloadBytes
+        self.uploadBytes = uploadBytes
+        self.assumedDownloadMbps = assumedDownloadMbps
+        self.assumedUploadMbps = assumedUploadMbps
+        self.ceilingBytes = ceilingBytes
+        self.ceilingDownloadMbps = ceilingDownloadMbps
+        self.ceilingUploadMbps = ceilingUploadMbps
+    }
+
     public var totalBytes: Int64 { downloadBytes + uploadBytes }
     /// Range shown to the user: 70 % of the conservative point estimate up to
     /// max(130 % of it, the network type's fast-link ceiling).
