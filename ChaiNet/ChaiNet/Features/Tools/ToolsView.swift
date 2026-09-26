@@ -10,7 +10,7 @@ struct ToolsView: View {
                         Image(systemName: "flame.fill").font(.title2).foregroundStyle(Theme.critical)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("極限壓力測試").font(.headline).foregroundStyle(Theme.textPrimary)
-                            Text("最大負載 · 多節點 · 多輪 · 只需選擇時間 · AI / Engineer 匯出").font(.caption).foregroundStyle(Theme.textSecondary)
+                            Text("正常網速 → 飽和點 → 持續 / 全雙工 / 突發 / 多目的地壓力 → 恢復 · 只需選擇時間").font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(Theme.textSecondary)
@@ -60,7 +60,8 @@ struct ToolsView: View {
         case .dropMonitor: MonitorView(mode: .dropMonitor)
         case .serverBenchmark: ServerBenchmarkView()
         case .networkInfo: NetworkInfoView()
-        default: ToolRunView(tool: tool)
+        default:
+            if let kind = tool.stressKind { StressToolView(tool: tool, kind: kind) } else { ToolRunView(tool: tool) }
         }
     }
 }

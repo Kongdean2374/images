@@ -8,6 +8,24 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
     case continuousPing, dropMonitor
     case gaming, voice, streaming, obs
     case serverBenchmark, crossValidation, interfaceCompare, networkInfo
+    // Stress engines (same code as the Extreme Stress Test)
+    case stressRamp, stressSustainedDownload, stressSustainedUpload, stressFullDuplex, stressBurst, stressMultiDestination,
+         stressRecovery, stressPacketLoss
+
+    /// The stress engine this tool runs, if it is one.
+    var stressKind: StressToolKind? {
+        switch self {
+        case .stressRamp: .streamRamp
+        case .stressSustainedDownload: .sustainedDownload
+        case .stressSustainedUpload: .sustainedUpload
+        case .stressFullDuplex: .fullDuplex
+        case .stressBurst: .burst
+        case .stressMultiDestination: .multiDestination
+        case .stressRecovery: .recovery
+        case .stressPacketLoss: .packetLossStress
+        default: nil
+        }
+    }
 
     var id: String { rawValue }
 
@@ -36,6 +54,14 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .crossValidation: "多端點交叉驗證"
         case .interfaceCompare: "Wi-Fi / 行動網路比較"
         case .networkInfo: "網路介面資訊"
+        case .stressRamp: "連線數階梯（飽和點）"
+        case .stressSustainedDownload: "持續下載滿載"
+        case .stressSustainedUpload: "持續上傳滿載"
+        case .stressFullDuplex: "全雙工滿載"
+        case .stressBurst: "突發 / 階梯負載"
+        case .stressMultiDestination: "多目的地同時下載"
+        case .stressRecovery: "負載後恢復"
+        case .stressPacketLoss: "封包遺失壓力"
         }
     }
 
@@ -64,6 +90,14 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .crossValidation: "判斷是伺服器還是你的網路"
         case .interfaceCompare: "同時比較兩種介面延遲"
         case .networkInfo: "介面、IP、VPN、制式"
+        case .stressRamp: "1→32 條連線，找出吞吐量飽和點"
+        case .stressSustainedDownload: "固定連線數長時間滿載下載"
+        case .stressSustainedUpload: "長時間滿載上傳與上行排隊"
+        case .stressFullDuplex: "上下行同時滿載的互相影響"
+        case .stressBurst: "負載 / 閒置循環，量測恢復時間"
+        case .stressMultiDestination: "多個節點同時下載的總量"
+        case .stressRecovery: "滿載後延遲回到基準的時間"
+        case .stressPacketLoss: "50 pps 壓力探測 + 多端點對照"
         }
     }
 
@@ -92,6 +126,14 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .crossValidation: "checkmark.shield"
         case .interfaceCompare: "arrow.left.arrow.right"
         case .networkInfo: "info.circle"
+        case .stressRamp: "chart.line.uptrend.xyaxis"
+        case .stressSustainedDownload: "arrow.down.to.line"
+        case .stressSustainedUpload: "arrow.up.to.line"
+        case .stressFullDuplex: "arrow.up.arrow.down"
+        case .stressBurst: "waveform.path"
+        case .stressMultiDestination: "point.3.filled.connected.trianglepath.dotted"
+        case .stressRecovery: "arrow.uturn.backward.circle"
+        case .stressPacketLoss: "bolt.horizontal"
         }
     }
 
@@ -107,6 +149,8 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .mtu: .mtu
         case .continuousPing, .dropMonitor: .monitoring
         case .interfaceCompare: .interfaceCompare
+        case .stressRamp, .stressSustainedDownload, .stressSustainedUpload, .stressFullDuplex, .stressBurst, .stressMultiDestination,
+             .stressRecovery, .stressPacketLoss: .stressTool
         default: .fullSpeedTest
         }
     }
@@ -133,6 +177,8 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .crossValidation: [.crossValidation]
         case .interfaceCompare: [.interfaceCompare]
         case .serverBenchmark, .networkInfo: []
+        case .stressRamp, .stressSustainedDownload, .stressSustainedUpload, .stressFullDuplex, .stressBurst, .stressMultiDestination,
+             .stressRecovery, .stressPacketLoss: []
         }
     }
 
@@ -143,6 +189,7 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case monitoring = "監測"
         case quality = "情境品質"
         case environment = "伺服器與環境"
+        case stress = "壓力測試元件"
         var id: String { rawValue }
     }
 
@@ -154,6 +201,8 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .continuousPing, .dropMonitor: .monitoring
         case .gaming, .voice, .streaming, .obs: .quality
         case .serverBenchmark, .crossValidation, .interfaceCompare, .networkInfo: .environment
+        case .stressRamp, .stressSustainedDownload, .stressSustainedUpload, .stressFullDuplex, .stressBurst, .stressMultiDestination,
+             .stressRecovery, .stressPacketLoss: .stress
         }
     }
 }

@@ -87,8 +87,8 @@ struct StressTestView: View {
         let traffic = plan.trafficEstimate(downloadMbps: rates.download, uploadMbps: rates.upload, networkClass: cls)
 
         VStack(alignment: .leading, spacing: 8) {
-            Label("最大強度 · 多節點 · 多輪", systemImage: "flame.fill").font(.headline).foregroundStyle(Theme.critical)
-            Text("每個吞吐量節點以最大負載（HTTP 16 條連線、M-Lab NDT7）反覆下載 / 上傳，同時量測負載延遲、50 pps ICMP 壓力探測與低頻對照探測、負載後恢復、跨業者一致性、DNS / 協定、IPv4 / IPv6、路由與 MTU。測試時間越長，重複輪數越多。")
+            Label("最大強度 · 正常網速 + 壓力階段", systemImage: "flame.fill").font(.headline).foregroundStyle(Theme.critical)
+            Text("先量一輪正常網速（Cloudflare HTTP ×16，M-Lab NDT7 驗證）作為主要結果；再進行連線數階梯（找飽和點）、持續下載 / 上傳、上下行同時滿載、突發負載、多目的地同時下載，每段重負載後量恢復。全程以同一固定對照探測量延遲，另含 50 pps / 5 pps 封包遺失、DNS / 協定、IPv4 / IPv6、路由與 MTU。")
                 .font(.caption).foregroundStyle(Theme.textSecondary)
         }
         .cardStyle()
@@ -120,7 +120,7 @@ struct StressTestView: View {
                 Text("設定 \(StressProgressHeader.mmss(totalSeconds))，實際預估 \(StressProgressHeader.mmss(plan.estimatedSeconds))：\(Self.durationReasonText(reason))")
                     .font(.caption2).foregroundStyle(Theme.warning)
             }
-            Text("每個節點每輪下載 / 上傳各 \(Int(plan.transferSeconds.rounded())) 秒（M-Lab NDT7 依協定上限 10 秒）；健康檢查未通過的節點會略過，不影響整體測試。")
+            Text("正常網速每個節點下載 / 上傳各 \(Int(plan.transferSeconds.rounded())) 秒（M-Lab NDT7 依協定上限 10 秒）；超過 300 秒的時間優先分配給持續負載、全雙工與最終恢復。壓力結果與正常網速分開呈現。")
                 .font(.caption2).foregroundStyle(Theme.textSecondary)
         }
         .cardStyle()
@@ -365,7 +365,14 @@ struct StressResultView: View {
                 }
                 .cardStyle()
 
-                LazyVGrid(columns: columns, spacing: 12) { tiles(s) }
+                if let load = result.stressLoad {
+                    StressLoadSummaryCard(report: load, standardDownloadMbps: s.headlineMbps(.download), standardUploadMbps: s.headlineMbps(.upload))
+                }
+                LazyVGrid(columns: columns, spacing: 12) {
+                    tiles(s)
+                    if let load = result.stressLoad { StressLoadTiles(report: load) }
+                    diagnosticTiles
+                }
 
                 NavigationLink { StressTechnicalView(result: result) } label: {
                     Label("查看完整技術資料", systemImage: "list.bullet.rectangle").frame(maxWidth: .infinity)
@@ -401,8 +408,8 @@ struct StressResultView: View {
         let loaded = [s.loadedLatencyMs(.download), s.loadedLatencyMs(.upload)].compactMap { $0 }.max()
         let cv = [s.downloadAggregate, s.uploadAggregate].compactMap { $0 }.filter { $0.values.count >= 2 && $0.comparable }.compactMap(\.coefficientOfVariation).max()
         let large = s.downloadAggregate?.largeVariance == true || s.uploadAggregate?.largeVariance == true
-        MetricTile(title: "持續下載", value: dl.value, unit: dl.unit, caption: Self.headlineCaption(s, .download), symbol: "arrow.down.circle", tint: Theme.download)
-        MetricTile(title: "持續上傳", value: ul.value, unit: ul.unit, caption: Self.headlineCaption(s, .upload), symbol: "arrow.up.circle", tint: Theme.upload)
+        MetricTile(title: "正常下載", value: dl.value, unit: dl.unit, caption: Self.headlineCaption(s, .download), symbol: "arrow.down.circle", tint: Theme.download)
+        MetricTile(title: "正常上傳", value: ul.value, unit: ul.unit, caption: Self.headlineCaption(s, .upload), symbol: "arrow.up.circle", tint: Theme.upload)
         MetricTile(title: "下載穩定度", value: Format.number(s.stability(.download), digits: 0), unit: "%",
                    caption: Self.stabilityCaption(s.stabilityUnavailableReason(.download)), symbol: "waveform.path", tint: Theme.download)
         MetricTile(title: "上傳穩定度", value: Format.number(s.stability(.upload), digits: 0), unit: "%",
@@ -433,6 +440,28 @@ struct StressResultView: View {
                    symbol: "clock", tint: Theme.info)
         MetricTile(title: "總流量", value: Format.bytes(s.totalBytes), caption: "↓ \(Format.bytes(s.totalDownloadBytes)) ↑ \(Format.bytes(s.totalUploadBytes))",
                    symbol: "externaldrive", tint: Theme.info)
+    }
+
+    /// IPv4 / IPv6, DNS, QUIC and MTU at a glance (details in the technical view).
+    @ViewBuilder
+    private var diagnosticTiles: some View {
+        let r = result
+        if let f = r.ipFamilyComparison {
+            MetricTile(title: "IPv4 / IPv6", value: "\(Format.number(f.ipv4?.rtt?.median, digits: 0)) / \(Format.number(f.ipv6?.rtt?.median, digits: 0))", unit: "ms",
+                       caption: f.ipv6 == nil ? (f.ipv6Error.map { "IPv6：\($0)" } ?? "IPv6 不可用") : f.target, symbol: "number", tint: Theme.info)
+        }
+        if let best = r.dns?.ranked.first {
+            MetricTile(title: "DNS", value: Format.number(best.statistics.rtt?.median, digits: 0), unit: "ms", caption: "最快：\(best.resolver.name)",
+                       symbol: "globe", tint: Theme.info)
+        }
+        if let p = r.protocolProbe {
+            MetricTile(title: "QUIC 交握", value: Format.availability(p.quicHandshakeMs) { Format.number($0, digits: 0) }, unit: "",
+                       caption: p.host, symbol: "bolt.horizontal.circle", tint: Theme.info)
+        }
+        if let m = r.mtu {
+            MetricTile(title: "路徑 MTU", value: m.pathMTU.map(String.init) ?? Format.dash, unit: "bytes", caption: "IPv4 → \(m.target)",
+                       symbol: "ruler", tint: Theme.info)
+        }
     }
 
     /// Headline scope: a cross-provider median only when every node used the same method; otherwise
@@ -471,6 +500,9 @@ struct StressTechnicalView: View {
         ScrollView {
             VStack(spacing: 16) {
                 if let s = result.stress {
+                    if let load = result.stressLoad {
+                        StressLoadTechnicalSections(report: load)
+                    }
                     section("實際流量與時間") {
                         KeyValueRow(key: "下載", value: Format.bytes(s.totalDownloadBytes))
                         KeyValueRow(key: "上傳", value: Format.bytes(s.totalUploadBytes))

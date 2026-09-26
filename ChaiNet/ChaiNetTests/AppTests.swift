@@ -101,6 +101,12 @@ final class AppTests: XCTestCase {
         }
     }
 
+    func testEveryStressEngineIsInTheToolbox() {
+        let kinds = Set(Tool.allCases.compactMap(\.stressKind))
+        XCTAssertEqual(kinds, Set(StressToolKind.allCases))
+        XCTAssertTrue(Tool.allCases.filter { $0.stressKind != nil }.allSatisfy { $0.kind == .stressTool })
+    }
+
     func testRecommendedTestMapping() {
         XCTAssertEqual(DiagnosticSessionViewModel.items(for: .compareIPFamilies), [.ipFamilies])
         XCTAssertTrue(DiagnosticSessionViewModel.isManual(.repeatOnLTE), "iOS can't switch radio technology itself")

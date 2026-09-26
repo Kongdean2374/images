@@ -112,6 +112,20 @@ public struct LoadStats: Codable, Sendable, Hashable {
                          bytes: speed.samples.last?.cumulativeBytes ?? 0, durationSeconds: speed.samples.last?.offset ?? 0,
                          samplingArtifact: !m.shortWindowReliable)
     }
+
+    public init(averageMbps: Double, medianMbps: Double, p10Mbps: Double, p95Mbps: Double, peakMbps: Double, initialMbps: Double? = nil, finalMbps: Double? = nil, degradationPercent: Double? = nil, bytes: Int64, durationSeconds: Double, samplingArtifact: Bool) {
+        self.averageMbps = averageMbps
+        self.medianMbps = medianMbps
+        self.p10Mbps = p10Mbps
+        self.p95Mbps = p95Mbps
+        self.peakMbps = peakMbps
+        self.initialMbps = initialMbps
+        self.finalMbps = finalMbps
+        self.degradationPercent = degradationPercent
+        self.bytes = bytes
+        self.durationSeconds = durationSeconds
+        self.samplingArtifact = samplingArtifact
+    }
 }
 
 /// Control latency during a load phase compared with the idle control baseline (same probe).
@@ -134,6 +148,17 @@ public struct LatencyUnderLoad: Codable, Sendable, Hashable {
                                 lossPercent: s.sent > 0 ? s.loss.lossPercent : nil, sampleCount: s.sent, idleMedianMs: idleMedianMs,
                                 inflationMs: median.flatMap { m in idleMedianMs.map { m - $0 } })
     }
+
+    public init(medianMs: Double? = nil, p95Ms: Double? = nil, p99Ms: Double? = nil, jitterMs: Double? = nil, lossPercent: Double? = nil, sampleCount: Int, idleMedianMs: Double? = nil, inflationMs: Double? = nil) {
+        self.medianMs = medianMs
+        self.p95Ms = p95Ms
+        self.p99Ms = p99Ms
+        self.jitterMs = jitterMs
+        self.lossPercent = lossPercent
+        self.sampleCount = sampleCount
+        self.idleMedianMs = idleMedianMs
+        self.inflationMs = inflationMs
+    }
 }
 
 // MARK: - Adaptive stream ramp
@@ -145,6 +170,14 @@ public struct StreamRampStage: Codable, Sendable, Hashable {
     /// Gain of this stage's average over the previous stage's (%); nil for the first stage.
     public var gainPercent: Double?
     public var samples: [SpeedSample]
+
+    public init(streamCount: Int, throughput: LoadStats, latency: LatencyUnderLoad? = nil, gainPercent: Double? = nil, samples: [SpeedSample]) {
+        self.streamCount = streamCount
+        self.throughput = throughput
+        self.latency = latency
+        self.gainPercent = gainPercent
+        self.samples = samples
+    }
 }
 
 /// Saturation search: streams 1, 2, 4, 8, 16, 24, 32 until throughput stops growing.
@@ -213,6 +246,21 @@ public struct StreamRampResult: Codable, Sendable, Hashable {
 
     /// Streams the later stress phases use: saturation point, else the optimal count, else 16.
     public var recommendedStreams: Int { saturationStreamCount ?? optimalStreamCount ?? 16 }
+
+    public init(direction: TransferDirection, method: String, targetNodeID: String, stages: [StreamRampStage], saturationDetected: Bool, saturationStreamCount: Int? = nil, saturationThroughputMbps: Double? = nil, optimalStreamCount: Int? = nil, maxObservedStreamCount: Int, marginalGainPercent: Double? = nil, scalingEfficiency0_100: Double? = nil, connectionEfficiencyMbpsPerStream: Double? = nil) {
+        self.direction = direction
+        self.method = method
+        self.targetNodeID = targetNodeID
+        self.stages = stages
+        self.saturationDetected = saturationDetected
+        self.saturationStreamCount = saturationStreamCount
+        self.saturationThroughputMbps = saturationThroughputMbps
+        self.optimalStreamCount = optimalStreamCount
+        self.maxObservedStreamCount = maxObservedStreamCount
+        self.marginalGainPercent = marginalGainPercent
+        self.scalingEfficiency0_100 = scalingEfficiency0_100
+        self.connectionEfficiencyMbpsPerStream = connectionEfficiencyMbpsPerStream
+    }
 }
 
 // MARK: - Sustained / full duplex / burst / multi-destination
@@ -230,6 +278,21 @@ public struct SustainedLoadResult: Codable, Sendable, Hashable {
     public var thermalStateEnd: String?
     public var samples: [SpeedSample]
     public var error: String?
+
+    public init(direction: TransferDirection, method: String, targetNodeID: String, streams: Int, plannedSeconds: Double, throughput: LoadStats? = nil, latency: LatencyUnderLoad? = nil, pathChanges: Int, thermalStateStart: String? = nil, thermalStateEnd: String? = nil, samples: [SpeedSample], error: String? = nil) {
+        self.direction = direction
+        self.method = method
+        self.targetNodeID = targetNodeID
+        self.streams = streams
+        self.plannedSeconds = plannedSeconds
+        self.throughput = throughput
+        self.latency = latency
+        self.pathChanges = pathChanges
+        self.thermalStateStart = thermalStateStart
+        self.thermalStateEnd = thermalStateEnd
+        self.samples = samples
+        self.error = error
+    }
 }
 
 public struct FullDuplexResult: Codable, Sendable, Hashable {
@@ -256,6 +319,21 @@ public struct FullDuplexResult: Codable, Sendable, Hashable {
         guard let ref = uploadOnlyReferenceMbps, ref > 0, let u = upload?.averageMbps else { return nil }
         return (ref - u) / ref * 100
     }
+
+    public init(targetNodeID: String, downloadStreams: Int, uploadStreams: Int, plannedSeconds: Double, download: LoadStats? = nil, upload: LoadStats? = nil, downloadOnlyReferenceMbps: Double? = nil, uploadOnlyReferenceMbps: Double? = nil, latency: LatencyUnderLoad? = nil, downloadSamples: [SpeedSample], uploadSamples: [SpeedSample], queueLocation: String = "unknown") {
+        self.targetNodeID = targetNodeID
+        self.downloadStreams = downloadStreams
+        self.uploadStreams = uploadStreams
+        self.plannedSeconds = plannedSeconds
+        self.download = download
+        self.upload = upload
+        self.downloadOnlyReferenceMbps = downloadOnlyReferenceMbps
+        self.uploadOnlyReferenceMbps = uploadOnlyReferenceMbps
+        self.latency = latency
+        self.downloadSamples = downloadSamples
+        self.uploadSamples = uploadSamples
+        self.queueLocation = queueLocation
+    }
 }
 
 /// One idle → load → idle cycle.
@@ -277,6 +355,22 @@ public struct BurstCycle: Codable, Sendable, Hashable {
     public var lossPercent: Double?
     public var bytes: Int64
     public var samples: [SpeedSample]
+
+    public init(index: Int, loadSeconds: Double, idleSeconds: Double, burstStartLatencyMs: Double? = nil, peakLoadedLatencyMs: Double? = nil, throughputMbps: Double? = nil, throughputRampTimeMs: Double? = nil, queueBuildTimeMs: Double? = nil, recoveryTimeMs: Double? = nil, postBurstLatencyMs: Double? = nil, lossPercent: Double? = nil, bytes: Int64, samples: [SpeedSample]) {
+        self.index = index
+        self.loadSeconds = loadSeconds
+        self.idleSeconds = idleSeconds
+        self.burstStartLatencyMs = burstStartLatencyMs
+        self.peakLoadedLatencyMs = peakLoadedLatencyMs
+        self.throughputMbps = throughputMbps
+        self.throughputRampTimeMs = throughputRampTimeMs
+        self.queueBuildTimeMs = queueBuildTimeMs
+        self.recoveryTimeMs = recoveryTimeMs
+        self.postBurstLatencyMs = postBurstLatencyMs
+        self.lossPercent = lossPercent
+        self.bytes = bytes
+        self.samples = samples
+    }
 }
 
 public struct BurstResult: Codable, Sendable, Hashable {
@@ -305,6 +399,14 @@ public struct BurstResult: Codable, Sendable, Hashable {
         let unrec = Double(unrecoveredCycles) / Double(cycles.count) * 30
         return max(0, min(100, 100 - rec - unrec - (lossPercent ?? 0) * 10))
     }
+
+    public init(targetNodeID: String, method: String, streams: Int, cycles: [BurstCycle], idleBaselineMs: Double? = nil) {
+        self.targetNodeID = targetNodeID
+        self.method = method
+        self.streams = streams
+        self.cycles = cycles
+        self.idleBaselineMs = idleBaselineMs
+    }
 }
 
 public struct DestinationLoad: Codable, Sendable, Hashable {
@@ -315,6 +417,16 @@ public struct DestinationLoad: Codable, Sendable, Hashable {
     public var streamCount: Int
     public var throughput: LoadStats?
     public var samples: [SpeedSample]
+
+    public init(nodeID: String, name: String, provider: StressProvider, method: String, streamCount: Int, throughput: LoadStats? = nil, samples: [SpeedSample]) {
+        self.nodeID = nodeID
+        self.name = name
+        self.provider = provider
+        self.method = method
+        self.streamCount = streamCount
+        self.throughput = throughput
+        self.samples = samples
+    }
 }
 
 /// Several destinations downloading at the same time. A saturation-load indicator, never a
@@ -333,6 +445,13 @@ public struct MultiDestinationResult: Codable, Sendable, Hashable {
     public var singleDestinationLimitationPossible: Bool {
         guard let best = bestSingleStandardMbps, best > 0, destinations.count >= 2 else { return false }
         return aggregateMbps >= 1.2 * best
+    }
+
+    public init(plannedSeconds: Double, destinations: [DestinationLoad], latency: LatencyUnderLoad? = nil, bestSingleStandardMbps: Double? = nil) {
+        self.plannedSeconds = plannedSeconds
+        self.destinations = destinations
+        self.latency = latency
+        self.bestSingleStandardMbps = bestSingleStandardMbps
     }
 }
 
@@ -376,6 +495,21 @@ public struct RecoveryResult: Codable, Sendable, Hashable {
                               samples: ordered, recoveryTime10PercentMs: t10, recoveryTime20PercentMs: within(0.20),
                               complete: t10 != nil, lossPercent: stats.sent > 0 ? stats.loss.lossPercent : nil,
                               jitterMs: stats.rtt?.jitter, medianMs: stats.rtt?.median, spikeCount: spikes)
+    }
+
+    public init(kind: String, afterPhase: String, plannedSeconds: Double, baselineMedianMs: Double? = nil, samples: [LatencySample], recoveryTime10PercentMs: Double? = nil, recoveryTime20PercentMs: Double? = nil, complete: Bool, lossPercent: Double? = nil, jitterMs: Double? = nil, medianMs: Double? = nil, spikeCount: Int) {
+        self.kind = kind
+        self.afterPhase = afterPhase
+        self.plannedSeconds = plannedSeconds
+        self.baselineMedianMs = baselineMedianMs
+        self.samples = samples
+        self.recoveryTime10PercentMs = recoveryTime10PercentMs
+        self.recoveryTime20PercentMs = recoveryTime20PercentMs
+        self.complete = complete
+        self.lossPercent = lossPercent
+        self.jitterMs = jitterMs
+        self.medianMs = medianMs
+        self.spikeCount = spikeCount
     }
 }
 
@@ -497,6 +631,19 @@ public struct CrossLoadImpact: Codable, Sendable, Hashable {
                                idleLatencyMs: r.idleControlMedianMs, downloadLoadedLatencyMs: r.sustainedDownload?.latency?.medianMs,
                                uploadLoadedLatencyMs: r.sustainedUpload?.latency?.medianMs, fullDuplexLoadedLatencyMs: fd.latency?.medianMs)
     }
+
+    public init(downloadOnlyMbps: Double? = nil, uploadOnlyMbps: Double? = nil, fullDuplexDownloadMbps: Double? = nil, fullDuplexUploadMbps: Double? = nil, downloadLossDueToUploadPercent: Double? = nil, uploadLossDueToDownloadPercent: Double? = nil, idleLatencyMs: Double? = nil, downloadLoadedLatencyMs: Double? = nil, uploadLoadedLatencyMs: Double? = nil, fullDuplexLoadedLatencyMs: Double? = nil) {
+        self.downloadOnlyMbps = downloadOnlyMbps
+        self.uploadOnlyMbps = uploadOnlyMbps
+        self.fullDuplexDownloadMbps = fullDuplexDownloadMbps
+        self.fullDuplexUploadMbps = fullDuplexUploadMbps
+        self.downloadLossDueToUploadPercent = downloadLossDueToUploadPercent
+        self.uploadLossDueToDownloadPercent = uploadLossDueToDownloadPercent
+        self.idleLatencyMs = idleLatencyMs
+        self.downloadLoadedLatencyMs = downloadLoadedLatencyMs
+        self.uploadLoadedLatencyMs = uploadLoadedLatencyMs
+        self.fullDuplexLoadedLatencyMs = fullDuplexLoadedLatencyMs
+    }
 }
 
 /// Stress sub-scores (0–100). Speed alone never earns a high score: latency under load, recovery
@@ -539,6 +686,15 @@ public struct StressLoadScores: Codable, Sendable, Hashable {
         let all = [s.saturationStability, s.fullDuplex, s.burstResilience, s.recovery, s.loadedLatency].compactMap { $0 }
         s.stressEndurance = all.isEmpty ? nil : Int((Double(all.reduce(0, +)) / Double(all.count)).rounded())
         return s
+    }
+
+    public init(saturationStability: Int? = nil, fullDuplex: Int? = nil, burstResilience: Int? = nil, recovery: Int? = nil, loadedLatency: Int? = nil, stressEndurance: Int? = nil) {
+        self.saturationStability = saturationStability
+        self.fullDuplex = fullDuplex
+        self.burstResilience = burstResilience
+        self.recovery = recovery
+        self.loadedLatency = loadedLatency
+        self.stressEndurance = stressEndurance
     }
 }
 
