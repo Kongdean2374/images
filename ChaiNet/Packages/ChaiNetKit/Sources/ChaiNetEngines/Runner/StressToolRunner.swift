@@ -62,7 +62,7 @@ extension TestRunner {
         case .streamRamp:
             let stages = StreamRampResult.defaultStages.filter { $0 <= streams }
             report.streamRamp = try await StreamRampEngine().run(ctx, node: target, server: server, stages: stages,
-                                                                 stageSeconds: max(2, seconds / Double(max(stages.count, 1))),
+                                                                 stageSeconds: max(2, request.durationSeconds),
                                                                  maxStreams: streams, idleBaselineMs: idleMedian)
         case .sustainedDownload:
             report.sustainedDownload = try await SustainedLoadEngine().run(ctx, node: target, server: server, direction: .download,
