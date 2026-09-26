@@ -212,7 +212,8 @@ final class GPSWorkoutRecorder: ObservableObject {
                                              steps: pedometer.steps,
                                              pace: currentPace ?? averagePace,
                                              statusText: isAutoPaused ? "自動暫停"
-                                                : (state == .paused ? "已暫停" : "記錄中"),
+                                                : (state == .paused ? "已暫停"
+                                                   : (isAssisted ? "無定位・持續記錄" : "記錄中")),
                                              isPaused: state != .recording,
                                              force: force)
     }
@@ -442,6 +443,9 @@ final class GPSWorkoutRecorder: ObservableObject {
                               reasonRaw: assistReason.rawValue)
         coverageGaps.append(gap)
         justResumedFromGap = true
+        // 濾波器裡還留著中斷前的位置，不重置的話恢復後的第一個點
+        // 會被拖到兩地中間，軌跡就接錯了
+        kalman.reset()
         DiagnosticsLog.shared.log(.warning, category: "location", "定位中斷後恢復",
                                   detail: ["原因": assistReason.displayName,
                                            "持續": String(format: "%.0f 秒", gap.duration),
@@ -536,6 +540,9 @@ final class GPSWorkoutRecorder: ObservableObject {
             lastValidSpeed = raw.speed
             currentSpeed = raw.speed
         }
+
+        // 讓濾波器跟得上當下速度，否則騎車時平滑後的座標會一直落在後方
+        kalman.adapt(toSpeed: max(currentSpeed, lastValidSpeed))
 
         let smoothed = kalman.process(latitude: raw.coordinate.latitude,
                                       longitude: raw.coordinate.longitude,

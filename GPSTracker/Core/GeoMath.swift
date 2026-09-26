@@ -41,8 +41,12 @@ enum GeoMath {
 /// 一維自適應卡爾曼濾波器（Stochastic Models 常用的 GPS 平滑法）。
 /// 以測量精度（accuracy）作為觀測雜訊，逐點平滑經緯度與海拔。
 final class GPSKalmanFilter {
-    /// 預期移動速度（公尺/秒），決定製程雜訊大小
-    private let processNoise: Double
+    /// 預期移動速度（公尺/秒），決定製程雜訊大小。
+    ///
+    /// 這個值要跟實際移動速度相稱：太小的話濾波器會「跟不上」，
+    /// 平滑後的座標一直落在真實位置後方，騎車時軌跡看起來就會整條偏掉。
+    /// 因此改成可隨當下速度調整，而不是固定給跑步用的數值。
+    private var processNoise: Double
     private var variance: Double = -1
     private var latitude: Double = 0
     private var longitude: Double = 0
@@ -55,6 +59,14 @@ final class GPSKalmanFilter {
 
     func reset() {
         variance = -1
+    }
+
+    /// 依當下速度調整製程雜訊。走路跑步維持原本的靈敏度，
+    /// 單車等高速活動要放大，濾波器才跟得上。
+    func adapt(toSpeed speed: Double) {
+        let target = max(1.6, min(12.0, speed * 1.3))
+        // 平滑變動，避免忽大忽小
+        processNoise = processNoise * 0.8 + target * 0.2
     }
 
     /// 回傳平滑後的座標與海拔。
