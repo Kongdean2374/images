@@ -53,9 +53,22 @@
     var c = $('#starfield');
     if (!c || !c.getContext) return;
     var ctx = c.getContext('2d');
-    var w = 0, h = 0, stars = [], raf = null;
+    var w = 0, h = 0, stars = [], lamps = [], raf = null, lampFade = 1;
 
     function seed() {
+      /* 遠處幾盞看不清楚的燈，位置固定、只微微呼吸 */
+      lamps = [];
+      var spots = [[0.14, 0.70], [0.37, 0.765], [0.82, 0.735], [0.63, 0.80]];
+      for (var k = 0; k < spots.length; k++) {
+        var lx = spots[k][0] * w, ly = spots[k][1] * h;
+        var rad = 26 + k * 7;
+        var g = ctx.createRadialGradient(lx, ly, 0, lx, ly, rad);
+        g.addColorStop(0, 'rgba(255,196,128,.30)');
+        g.addColorStop(0.38, 'rgba(255,178,87,.09)');
+        g.addColorStop(1, 'rgba(255,178,87,0)');
+        lamps.push({ x: lx, y: ly, r: rad, g: g, ph: k * 1.7, core: 1 + (k % 2) * 0.5 });
+      }
+
       var n = Math.max(40, Math.min(130, Math.round((w * h) / 13000)));
       stars = [];
       for (var i = 0; i < n; i++) {
@@ -84,6 +97,25 @@
 
     function draw(t) {
       ctx.clearRect(0, 0, w, h);
+
+      /* 捲離首屏的過程中，遠處的燈慢慢淡出 */
+      lampFade = Math.max(0, 1 - window.pageYOffset / (h * 0.72));
+
+      for (var k = 0; lampFade > 0.01 && k < lamps.length; k++) {
+        var L = lamps[k];
+        var b = (reduce ? 1 : (0.82 + 0.18 * Math.sin(t / 2600 + L.ph))) * lampFade;
+        ctx.globalAlpha = b;
+        ctx.fillStyle = L.g;
+        ctx.beginPath();
+        ctx.arc(L.x, L.y, L.r, 0, 6.2832);
+        ctx.fill();
+        ctx.globalAlpha = b * 0.9;
+        ctx.fillStyle = '#ffd9a8';
+        ctx.beginPath();
+        ctx.arc(L.x, L.y, L.core, 0, 6.2832);
+        ctx.fill();
+      }
+
       for (var i = 0; i < stars.length; i++) {
         var s = stars[i];
         if (s.vy) { s.y += s.vy; if (s.y < -4) { s.y = h + 4; s.x = Math.random() * w; } }
@@ -99,7 +131,10 @@
 
     function loop(t) { draw(t); raf = requestAnimationFrame(loop); }
     function start() { if (!reduce && raf === null) raf = requestAnimationFrame(loop); }
-    function stop() { if (raf !== null) { cancelAnimationFrame(raf); raf = null; } }
+    function stop() {
+      if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
+      draw(performance.now());   /* 收尾一幀，把已經淡出的燈畫掉 */
+    }
 
     resize();
     start();
@@ -125,7 +160,15 @@
 
   /* ── 進場動畫 ───────────────────────────────────────── */
   (function () {
-    var targets = $$('.sec__head, .intro, .ava, .intro__t, .traits, .talk, .lede, .tags, .save, .sub, .roster, .chart, .wall .ph, .dir__col, .quote, .quote__btns');
+    var targets = $$([
+      '.sec__head', '.prof__side > *', '.figure', '.facts', '.tags', '.notes', '.talk',
+      '.life__t', '.life__eyebrow', '.pursuit',
+      '.save',
+      '.shelf__head', '.tier', '.glist',
+      '.wall__head', '.wall .ph',
+      '.dir__col',
+      '.words__eyebrow', '.quote', '.quote__btns'
+    ].join(','));
     if (!targets.length) return;
 
     if (!('IntersectionObserver' in window)) return;
@@ -141,9 +184,10 @@
       });
     }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
 
-    // 照片牆錯開一點，比較有手感
-    $$('.wall .ph').forEach(function (el, i) { el.setAttribute('data-d', String(i * 70)); });
+    // 錯開一點，像沿路一個一個看到
+    $$('.wall .ph').forEach(function (el, i) { el.setAttribute('data-d', String(i * 65)); });
     $$('.dir__col').forEach(function (el, i) { el.setAttribute('data-d', String(i * 90)); });
+    $$('.pursuit').forEach(function (el, i) { el.setAttribute('data-d', String(i * 80)); });
 
     targets.forEach(function (el) { io.observe(el); });
   })();
@@ -156,12 +200,26 @@
     var map = {};
     links.forEach(function (a) { map[a.getAttribute('data-lamp')] = a; });
 
+    var current = null, litTimer;
+
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (!e.isIntersecting) return;
-        links.forEach(function (a) { a.classList.remove('is-on'); });
         var a = map[e.target.id];
-        if (a) a.classList.add('is-on');
+        if (!a || a === current) return;
+
+        links.forEach(function (x) { x.classList.remove('is-on'); });
+        a.classList.add('is-on');
+        current = a;
+
+        /* 走到下一盞燈時，那盞燈才閃一下亮起來 */
+        if (!reduce) {
+          clearTimeout(litTimer);
+          links.forEach(function (x) { x.classList.remove('just-lit'); });
+          void a.offsetWidth;
+          a.classList.add('just-lit');
+          litTimer = setTimeout(function () { a.classList.remove('just-lit'); }, 560);
+        }
       });
     }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
 
@@ -169,6 +227,25 @@
       var sec = document.getElementById(id);
       if (sec) io.observe(sec);
     });
+
+    /* 已經走過的那一段路，線稍微亮一點 */
+    var walked = $('#pole-walked');
+    if (walked) {
+      var ticking = false;
+      function paint() {
+        var max = document.documentElement.scrollHeight - window.innerHeight;
+        var p = max > 0 ? Math.min(1, Math.max(0, window.pageYOffset / max)) : 0;
+        walked.style.height = (p * 100).toFixed(1) + '%';
+        ticking = false;
+      }
+      window.addEventListener('scroll', function () {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(paint);
+      }, { passive: true });
+      window.addEventListener('resize', paint);
+      paint();
+    }
   })();
 
   /* ── 柴柴語錄 ───────────────────────────────────────── */
@@ -293,19 +370,6 @@
     });
   })();
 
-  /* ── 音遊譜面：真的可以滑動時才顯示提示 ─────────────── */
-  (function () {
-    var chart = $('.chart'), scroll = $('.chart__scroll');
-    if (!chart || !scroll) return;
-    function check() {
-      chart.classList.toggle('is-scrollable', scroll.scrollWidth - scroll.clientWidth > 4);
-    }
-    check();
-    window.addEventListener('resize', check);
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(check);
-    window.addEventListener('load', check);
-  })();
-
   /* ── 彩蛋：戳頭像 / 戳本人照片 ─────────────────────── */
   (function () {
     var bubble = $('#bubble');
@@ -401,10 +465,10 @@
 
   /* ── 最後更新日期：只需改 HTML 裡 datetime 那一處 ───── */
   (function () {
-    var el = $('#updated');
-    if (!el) return;
-    var d = (el.getAttribute('datetime') || '').split('-');
-    if (d.length === 3) el.textContent = d[0] + ' / ' + d[1] + ' / ' + d[2];
+    $$('#updated, #games-updated').forEach(function (el) {
+      var d = (el.getAttribute('datetime') || '').split('-');
+      if (d.length === 3) el.textContent = d[0] + ' / ' + d[1] + ' / ' + d[2];
+    });
   })();
 
   /* ── 回到頂端 ───────────────────────────────────────── */
