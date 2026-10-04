@@ -1,8 +1,8 @@
 import Foundation
 
 /// 資料完整性檢查：讓使用者知道哪些統計還缺資料、哪裡可以補。
-struct IntegrityIssue: Identifiable, Hashable {
-    enum Severity: Int, Comparable {
+struct IntegrityIssue: Identifiable, Hashable, Sendable {
+    enum Severity: Int, Comparable, Sendable {
         case info = 0, warning = 1, problem = 2
         static func < (lhs: Severity, rhs: Severity) -> Bool { lhs.rawValue < rhs.rawValue }
     }
@@ -14,7 +14,7 @@ struct IntegrityIssue: Identifiable, Hashable {
     let count: Int
 }
 
-struct IntegrityReport {
+struct IntegrityReport: Sendable {
     var total = 0
     var missingDistance = 0
     var missingDuration = 0
