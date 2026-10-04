@@ -50,6 +50,7 @@ struct RoutePlaybackView: View {
     let session: WorkoutSession
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var settings: AppSettings
 
     @State private var progress: Double = 0
@@ -78,6 +79,12 @@ struct RoutePlaybackView: View {
     /// 動畫時鐘
     @State private var lastTick: Date?
     @State private var orbitAngle: Double = 0
+    @State private var isVisible = false
+    @State private var renderedSegments: [RouteSegment] = []
+    @State private var lastOverlayUpdate = Date.distantPast
+    @State private var lastCameraUpdate = Date.distantPast
+
+    private var animationPaused: Bool { !isVisible || scenePhase != .active || !isPlaying || showExport || showOptions }
 
     // MARK: 位置計算
 
@@ -209,7 +216,7 @@ struct RoutePlaybackView: View {
         .preferredColorScheme(.dark)
         .background {
             // 以畫面更新頻率驅動（60 / 120 Hz），不是固定 30 Hz 的 Timer
-            TimelineView(.animation(minimumInterval: nil, paused: !isPlaying)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 60, paused: animationPaused)) { context in
                 Color.clear
                     .onChange(of: context.date) { _, now in
                         advance(to: now)
@@ -217,11 +224,27 @@ struct RoutePlaybackView: View {
             }
             .allowsHitTesting(false)
         }
-        .onAppear { prepare() }
+        .onAppear {
+            isVisible = true
+            lastTick = nil
+            if !ready { prepare() }
+        }
+        .onDisappear { isVisible = false; lastTick = nil }
+        .onChange(of: scenePhase) { _, phase in
+            lastTick = nil
+            lastCameraUpdate = .distantPast
+            lastOverlayUpdate = .distantPast
+            if phase == .active { refreshOverlays() }
+        }
+        .onChange(of: showExport) { _, _ in lastTick = nil }
+        .onChange(of: showOptions) { _, _ in lastTick = nil }
+        .onChange(of: progress) { _, _ in
+            if !isPlaying { refreshOverlays() }
+        }
         .onChange(of: isPlaying) { _, playing in
             if playing { lastTick = nil }
         }
-        .onChange(of: colorMode) { _, _ in rebuildColors() }
+        .onChange(of: colorMode) { _, _ in rebuildColors(); refreshOverlays() }
         .onChange(of: cameraMode) { _, _ in updateCamera(force: true) }
         .sheet(isPresented: $showExport) {
             RouteVideoExportView(session: session)
@@ -275,6 +298,7 @@ struct RoutePlaybackView: View {
                     mode: colorMode,
                     gapAfterIndex: mappedGaps)
         ready = true
+        refreshOverlays()
         lastTick = nil
 
         // 等 @State 寫入生效後再設鏡頭，否則讀到的還是空陣列
@@ -310,7 +334,7 @@ struct RoutePlaybackView: View {
 
     /// 依實際經過的時間推進，掉幀也不會變慢
     private func advance(to now: Date) {
-        guard isPlaying, coordinates.count > 1 else { return }
+        guard !animationPaused, coordinates.count > 1 else { lastTick = nil; return }
         defer { lastTick = now }
         guard let last = lastTick else { return }
         let delta = now.timeIntervalSince(last)
@@ -319,18 +343,27 @@ struct RoutePlaybackView: View {
         progress = min(1, progress + (delta / playbackDuration) * rate)
         if cameraMode == .cinematic { orbitAngle += delta * 12 }
         if progress >= 1 { isPlaying = false }
-        updateCamera()
+        if now.timeIntervalSince(lastOverlayUpdate) >= 0.12 || !isPlaying {
+            refreshOverlays()
+            lastOverlayUpdate = now
+        }
+        if now.timeIntervalSince(lastCameraUpdate) >= 1.0 / 30 {
+            updateCamera()
+            lastCameraUpdate = now
+        }
     }
+
+    private func refreshOverlays() { renderedSegments = visibleSegments }
 
     // MARK: 地圖
 
     private var mapLayer: some View {
         Map(position: $camera, interactionModes: cameraMode == .overview ? .all : [.zoom]) {
             // 還沒走到的路線：淡淡的預覽
-            if currentIndex < coordinates.count - 1 {
-                MapPolyline(coordinates: Array(coordinates[currentIndex...]))
-                    .stroke(Color.white.opacity(0.22),
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [7, 9]))
+            // Static segmented preview: no full-route suffix copy on every animation frame.
+            ForEach(allSegments) { segment in
+                MapPolyline(coordinates: segment.coordinates)
+                    .stroke(Color.white.opacity(0.22), lineWidth: 4)
                     .mapOverlayLevel(level: .aboveRoads)
             }
 
@@ -343,13 +376,13 @@ struct RoutePlaybackView: View {
             }
 
             // 已走過的路線：先畫一層較寬的半透明當作發光底層
-            ForEach(visibleSegments) { segment in
+            ForEach(renderedSegments) { segment in
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color.opacity(0.32),
                             style: StrokeStyle(lineWidth: 16, lineCap: .round, lineJoin: .round))
                     .mapOverlayLevel(level: .aboveRoads)
             }
-            ForEach(visibleSegments) { segment in
+            ForEach(renderedSegments) { segment in
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color,
                             style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
@@ -367,7 +400,7 @@ struct RoutePlaybackView: View {
 
             if let head = headCoordinate {
                 Annotation("", coordinate: head) {
-                    TimelineView(.animation) { context in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: animationPaused)) { context in
                         let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 3.2) + 1) / 2
                         ZStack {
                             Circle()

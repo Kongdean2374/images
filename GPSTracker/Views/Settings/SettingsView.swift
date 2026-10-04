@@ -34,10 +34,10 @@ struct SettingsView: View {
                     homeLayoutCard
                     unitCard
                     bodyCard
-                    announcementCard
-                    powerCard
-                    cueCard
-                    mapCard
+                    Toggle("靈動島／鎖定畫面即時活動", isOn: $settings.liveActivityEnabled)
+                    Text("運動設定請從各運動頁的齒輪調整。")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 group("系統") {
                     permissionCard

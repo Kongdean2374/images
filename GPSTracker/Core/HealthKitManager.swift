@@ -737,7 +737,8 @@ final class HealthKitManager: ObservableObject {
     }
 
     /// A failed route query must never turn a partial route into a completed workout.
-    func completeRoute(of workout: HKWorkout, cancellation: ImportCancellation) async throws -> [CLLocation] {
+    func completeRoute(of workout: HKWorkout, cancellation: ImportCancellation,
+                       onProgress: @escaping @Sendable (Int) -> Void = { _ in }) async throws -> [CLLocation] {
         try cancellation.check()
         let routes: [HKWorkoutRoute] = try await withCheckedThrowingContinuation { continuation in
             let box = ResumeBox()
@@ -769,7 +770,7 @@ final class HealthKitManager: ObservableObject {
                         if box.take() { cancellation.remove(id); continuation.resume(throwing: error) }
                         return
                     }
-                    if let batch { accumulated.append(contentsOf: batch) }
+                    if let batch { accumulated.append(contentsOf: batch); onProgress(accumulated.count) }
                     if done, box.take() {
                         cancellation.remove(id)
                         continuation.resume(returning: accumulated)

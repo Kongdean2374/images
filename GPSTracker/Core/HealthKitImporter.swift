@@ -2,6 +2,7 @@ import Foundation
 import HealthKit
 import CoreLocation
 import SwiftData
+import UIKit
 
 /// 匯入結果
 struct ImportResult: Equatable {
@@ -223,14 +224,17 @@ final class HealthKitImporter: ObservableObject {
 
     private func run(from start: Date, includeRoutes: Bool) async -> ImportResult {
         guard health.isReady, let writerTask, !isImporting else { return ImportResult() }
+        guard DatabaseHealth.state != .memoryOnly else { return ImportResult(failure: DatabaseHealth.message) }
         isImporting = true
         isCancelled = false
         cancellation = ImportCancellation()
         let token = cancellation
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Health import") { token.cancel() }
         progress = 0
         statusText = "讀取健康訓練…"
         var result = ImportResult()
         defer {
+            if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
             result.finishedAt = Date()
             lastResult = result
             isImporting = false
@@ -248,7 +252,12 @@ final class HealthKitImporter: ObservableObject {
                 let uuid = workout.uuid.uuidString
                 if keys.uuids.contains(uuid) { result.skipped += 1; continue }
                 statusText = "讀取第 \(index + 1) / \(workouts.count) 筆完整軌跡…"
-                let locations = includeRoutes ? try await health.completeRoute(of: workout, cancellation: token) : []
+                let locations = includeRoutes ? try await health.completeRoute(of: workout, cancellation: token, onProgress: { count in
+                    Task { @MainActor in
+                        guard self.isImporting, !self.isCancelled else { return }
+                        self.statusText = "讀取第 \(index + 1) 筆：已收到 \(count) 點…"
+                    }
+                }) : []
                 try token.check()
                 let type = HealthKitManager.workoutType(for: workout.workoutActivityType, hasRoute: locations.count > 1)
                 let sport = SportCatalog.sport(for: workout.workoutActivityType)
@@ -304,8 +313,11 @@ final class HealthKitImporter: ObservableObject {
                 let previous = locations[index - 1]
                 let current = locations[index]
                 let delta = current.altitude - previous.altitude
-                if delta > 0.8 { gain += delta } else if delta < -0.8 { loss += -delta }
-                fullRouteDistance += current.distance(from: previous)
+                if current.verticalAccuracy >= 0, previous.verticalAccuracy >= 0 {
+                    if delta > 0.8 { gain += delta } else if delta < -0.8 { loss += -delta }
+                }
+                let dt = current.timestamp.timeIntervalSince(previous.timestamp)
+                if dt > 0, dt <= 20 { fullRouteDistance += current.distance(from: previous) }
             }
         }
 
@@ -337,20 +349,11 @@ final class HealthKitImporter: ObservableObject {
         var accumulated = 0.0
         var previous: CLLocation?
         for location in compacted {
-            var derivedSpeed = 0.0
             if let previous {
-                let stepDistance = location.distance(from: previous)
-                accumulated += stepDistance
                 let dt = location.timestamp.timeIntervalSince(previous.timestamp)
-                if dt > 0 {
-                    derivedSpeed = max(0, stepDistance / dt)
-                }
+                if dt > 0, dt <= 20 { accumulated += location.distance(from: previous) }
             }
-
             let reportedSpeed = location.speed
-            let effectiveSpeed = reportedSpeed.isFinite && reportedSpeed > 0.1
-                ? reportedSpeed
-                : derivedSpeed
 
             routePoints.append(HealthImportRoutePoint(
                 latitude: location.coordinate.latitude,

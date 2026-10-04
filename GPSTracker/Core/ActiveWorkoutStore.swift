@@ -34,6 +34,7 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
     }
 
     var pointOffset: Int?
+    var disciplineID: String?
     var typeRaw: String
     var sportID: String?
     var startDate: Date

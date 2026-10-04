@@ -142,7 +142,7 @@ final class AppSettings: ObservableObject {
             Keys.announceDuration: false,
             Keys.announcePacerDelta: true,
             Keys.keepScreenAwake: true,
-            Keys.batterySaver: true,
+            Keys.batterySaver: false,
             Keys.dailyDistanceGoal: 5.0,
             Keys.lastHealthImport: 0.0,
             Keys.mapStyleIndex: 0,

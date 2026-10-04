@@ -19,6 +19,9 @@ enum SessionSaver {
     static func save(_ session: WorkoutSession,
                      context: ModelContext,
                      clearsAutosave: Bool = true) -> Result {
+        guard DatabaseHealth.state != .memoryOnly else {
+            return .failed(DatabaseHealth.message)
+        }
         context.insert(session)
         do {
             try context.save()

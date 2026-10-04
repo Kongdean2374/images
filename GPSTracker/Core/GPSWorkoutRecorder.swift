@@ -623,17 +623,8 @@ final class GPSWorkoutRecorder: ObservableObject {
         // 只把它當成新的起點，地圖上就會留下一段空白
         if justResumedFromGap {
             justResumedFromGap = false
-            lastAccepted = TrackSample(latitude: smoothed.latitude,
-                                       longitude: smoothed.longitude,
-                                       altitude: smoothed.altitude,
-                                       timestamp: raw.timestamp,
-                                       speed: max(0, currentSpeed),
-                                       distanceFromStart: distance)
-            samples.append(lastAccepted!)
-            lastGoodFix = Date()
-            lastAltitude = smoothed.altitude
-            currentPace = GeoMath.pace(fromSpeed: currentSpeed)
-            return
+            lastAccepted = nil
+            lastAltitude = nil
         }
 
         if let last = lastAccepted {
@@ -703,7 +694,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     var snapshot: ActiveWorkoutSnapshot { makeSnapshot(from: 0) }
 
     private func makeSnapshot(from offset: Int) -> ActiveWorkoutSnapshot {
-        ActiveWorkoutSnapshot(pointOffset: offset, typeRaw: workoutType.rawValue,
+        ActiveWorkoutSnapshot(pointOffset: offset, disciplineID: disciplineID, typeRaw: workoutType.rawValue,
                               sportID: sport?.id,
                               startDate: startDate,
                               savedAt: Date(),
@@ -754,6 +745,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     /// 從中斷的自動存檔接續記錄
     func restore(from snapshot: ActiveWorkoutSnapshot) {
         reset()
+        disciplineID = snapshot.disciplineID ?? DisciplineCatalog.discipline(forSportID: snapshot.sportID ?? "")?.id ?? (snapshot.type == .gpsHike ? "hiking" : "running")
         workoutType = snapshot.type
         sport = snapshot.sport
         startDate = snapshot.startDate

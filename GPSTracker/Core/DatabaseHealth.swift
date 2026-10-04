@@ -29,7 +29,7 @@ enum DatabaseHealth {
         case .recoveredWithFreshStore:
             return "上次的資料庫檔已損毀，App 已用全新的資料庫啟動。舊檔案沒有被刪除，仍保留在裝置上。你可以從備份檔還原，或重新從健康 App 匯入。"
         case .memoryOnly:
-            return "資料庫無法建立，目前為暫存模式：這次記錄的內容在關閉 App 後不會保留。請重新啟動 App，若仍相同，建議重裝並從備份還原。"
+            return "資料庫暫時無法開啟，原始檔案完整保留。本次不接受正式儲存或健康匯入；請先解鎖裝置、確認可用空間後重開。請勿移除 App。"
         }
     }
 
@@ -47,43 +47,13 @@ enum DatabaseHealth {
             state = .healthy
             return container
         } catch {
-            // 第一次失敗：把損毀的檔案移開，保留原始資料以便日後救援
-            let quarantined = quarantineStoreFiles()
-            do {
-                let container = try ModelContainer(for: schema, configurations: [configuration])
-                state = .recoveredWithFreshStore(quarantinedPath: quarantined ?? "未知位置")
-                return container
-            } catch {
-                let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-                state = .memoryOnly
-                // 記憶體模式若再失敗就真的無法運作，這裡是最後一道
-                return (try? ModelContainer(for: schema, configurations: [memory]))
-                    ?? (try! ModelContainer(for: schema, configurations: [memory]))
-            }
+            // An opening error may be migration, file protection or disk pressure,
+            // not corruption. Leave the store and WAL untouched for recovery.
+            state = .memoryOnly
+            let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            do { return try ModelContainer(for: schema, configurations: [memory]) }
+            catch { fatalError("Unable to open a safe temporary store: \(error)") }
         }
     }
 
-    /// 把 default.store 及其附屬檔案改名保留
-    private static func quarantineStoreFiles() -> String? {
-        let manager = FileManager.default
-        guard let supportDirectory = manager.urls(for: .applicationSupportDirectory,
-                                                  in: .userDomainMask).first else { return nil }
-        let stamp = DataExporter.stamp()
-        var movedTo: String?
-
-        for suffix in ["", "-wal", "-shm"] {
-            let source = supportDirectory.appendingPathComponent("default.store\(suffix)")
-            guard manager.fileExists(atPath: source.path) else { continue }
-            let destination = supportDirectory
-                .appendingPathComponent("corrupted-\(stamp)-default.store\(suffix)")
-            do {
-                try manager.moveItem(at: source, to: destination)
-                if suffix.isEmpty { movedTo = destination.path }
-            } catch {
-                // Never delete the only copy on a migration / protection / I/O failure.
-                return nil
-            }
-        }
-        return movedTo
-    }
 }

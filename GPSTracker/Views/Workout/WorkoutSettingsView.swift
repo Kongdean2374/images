@@ -32,6 +32,7 @@ struct WorkoutSettingsView: View {
             Form {
                 headerSection
                 Section {
+                    NavigationLink("共用運動預設值") { WorkoutDefaultsView() }
                     Button("恢復共用預設值") { settings.resetWorkoutOptions(for: discipline.id) }
                     Text("未個別修改的選項會沿用共用預設值。")
                         .font(.caption)
@@ -401,7 +402,7 @@ struct WorkoutSettingsView: View {
                 Toggle("播報距離", isOn: option(\.announceDistance))
                 Toggle("播報配速", isOn: option(\.announcePace))
                 Toggle("播報時間", isOn: option(\.announceDuration))
-                Toggle("播報與目標配速差", isOn: option(\.announcePace)rDelta)
+                Toggle("播報與目標配速差", isOn: option(\.announcePacerDelta))
             }
         }
     }
