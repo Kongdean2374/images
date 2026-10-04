@@ -242,8 +242,8 @@ struct RoutePlaybackView: View {
         // 點太多先抽稀，視覺上看不出來但畫起來快很多
         if working.count > 4000 {
             let coords = working.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
-            let keep = RouteRenderer.simplify(coords, tolerance: 2.5)
-            if keep.count > 500 { working = keep.map { working[$0] } }
+            let keep = RouteRenderer.simplify(coords, timestamps: originalTimestamps, tolerance: 2.5)
+            working = keep.map { working[$0] }
         }
 
         let coords = working.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
@@ -254,7 +254,14 @@ struct RoutePlaybackView: View {
 
         points = working
         coordinates = coords
-        fastestRange = best
+        if let best {
+            let start = sorted[best.lowerBound].timestamp
+            let end = sorted[min(best.upperBound, sorted.count - 1)].timestamp
+            if let lower = working.firstIndex(where: { $0.timestamp >= start }),
+               let upper = working.lastIndex(where: { $0.timestamp <= end }), lower <= upper {
+                fastestRange = lower...upper
+            }
+        }
         let mappedGaps = RouteRenderer.remapGapIndices(
             originalTimestamps: originalTimestamps,
             retainedTimestamps: working.map { $0.timestamp }

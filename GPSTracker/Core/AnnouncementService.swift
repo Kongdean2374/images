@@ -15,10 +15,11 @@ final class AnnouncementService {
                           elapsed: TimeInterval,
                           averagePace: Double?,
                           currentPace: Double?,
-                          pacerDelta: TimeInterval?) {
+                          pacerDelta: TimeInterval?, options: WorkoutOptions? = nil) {
         let settings = AppSettings.shared
-        let interval = settings.announceIntervalRaw
-        guard interval != 0, settings.voiceCues else { return }
+        let options = options ?? settings.workoutOptions(for: "global")
+        let interval = options.announceIntervalRaw
+        guard interval != 0, options.voiceCues else { return }
 
         if interval > 0 {
             guard distance - lastDistanceMark >= interval else { return }
@@ -30,16 +31,16 @@ final class AnnouncementService {
         }
 
         var parts: [String] = []
-        if settings.announceDistance {
+        if options.announceDistance {
             parts.append(distancePhrase(distance, unit: settings.unit))
         }
-        if settings.announceDuration {
+        if options.announceDuration {
             parts.append("用時 \(durationPhrase(elapsed))")
         }
-        if settings.announcePace, let pace = averagePace ?? currentPace {
+        if options.announcePace, let pace = averagePace ?? currentPace {
             parts.append("平均配速 \(pacePhrase(pace, unit: settings.unit))")
         }
-        if settings.announcePacerDelta, let delta = pacerDelta {
+        if options.announcePacerDelta, let delta = pacerDelta {
             parts.append(delta >= 0
                          ? "領先目標 \(Int(abs(delta))) 秒"
                          : "落後目標 \(Int(abs(delta))) 秒")
@@ -47,7 +48,7 @@ final class AnnouncementService {
         guard !parts.isEmpty else { return }
 
         CueService.shared.impact(.medium)
-        CueService.shared.speak(parts.joined(separator: "，"))
+        CueService.shared.speak(parts.joined(separator: "，"), enabled: options.voiceCues)
     }
 
     private func distancePhrase(_ meters: Double, unit: DistanceUnit) -> String {

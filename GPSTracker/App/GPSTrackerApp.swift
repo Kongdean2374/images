@@ -21,6 +21,12 @@ struct GPSTrackerApp: App {
                 .environmentObject(settings)
                 .preferredColorScheme(settings.preferDarkMode ? .dark : nil)
                 .task {
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--engineering-tests") {
+                        await EngineeringChecks.run()
+                        return
+                    }
+                    #endif
                     HealthKitImporter.shared.configure(container: sharedModelContainer)
                     HealthKitManager.shared.refreshAvailability()
                     if settings.backgroundUpdates {

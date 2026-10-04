@@ -5,6 +5,10 @@ import SwiftUI
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    @Published var workoutOverrides: Data = UserDefaults.standard.data(forKey: "workoutOverrides.v1") ?? Data("{}".utf8) {
+        didSet { UserDefaults.standard.set(workoutOverrides, forKey: "workoutOverrides.v1") }
+    }
+
     private let defaults = UserDefaults.standard
 
     @Published var unitRaw: String { didSet { defaults.set(unitRaw, forKey: Keys.unit) } }

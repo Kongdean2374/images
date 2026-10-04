@@ -80,8 +80,8 @@ enum DatabaseHealth {
                 try manager.moveItem(at: source, to: destination)
                 if suffix.isEmpty { movedTo = destination.path }
             } catch {
-                // 移不動就試著直接刪除主檔，至少讓 App 能開起來
-                if suffix.isEmpty { try? manager.removeItem(at: source) }
+                // Never delete the only copy on a migration / protection / I/O failure.
+                return nil
             }
         }
         return movedTo

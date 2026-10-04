@@ -40,8 +40,8 @@ final class CueService: NSObject {
         }
     }
 
-    func speak(_ text: String) {
-        guard settings.voiceCues else { return }
+    func speak(_ text: String, enabled: Bool? = nil) {
+        guard enabled ?? settings.voiceCues else { return }
         configureAudioSession()
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "zh-TW")

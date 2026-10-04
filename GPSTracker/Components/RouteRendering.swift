@@ -169,7 +169,7 @@ enum RouteRenderer {
                 continue
             }
             let slice = Array(coordinates[index...end])
-            let valueSlice = values.isEmpty ? [] : Array(values[index...min(end, values.count - 1)])
+            let valueSlice = index >= values.count ? [] : Array(values[index...min(end, values.count - 1)])
             let average = valueSlice.isEmpty ? scale.low : valueSlice.reduce(0, +) / Double(valueSlice.count)
             result.append(RouteSegment(startIndex: index,
                                        endIndex: end,
@@ -270,6 +270,21 @@ enum RouteRenderer {
             }
         }
         return keep.indices.filter { keep[$0] }
+    }
+
+    /// Simplify each continuous part independently; retain both sides of every gap.
+    static func simplify(_ coordinates: [CLLocationCoordinate2D], timestamps: [Date],
+                         tolerance: Double) -> [Int] {
+        guard coordinates.count == timestamps.count else { return Array(coordinates.indices) }
+        let boundaries = gapIndices(timestamps: timestamps).sorted()
+        var retained: [Int] = []
+        var start = 0
+        for end in boundaries + [coordinates.count - 1] {
+            guard end >= start else { continue }
+            retained.append(contentsOf: simplify(Array(coordinates[start...end]), tolerance: tolerance).map { $0 + start })
+            start = end + 1
+        }
+        return retained
     }
 
     private static func perpendicularDistance(_ point: CLLocationCoordinate2D,

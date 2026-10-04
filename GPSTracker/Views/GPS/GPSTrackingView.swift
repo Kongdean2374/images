@@ -33,7 +33,12 @@ struct GPSTrackingView: View {
     @State private var showBackToStart = false
     @State private var bigTextMode = false
     @State private var showAccuracyHint = false
+    @State private var cachedSegments: [RouteSegment] = []
+    @State private var lastRender = Date.distantPast
 
+
+    private var optionID: String { discipline?.id ?? sport?.id ?? type.rawValue }
+    private var workout: WorkoutOptions { settings.workoutOptions(for: optionID) }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -54,6 +59,7 @@ struct GPSTrackingView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            recorder.disciplineID = optionID
             recorder.workoutType = type
             recorder.sport = sport
             bigTextMode = settings.preferBigText
@@ -62,7 +68,7 @@ struct GPSTrackingView: View {
                 recorder.restore(from: restoring)
             }
             if location.isAuthorized {
-                location.startUpdating(background: settings.backgroundLocation)
+                location.startUpdating(background: workout.backgroundLocation)
                 location.requestOneShot()
                 location.requestFullAccuracy()
                 showAccuracyHint = location.isReducedAccuracy
@@ -76,7 +82,7 @@ struct GPSTrackingView: View {
             if recorder.state == .recording || recorder.state == .paused {
                 recorder.autosave(force: true)
             }
-            location.stopUpdating()
+            if recorder.state != .recording && recorder.state != .paused { location.stopUpdating() }
         }
         .onChange(of: scenePhase) { _, phase in
             // 進背景／被系統終止前的最後機會，一定要把進度寫下來
@@ -84,8 +90,10 @@ struct GPSTrackingView: View {
                 recorder.autosave(force: true)
             }
         }
+        .onChange(of: settings.routeColorMode) { _, _ in refreshRoute(force: true) }
         .onChange(of: recorder.samples.count) { _, _ in
             updateCamera()
+            refreshRoute()
         }
         .fullScreenCover(item: $finishedSession) { session in
             NavigationStack {
@@ -95,7 +103,7 @@ struct GPSTrackingView: View {
         }
         .sheet(isPresented: $showPaceEditor) {
             PaceEditorSheet(unit: settings.unit,
-                            initialSecondsPerKM: settings.gpsTargetPace) { value in
+                            initialSecondsPerKM: workout.gpsTargetPace) { value in
                 applyPace(value)
                 if value > 0 { settings.addCustomPace(value) }
             }
@@ -103,7 +111,7 @@ struct GPSTrackingView: View {
         .sheet(isPresented: $showLapEditor) {
             DistanceEditorSheet(title: "自訂分圈距離",
                                 unit: settings.unit,
-                                initialMeters: settings.gpsAutoLapDistance,
+                                initialMeters: workout.gpsAutoLapDistance,
                                 suggestions: [200, 400, 500, 1000, 1609.344, 2000, 5000]) { value in
                 applyLap(value)
                 if value > 0 { settings.addCustomLapDistance(value) }
@@ -120,25 +128,31 @@ struct GPSTrackingView: View {
 
     /// 從設定頁帶入這個項目儲存的偏好
     private func applyStoredOptions() {
-        recorder.targetPace = settings.gpsTargetPace > 0 ? settings.gpsTargetPace : nil
-        recorder.autoLapDistance = settings.gpsAutoLapDistance
+        recorder.targetPace = workout.gpsTargetPace > 0 ? workout.gpsTargetPace : nil
+        recorder.autoLapDistance = workout.gpsAutoLapDistance
     }
 
     // MARK: 地圖
 
     /// 即時軌跡：尺規每次都依「目前為止看到的資料」重建，
     /// 所以中途忽然衝到很高的速度時，整條線會立刻重新分級，不會全部變紅。
-    private var liveSegments: [RouteSegment] {
-        let speeds = recorder.samples.map { max(0, $0.speed) }
-        let values: [Double] = settings.routeColorMode == .elevation
-            ? recorder.samples.map { $0.altitude }
-            : speeds
-        let scale = RouteColorScale.make(mode: settings.routeColorMode, values: values)
-        let gaps = RouteRenderer.gapIndices(timestamps: recorder.samples.map { $0.timestamp })
-        return RouteRenderer.segments(coordinates: recorder.coordinates,
-                                      values: values,
-                                      scale: scale,
-                                      gapAfterIndex: gaps)
+    private var liveSegments: [RouteSegment] { cachedSegments }
+
+    private func refreshRoute(force: Bool = false) {
+        guard scenePhase == .active,
+              force || Date().timeIntervalSince(lastRender) >= 1 else { return }
+        lastRender = Date()
+        let samples = recorder.samples
+        let coordinates = samples.map { $0.coordinate }
+        let timestamps = samples.map { $0.timestamp }
+        let keep = RouteRenderer.simplify(coordinates, timestamps: timestamps, tolerance: 2.5)
+        let mode = settings.routeColorMode
+        let values = keep.map { mode == .elevation ? samples[$0].altitude : max(0, samples[$0].speed) }
+        let scale = RouteColorScale.make(mode: mode, values: values)
+        let gaps = RouteRenderer.remapGapIndices(originalTimestamps: timestamps,
+                                                 retainedTimestamps: keep.map { timestamps[$0] })
+        cachedSegments = RouteRenderer.segments(coordinates: keep.map { coordinates[$0] },
+                                                values: values, scale: scale, gapAfterIndex: gaps)
     }
 
     private var mapLayer: some View {
@@ -494,7 +508,7 @@ struct GPSTrackingView: View {
         VStack(alignment: .leading, spacing: 12) {
             valueChipRow(title: "虛擬配速員",
                          values: settings.customPaces,
-                         current: settings.gpsTargetPace,
+                         current: workout.gpsTargetPace,
                          label: { Fmt.pace($0, unit: settings.unit) }) { value in
                 applyPace(value)
             } onCustom: {
@@ -503,7 +517,7 @@ struct GPSTrackingView: View {
 
             valueChipRow(title: "自動分圈",
                          values: settings.customLapDistances,
-                         current: settings.gpsAutoLapDistance,
+                         current: workout.gpsAutoLapDistance,
                          label: { Fmt.distance($0, unit: settings.unit) }) { value in
                 applyLap(value)
             } onCustom: {
@@ -513,12 +527,12 @@ struct GPSTrackingView: View {
     }
 
     private func applyPace(_ value: Double) {
-        settings.gpsTargetPace = value
+        settings.updateWorkoutOptions(for: optionID) { $0.gpsTargetPace = value }
         recorder.targetPace = value > 0 ? value : nil
     }
 
     private func applyLap(_ value: Double) {
-        settings.gpsAutoLapDistance = value
+        settings.updateWorkoutOptions(for: optionID) { $0.gpsAutoLapDistance = value }
         recorder.autoLapDistance = value
     }
 

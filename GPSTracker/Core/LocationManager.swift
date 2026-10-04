@@ -88,6 +88,7 @@ final class LocationManager: NSObject, ObservableObject {
             requestPermission()
             return
         }
+        manager.allowsBackgroundLocationUpdates = background
         if background {
             // 關鍵：只要有定位權限就要打開背景更新。
             // 只在「永遠允許」時才打開的話，使用者給「使用期間」時系統會在
@@ -117,8 +118,8 @@ final class LocationManager: NSObject, ObservableObject {
     }
 
     /// 依速度與低電量狀態調整取樣密度，長距離記錄可省下可觀電力
-    func applyPowerProfile(speed: Double) {
-        guard AppSettings.shared.batterySaver else {
+    func applyPowerProfile(speed: Double, saver: Bool? = nil) {
+        guard saver ?? AppSettings.shared.batterySaver else {
             setPowerMode(.precise)
             return
         }

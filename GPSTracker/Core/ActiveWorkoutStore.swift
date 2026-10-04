@@ -16,6 +16,14 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
         let time: Date
         let speed: Double
         let distance: Double
+        var horizontalAccuracy: Double?
+        var verticalAccuracy: Double?
+        var course: Double?
+        var rawSpeed: Double?
+        var speedAccuracy: Double?
+        var courseAccuracy: Double?
+        var rawLatitude: Double?
+        var rawLongitude: Double?
     }
 
     struct Lap: Codable {
@@ -25,6 +33,7 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
         let timestamp: Date
     }
 
+    var pointOffset: Int?
     var typeRaw: String
     var sportID: String?
     var startDate: Date
@@ -70,59 +79,102 @@ final class ActiveWorkoutStore {
 
     private init() {}
 
-    // MARK: 寫入
-
-    /// 背景時拉長存檔間隔：組快照要走訪全部座標點，長距離運動這件事本身
-    /// 就是可觀的 CPU 開銷，而背景 CPU 用量過高會讓 iOS 直接終止 App。
+    // Accessed by the recorder on the main thread; I/O is ordered on queue.
     var isInBackground = false
+    private(set) var savedPointCount = 0
+    private var writing = false
+    private var generation = UUID()
+    private var sessionStart: Date?
+    private var journalURL: URL? { url?.appendingPathExtension("journal") }
 
-    /// 問節流器現在該不該寫。呼叫端先問過再組快照，省下無謂的走訪。
+    func pointOffset(for start: Date) -> Int { sessionStart == start ? savedPointCount : 0 }
+
     func shouldWrite(force: Bool) -> Bool {
-        let interval: TimeInterval = isInBackground ? 25 : 8
-        return force || Date().timeIntervalSince(lastWrite) > interval
+        !writing && (force || Date().timeIntervalSince(lastWrite) > (isInBackground ? 25 : 8))
     }
 
-    /// 節流寫入。`force` 用在暫停、進背景這種關鍵時刻，必定寫入。
+    /// Each durable line contains only new points and a metadata checkpoint.
+    /// A crash mid-write leaves the previous complete line recoverable.
     func save(_ snapshot: ActiveWorkoutSnapshot, force: Bool = false) {
-        guard shouldWrite(force: force) else { return }
-        guard let url else { return }
-        lastWrite = Date()
-        // 編碼與寫檔都丟到背景佇列，主執行緒不會因此掉幀
+        guard shouldWrite(force: force), let journalURL else { return }
+        let offset = snapshot.pointOffset ?? 0
+        let reset = sessionStart != snapshot.startDate || offset == 0
+        let ticket = generation
+        writing = true
         queue.async {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            guard let data = try? encoder.encode(snapshot) else { return }
-            try? data.write(to: url, options: .atomic)
+            var succeeded = false
+            do {
+                let encoder = JSONEncoder() // preserves sub-second timestamps
+                var data = try encoder.encode(snapshot)
+                data.append(0x0A)
+                if reset {
+                    try data.write(to: journalURL, options: .atomic)
+                } else {
+                    let handle = try FileHandle(forWritingTo: journalURL)
+                    defer { try? handle.close() }
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                    try handle.synchronize()
+                }
+                succeeded = true
+            } catch { }
+            let didSave = succeeded
+            DispatchQueue.main.async {
+                guard self.generation == ticket else { return }
+                self.writing = false
+                if didSave {
+                    self.savedPointCount = offset + snapshot.points.count
+                    self.sessionStart = snapshot.startDate
+                    self.lastWrite = Date()
+                }
+            }
         }
     }
-
-    // MARK: 讀取與清除
 
     func load() -> ActiveWorkoutSnapshot? {
-        guard let url, let data = try? Data(contentsOf: url) else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(ActiveWorkoutSnapshot.self, from: data) else {
-            clear()
-            return nil
+        queue.sync {
+            if let journalURL, let data = try? Data(contentsOf: journalURL) {
+                var latest: ActiveWorkoutSnapshot?
+                var points: [ActiveWorkoutSnapshot.Point] = []
+                // Only newline-terminated records were committed.
+                let lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
+                for line in lines.dropLast() {
+                    guard let delta = try? JSONDecoder().decode(ActiveWorkoutSnapshot.self, from: Data(line)) else { break }
+                    let offset = delta.pointOffset ?? 0
+                    if offset == 0 { points.removeAll(keepingCapacity: true) }
+                    guard offset == points.count else { break }
+                    points.append(contentsOf: delta.points)
+                    latest = delta
+                }
+                if var latest {
+                    latest.points = points
+                    latest.pointOffset = 0
+                    return latest
+                }
+            }
+            // Non-destructive compatibility with the previous full JSON snapshot.
+            guard let url, let data = try? Data(contentsOf: url) else { return nil }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try? decoder.decode(ActiveWorkoutSnapshot.self, from: data)
         }
-        // 超過 24 小時的殘檔直接丟掉，不要在幾天後才跳出來嚇人
-        guard Date().timeIntervalSince(snapshot.savedAt) < 86_400 else {
-            clear()
-            return nil
-        }
-        return snapshot
     }
 
-    var hasPending: Bool {
-        guard let snapshot = load() else { return false }
-        return snapshot.isWorthRecovering
-    }
+    var hasPending: Bool { load()?.isWorthRecovering ?? false }
 
     func clear() {
+        generation = UUID()
+        writing = false
+        savedPointCount = 0
+        sessionStart = nil
         lastWrite = .distantPast
-        guard let url else { return }
-        try? FileManager.default.removeItem(at: url)
+        let legacy = url
+        let journal = journalURL
+        // Order deletion after pending writes so a late autosave cannot resurrect a finished workout.
+        queue.async {
+            if let legacy { try? FileManager.default.removeItem(at: legacy) }
+            if let journal { try? FileManager.default.removeItem(at: journal) }
+        }
     }
 
     // MARK: 轉成正式紀錄
@@ -171,7 +223,15 @@ final class ActiveWorkoutStore {
                        altitude: $0.alt,
                        timestamp: $0.time,
                        speed: $0.speed,
-                       distanceFromStart: $0.distance)
+                       distanceFromStart: $0.distance,
+                       horizontalAccuracy: $0.horizontalAccuracy,
+                       verticalAccuracy: $0.verticalAccuracy,
+                       course: $0.course,
+                       rawSpeed: $0.rawSpeed,
+                       speedAccuracy: $0.speedAccuracy,
+                       courseAccuracy: $0.courseAccuracy,
+                       rawLatitude: $0.rawLatitude,
+                       rawLongitude: $0.rawLongitude)
         }
         return session
     }

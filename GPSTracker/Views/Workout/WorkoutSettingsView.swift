@@ -20,10 +20,22 @@ struct WorkoutSettingsView: View {
 
     private var gpsBlocked: Bool { !location.canRecordGPS }
 
+    private var workout: WorkoutOptions { settings.workoutOptions(for: discipline.id) }
+    private func option<T>(_ key: WritableKeyPath<WorkoutOptions, T>) -> Binding<T> {
+        Binding(get: { workout[keyPath: key] }, set: { value in
+            settings.updateWorkoutOptions(for: discipline.id) { $0[keyPath: key] = value }
+        })
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 headerSection
+                Section {
+                    Button("恢復共用預設值") { settings.resetWorkoutOptions(for: discipline.id) }
+                    Text("未個別修改的選項會沿用共用預設值。")
+                        .font(.caption)
+                }
                 if discipline.isDual { modeSection }
                 if discipline.supportsGPS { gpsSection }
                 if discipline.supportsIndoor { indoorSection }
@@ -43,24 +55,24 @@ struct WorkoutSettingsView: View {
             .onAppear { preference = settings.preference(for: discipline.id) }
             .sheet(isPresented: $showPaceEditor) {
                 PaceEditorSheet(unit: settings.unit,
-                                initialSecondsPerKM: settings.gpsTargetPace) { value in
-                    settings.gpsTargetPace = value
+                                initialSecondsPerKM: workout.gpsTargetPace) { value in
+                    settings.updateWorkoutOptions(for: discipline.id) { $0.gpsTargetPace = value }
                     if value > 0 { settings.addCustomPace(value) }
                 }
             }
             .sheet(isPresented: $showLapEditor) {
                 DistanceEditorSheet(title: "自訂分圈距離",
                                     unit: settings.unit,
-                                    initialMeters: settings.gpsAutoLapDistance,
+                                    initialMeters: workout.gpsAutoLapDistance,
                                     suggestions: [200, 400, 500, 1000, 1609.344, 2000, 5000]) { value in
-                    settings.gpsAutoLapDistance = value
+                    settings.updateWorkoutOptions(for: discipline.id) { $0.gpsAutoLapDistance = value }
                     if value > 0 { settings.addCustomLapDistance(value) }
                 }
             }
             .sheet(isPresented: $showAnnounceEditor) {
                 AnnounceIntervalEditorSheet(unit: settings.unit,
-                                            initialRaw: settings.announceIntervalRaw) { value in
-                    settings.announceIntervalRaw = value
+                                            initialRaw: workout.announceIntervalRaw) { value in
+                    settings.updateWorkoutOptions(for: discipline.id) { $0.announceIntervalRaw = value }
                 }
             }
             .sheet(isPresented: $showLapCounterEditor) {
@@ -198,26 +210,26 @@ struct WorkoutSettingsView: View {
             }
 
             valueRow(title: "自動分圈",
-                     value: settings.gpsAutoLapDistance > 0
-                        ? Fmt.distance(settings.gpsAutoLapDistance, unit: settings.unit)
+                     value: workout.gpsAutoLapDistance > 0
+                        ? Fmt.distance(workout.gpsAutoLapDistance, unit: settings.unit)
                         : "關閉",
                      icon: "flag.checkered") {
                 showLapEditor = true
             }
 
             valueRow(title: "虛擬配速員",
-                     value: settings.gpsTargetPace > 0
-                        ? Fmt.pace(settings.gpsTargetPace, unit: settings.unit) + Fmt.paceUnitLabel(settings.unit)
+                     value: workout.gpsTargetPace > 0
+                        ? Fmt.pace(workout.gpsTargetPace, unit: settings.unit) + Fmt.paceUnitLabel(settings.unit)
                         : "關閉",
                      icon: "figure.run.circle") {
                 showPaceEditor = true
             }
 
-            Toggle("定位失效時自動接手", isOn: $settings.assistedTracking)
-            Toggle("背景持續記錄", isOn: $settings.backgroundLocation)
-            Toggle("自動暫停（停下就暫停）", isOn: $settings.autoPause)
-            Toggle("省電取樣（長距離較耐用）", isOn: $settings.batterySaver)
-            Toggle("螢幕保持喚醒", isOn: $settings.keepScreenAwake)
+            Toggle("定位失效時自動接手", isOn: option(\.assistedTracking))
+            Toggle("背景持續記錄", isOn: option(\.backgroundLocation))
+            Toggle("自動暫停（停下就暫停）", isOn: option(\.autoPause))
+            Toggle("省電取樣（長距離較耐用）", isOn: option(\.batterySaver))
+            Toggle("螢幕保持喚醒", isOn: option(\.keepScreenAwake))
             Toggle("進入時直接用大字幕", isOn: $settings.preferBigText)
             Stepper("地圖傾斜 \(Int(settings.mapPitch))°",
                     value: $settings.mapPitch, in: 0...75, step: 5)
@@ -378,18 +390,18 @@ struct WorkoutSettingsView: View {
 
     private var cueSection: some View {
         Section("提示與播報") {
-            Toggle("語音播報", isOn: $settings.voiceCues)
-            Toggle("震動提示", isOn: $settings.hapticCues)
-            if settings.voiceCues && discipline.supportsGPS {
+            Toggle("語音播報", isOn: option(\.voiceCues))
+            Toggle("震動提示", isOn: option(\.hapticCues))
+            if workout.voiceCues && discipline.supportsGPS {
                 valueRow(title: "播報間隔",
                          value: settings.announceIntervalText,
                          icon: "speaker.wave.2") {
                     showAnnounceEditor = true
                 }
-                Toggle("播報距離", isOn: $settings.announceDistance)
-                Toggle("播報配速", isOn: $settings.announcePace)
-                Toggle("播報時間", isOn: $settings.announceDuration)
-                Toggle("播報與目標配速差", isOn: $settings.announcePacerDelta)
+                Toggle("播報距離", isOn: option(\.announceDistance))
+                Toggle("播報配速", isOn: option(\.announcePace))
+                Toggle("播報時間", isOn: option(\.announceDuration))
+                Toggle("播報與目標配速差", isOn: option(\.announcePace)rDelta)
             }
         }
     }

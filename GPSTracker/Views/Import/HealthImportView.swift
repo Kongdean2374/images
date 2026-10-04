@@ -379,7 +379,7 @@ struct HealthImportView: View {
     private func runImportNew() async {
         message = nil
         let result = await importer.importNew(existing: sessions)
-        message = result.imported > 0 ? result.summary : "沒有新的紀錄"
+        message = result.summary
         if result.imported > 0 { CueService.shared.notify(.success) }
     }
 }

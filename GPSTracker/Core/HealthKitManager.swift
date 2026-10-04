@@ -655,18 +655,8 @@ final class HealthKitManager: ObservableObject {
 
     /// 某次訓練的距離（公尺）
     func distance(of workout: HKWorkout) async -> Double? {
-        if let value = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?
-            .sumQuantity()?.doubleValue(for: .meter()) {
-            return value
-        }
-        if let value = workout.statistics(for: HKQuantityType(.distanceCycling))?
-            .sumQuantity()?.doubleValue(for: .meter()) {
-            return value
-        }
-        return await sumQuantity(HKQuantityType(.distanceWalkingRunning),
-                                 unit: .meter(),
-                                 from: workout.startDate,
-                                 to: workout.endDate)
+        workout.statistics(for: Self.distanceType(for: workout.workoutActivityType))?
+            .sumQuantity()?.doubleValue(for: .meter()) ?? workout.totalDistance?.doubleValue(for: .meter())
     }
 
     func energy(of workout: HKWorkout) async -> Double? {
@@ -674,40 +664,128 @@ final class HealthKitManager: ObservableObject {
             .sumQuantity()?.doubleValue(for: .kilocalorie())
     }
 
-    /// 讀取訓練的 GPS 路線（其他 App 記錄的軌跡也讀得到）
-    func route(of workout: HKWorkout) async -> [CLLocation] {
-        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
-        let routes: [HKWorkoutRoute] = await withCheckedContinuation { continuation in
-            let predicate = HKQuery.predicateForObjects(from: workout)
-            let query = HKAnchoredObjectQuery(type: HKSeriesType.workoutRoute(),
-                                              predicate: predicate,
-                                              anchor: nil,
-                                              limit: HKObjectQueryNoLimit) { _, samples, _, _, _ in
-                continuation.resume(returning: (samples as? [HKWorkoutRoute]) ?? [])
+    /// Deliberately scoped, unit-labelled provenance and workout-associated metrics.
+    /// No unrelated health history or arbitrary metadata is copied.
+    func importDetails(of workout: HKWorkout) async throws -> String {
+        var details: [String: Any] = [
+            "version": 1, "sourceBundle": workout.sourceRevision.source.bundleIdentifier,
+            "sourceVersion": workout.sourceRevision.version ?? "",
+            "productType": workout.sourceRevision.productType ?? "",
+            "activityType": workout.workoutActivityType.rawValue,
+            "activeDuration": workout.duration,
+            "elapsedDuration": workout.endDate.timeIntervalSince(workout.startDate)
+        ]
+        if let device = workout.device {
+            details["device"] = ["name": device.name ?? "", "model": device.model ?? "",
+                                 "manufacturer": device.manufacturer ?? "",
+                                 "hardwareVersion": device.hardwareVersion ?? "",
+                                 "softwareVersion": device.softwareVersion ?? ""]
+        }
+        details["events"] = (workout.workoutEvents ?? []).map {
+            ["type": $0.type.rawValue, "start": $0.dateInterval.start.timeIntervalSince1970,
+             "duration": $0.dateInterval.duration] as [String: Any]
+        }
+        let metrics: [(HKQuantityTypeIdentifier, HKUnit)] = [
+            (.heartRate, .count().unitDivided(by: .minute())),
+            (.stepCount, .count()), (.runningSpeed, .meter().unitDivided(by: .second())),
+            (.runningPower, .watt()), (.runningStrideLength, .meter()),
+            (.runningVerticalOscillation, .meter()), (.runningGroundContactTime, .second()),
+            (.cyclingCadence, .count().unitDivided(by: .minute())),
+            (.cyclingPower, .watt()), (.cyclingSpeed, .meter().unitDivided(by: .second()))
+        ]
+        var series: [[String: Any]] = []
+        for (identifier, unit) in metrics {
+            let samples: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
+                let query = HKSampleQuery(sampleType: HKQuantityType(identifier),
+                                          predicate: HKQuery.predicateForObjects(from: workout),
+                                          limit: HKObjectQueryNoLimit,
+                                          sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]) { _, samples, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: (samples as? [HKQuantitySample]) ?? []) }
+                }
+                store.execute(query)
             }
-            store.execute(query)
+            if !samples.isEmpty {
+                series.append(["type": identifier.rawValue, "unit": unit.unitString,
+                               "samples": samples.map {
+                    ["start": $0.startDate.timeIntervalSince1970, "end": $0.endDate.timeIntervalSince1970,
+                     "value": $0.quantity.doubleValue(for: unit)]
+                }])
+            }
         }
-
-        var collected: [CLLocation] = []
-        for route in routes {
-            let batch = await routeLocations(in: route)
-            collected.append(contentsOf: batch)
-        }
-        return collected.sorted { $0.timestamp < $1.timestamp }
+        details["metrics"] = series
+        let data = try JSONSerialization.data(withJSONObject: details, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
     }
 
-    private func routeLocations(in route: HKWorkoutRoute) async -> [CLLocation] {
-        await withCheckedContinuation { continuation in
-            let box = ResumeBox()
-            var accumulated: [CLLocation] = []
-            let query = HKWorkoutRouteQuery(route: route) { _, batch, done, error in
-                if let batch { accumulated.append(contentsOf: batch) }
-                if done || error != nil {
-                    if box.take() { continuation.resume(returning: accumulated) }
-                }
+    /// Compatibility read for previews. Importing uses the throwing API below.
+    func route(of workout: HKWorkout) async -> [CLLocation] {
+        (try? await completeRoute(of: workout, cancellation: ImportCancellation())) ?? []
+    }
+
+    func importWorkouts(from start: Date) async throws -> [HKWorkout] {
+        try await withCheckedThrowingContinuation { continuation in
+            let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
+            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate,
+                                      limit: HKObjectQueryNoLimit,
+                                      sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]) { _, samples, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: (samples as? [HKWorkout]) ?? []) }
             }
             store.execute(query)
         }
+    }
+
+    /// A failed route query must never turn a partial route into a completed workout.
+    func completeRoute(of workout: HKWorkout, cancellation: ImportCancellation) async throws -> [CLLocation] {
+        try cancellation.check()
+        let routes: [HKWorkoutRoute] = try await withCheckedThrowingContinuation { continuation in
+            let box = ResumeBox()
+            let id = UUID()
+            let query = HKSampleQuery(sampleType: HKSeriesType.workoutRoute(),
+                                      predicate: HKQuery.predicateForObjects(from: workout),
+                                      limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+                guard box.take() else { return }
+                cancellation.remove(id)
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: (samples as? [HKWorkoutRoute]) ?? []) }
+            }
+            store.execute(query)
+            cancellation.register(id) { [store] in
+                guard box.take() else { return }
+                store.stop(query)
+                continuation.resume(throwing: CancellationError())
+            }
+        }
+        var collected: [CLLocation] = []
+        for route in routes {
+            try cancellation.check()
+            let batch: [CLLocation] = try await withCheckedThrowingContinuation { continuation in
+                let box = ResumeBox()
+                let id = UUID()
+                var accumulated: [CLLocation] = []
+                let query = HKWorkoutRouteQuery(route: route) { _, batch, done, error in
+                    if let error {
+                        if box.take() { cancellation.remove(id); continuation.resume(throwing: error) }
+                        return
+                    }
+                    if let batch { accumulated.append(contentsOf: batch) }
+                    if done, box.take() {
+                        cancellation.remove(id)
+                        continuation.resume(returning: accumulated)
+                    }
+                }
+                store.execute(query)
+                cancellation.register(id) { [store] in
+                    guard box.take() else { return }
+                    store.stop(query)
+                    continuation.resume(throwing: CancellationError())
+                }
+            }
+            collected.append(contentsOf: batch)
+        }
+        try cancellation.check()
+        return collected.sorted { $0.timestamp < $1.timestamp }
     }
 
     private func fetchWorkouts(from start: Date, limit: Int) async -> [HKWorkout] {

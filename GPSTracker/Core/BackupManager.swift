@@ -10,6 +10,14 @@ struct RoutePointBackup: Codable {
     var timestamp: Date
     var speed: Double
     var distanceFromStart: Double
+    var horizontalAccuracy: Double?
+    var verticalAccuracy: Double?
+    var course: Double?
+    var rawSpeed: Double?
+    var speedAccuracy: Double?
+    var courseAccuracy: Double?
+    var rawLatitude: Double?
+    var rawLongitude: Double?
 }
 
 struct LapBackup: Codable {
@@ -45,6 +53,7 @@ struct SessionBackup: Codable {
     var healthKitUUID: String?
     var isImported: Bool
     var sourceApp: String?
+    var healthDetailsJSON: String? = nil
     var distanceSource: String?
     var rpe: Int?
     var routeKey: String?
@@ -180,6 +189,7 @@ final class BackupManager: ObservableObject {
                               healthKitUUID: session.healthKitUUID,
                               isImported: session.isImported,
                               sourceApp: session.sourceApp,
+                              healthDetailsJSON: session.healthDetailsJSON,
                               distanceSource: session.distanceSourceRaw,
                               rpe: session.rpe,
                               routeKey: session.routeKey,
@@ -192,7 +202,15 @@ final class BackupManager: ObservableObject {
                                                      altitude: $0.altitude,
                                                      timestamp: $0.timestamp,
                                                      speed: $0.speed,
-                                                     distanceFromStart: $0.distanceFromStart)
+                                                     distanceFromStart: $0.distanceFromStart,
+                           horizontalAccuracy: $0.horizontalAccuracy,
+                           verticalAccuracy: $0.verticalAccuracy,
+                           course: $0.course,
+                           rawSpeed: $0.rawSpeed,
+                           speedAccuracy: $0.speedAccuracy,
+                           courseAccuracy: $0.courseAccuracy,
+                           rawLatitude: $0.rawLatitude,
+                           rawLongitude: $0.rawLongitude)
                                   }
                                 : [],
                               laps: session.sortedLaps.map {
@@ -371,6 +389,7 @@ final class BackupManager: ObservableObject {
             session.healthKitUUID = backup.healthKitUUID
             session.isImported = backup.isImported
             session.sourceApp = backup.sourceApp
+            session.healthDetailsJSON = backup.healthDetailsJSON
             session.distanceSourceRaw = backup.distanceSource
             session.rpe = backup.rpe
             session.routePoints = backup.routePoints.map {
@@ -379,7 +398,15 @@ final class BackupManager: ObservableObject {
                            altitude: $0.altitude,
                            timestamp: $0.timestamp,
                            speed: $0.speed,
-                           distanceFromStart: $0.distanceFromStart)
+                           distanceFromStart: $0.distanceFromStart,
+                           horizontalAccuracy: $0.horizontalAccuracy,
+                           verticalAccuracy: $0.verticalAccuracy,
+                           course: $0.course,
+                           rawSpeed: $0.rawSpeed,
+                           speedAccuracy: $0.speedAccuracy,
+                           courseAccuracy: $0.courseAccuracy,
+                           rawLatitude: $0.rawLatitude,
+                           rawLongitude: $0.rawLongitude)
             }
             session.laps = backup.laps.map {
                 LapRecord(lapNumber: $0.lapNumber,

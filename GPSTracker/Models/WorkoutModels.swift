@@ -194,6 +194,8 @@ final class WorkoutSession {
     var isImported: Bool = false
     /// 原始來源 App 名稱（例如 Apple Watch、Nike Run Club）
     var sourceApp: String?
+    /// Versioned, unit-labelled provenance and associated metric series.
+    var healthDetailsJSON: String?
     /// 距離來源：gps / pedometer / stride / manual
     var distanceSourceRaw: String?
     /// 自覺強度 RPE 1-10（運動後自行評分）
@@ -398,6 +400,14 @@ final class RoutePoint {
     var speed: Double
     /// 自起點累積距離（公尺）
     var distanceFromStart: Double
+    var horizontalAccuracy: Double?
+    var verticalAccuracy: Double?
+    var course: Double?
+    var rawSpeed: Double?
+    var speedAccuracy: Double?
+    var courseAccuracy: Double?
+    var rawLatitude: Double?
+    var rawLongitude: Double?
     var session: WorkoutSession?
 
     init(latitude: Double,
@@ -405,13 +415,29 @@ final class RoutePoint {
          altitude: Double,
          timestamp: Date,
          speed: Double = 0,
-         distanceFromStart: Double = 0) {
+         distanceFromStart: Double = 0,
+         horizontalAccuracy: Double? = nil,
+         verticalAccuracy: Double? = nil,
+         course: Double? = nil,
+         rawSpeed: Double? = nil,
+         speedAccuracy: Double? = nil,
+         courseAccuracy: Double? = nil,
+         rawLatitude: Double? = nil,
+         rawLongitude: Double? = nil) {
         self.latitude = latitude
         self.longitude = longitude
         self.altitude = altitude
         self.timestamp = timestamp
         self.speed = speed
         self.distanceFromStart = distanceFromStart
+        self.horizontalAccuracy = horizontalAccuracy
+        self.verticalAccuracy = verticalAccuracy
+        self.course = course
+        self.rawSpeed = rawSpeed
+        self.speedAccuracy = speedAccuracy
+        self.courseAccuracy = courseAccuracy
+        self.rawLatitude = rawLatitude
+        self.rawLongitude = rawLongitude
     }
 
     /// 秒 / 公里，速度為 0 時回傳 nil
