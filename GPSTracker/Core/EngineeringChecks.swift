@@ -10,6 +10,11 @@ enum EngineeringChecks {
         let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("engineering-checks.txt")
         var lines: [String] = []
+        func heartbeat(_ message: String) {
+            try? ("RUNNING: " + message + "\n")
+                .write(to: output, atomically: true, encoding: .utf8)
+        }
+        heartbeat("engineering checks started")
         do {
             let schema = Schema([WorkoutSession.self, RoutePoint.self, LapRecord.self, WorkoutGoal.self])
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
@@ -37,7 +42,17 @@ enum EngineeringChecks {
                 }
             }
             let began = Date()
-            let inserted = try await writer.insert(payload, cancellation: ImportCancellation())
+            heartbeat("40,000-point writer starting")
+            let inserted = try await writer.insert(
+                payload,
+                cancellation: ImportCancellation(),
+                onProgress: { saved, total in
+                    let elapsed = Date().timeIntervalSince(began)
+                    try? String(format: "RUNNING: persisted %d / %d points in %.1fs\n",
+                                saved, total, elapsed)
+                        .write(to: output, atomically: true, encoding: .utf8)
+                }
+            )
             ticker.cancel()
             guard inserted, ticks > 1 else { throw CheckError.failed("writer blocked UI executor") }
             let context = ModelContext(container)
