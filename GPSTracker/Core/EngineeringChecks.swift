@@ -54,12 +54,25 @@ enum EngineeringChecks {
                 }
             )
             ticker.cancel()
+            heartbeat("writer returned after \(String(format: "%.1f", Date().timeIntervalSince(began)))s")
             guard inserted, ticks > 1 else { throw CheckError.failed("writer blocked UI executor") }
+
+            heartbeat("fetching saved workout")
             let context = ModelContext(container)
             let saved = try context.fetch(FetchDescriptor<WorkoutSession>())
-            guard saved.count == 1, saved[0].routePoints.count == 40_000,
-                  saved[0].sortedPoints.last?.courseAccuracy == 1 else {
-                throw CheckError.failed("full route / accuracy persistence")
+            heartbeat("workout fetched; loading relationship")
+            guard saved.count == 1 else { throw CheckError.failed("saved workout count") }
+
+            let routeCount = saved[0].routePoints.count
+            heartbeat("relationship loaded: \(routeCount) points")
+            guard routeCount == 40_000 else {
+                throw CheckError.failed("full route point count")
+            }
+
+            heartbeat("sorting 40,000 points for fidelity check")
+            let finalAccuracy = saved[0].sortedPoints.last?.courseAccuracy
+            guard finalAccuracy == 1 else {
+                throw CheckError.failed("accuracy persistence")
             }
             lines.append("PASS 40,000 full points + accuracy fields; UI ticks=\(ticks); write seconds=\(Date().timeIntervalSince(began))")
             let duplicate = try await writer.insert(payload, cancellation: ImportCancellation())
