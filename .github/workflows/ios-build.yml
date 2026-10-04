@@ -59,12 +59,20 @@ jobs:
             if [ -f "$CONTAINER/Documents/engineering-checks.txt" ]; then
               cp "$CONTAINER/Documents/engineering-checks.txt" "$RUNNER_TEMP/engineering-checks.txt"
               cat "$RUNNER_TEMP/engineering-checks.txt"
-              grep -q 'ALL CHECKS PASSED' "$RUNNER_TEMP/engineering-checks.txt"
-              exit $?
+              if grep -q 'ALL CHECKS PASSED' "$RUNNER_TEMP/engineering-checks.txt"; then
+                exit 0
+              fi
+              if grep -q '^FAILED:' "$RUNNER_TEMP/engineering-checks.txt"; then
+                exit 1
+              fi
             fi
             sleep 5
           done
           echo "Integration checks timed out"
+          if [ -f "$RUNNER_TEMP/engineering-checks.txt" ]; then
+            echo "Last engineering-check state:"
+            cat "$RUNNER_TEMP/engineering-checks.txt"
+          fi
           exit 1
 
       - name: Archive (unsigned)
