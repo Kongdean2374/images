@@ -83,7 +83,9 @@ struct Achievement: Identifiable, Hashable {
 
 enum AchievementEngine {
 
-    static func evaluate(sessions: [WorkoutSession], calendar: Calendar = .current) -> [Achievement] {
+    static func evaluate(sessions: [WorkoutSession],
+                         withRouteCount: Int = 0,
+                         calendar: Calendar = .current) -> [Achievement] {
         guard !sessions.isEmpty else { return template() }
 
         let totalDistanceKM = sessions.reduce(0.0) { $0 + ($1.totalDistance ?? 0) } / 1000
@@ -101,7 +103,8 @@ enum AchievementEngine {
         let plankBest = sessions.filter { $0.type == .plank }.map { $0.duration }.max() ?? 0
         let repsTotal = Double(sessions.reduce(0) { $0 + ($1.repCount ?? 0) })
         let testCount = Double(sessions.filter { $0.type == .fitnessTest }.count)
-        let withRoute = Double(sessions.filter { !$0.routePoints.isEmpty }.count)
+        // routePoints 是大型 SwiftData relationship；數量由背景 ModelActor 預先統計。
+        let withRoute = Double(withRouteCount)
         let ratedCount = Double(sessions.filter { $0.rpe != nil }.count)
 
         var result: [Achievement] = []
