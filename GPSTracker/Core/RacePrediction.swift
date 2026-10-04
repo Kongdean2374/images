@@ -1,7 +1,7 @@
 import Foundation
 
 /// 用最佳分段推估各距離的比賽成績（Riegel 公式）
-struct RacePrediction: Identifiable, Hashable {
+struct RacePrediction: Identifiable, Hashable, Sendable {
     let id = UUID()
     let distance: Double        // 公尺
     let label: String
@@ -79,7 +79,7 @@ enum RacePredictionEngine {
 
 // MARK: - 訓練強度分佈（80/20）
 
-struct IntensityBalance {
+struct IntensityBalance: Sendable {
     var easySeconds: TimeInterval = 0
     var moderateSeconds: TimeInterval = 0
     var hardSeconds: TimeInterval = 0
