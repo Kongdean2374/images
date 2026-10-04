@@ -27,6 +27,7 @@ struct GPSTrackerApp: App {
                         return
                     }
                     #endif
+                    AnalysisDataService.shared.configure(container: sharedModelContainer)
                     HealthKitImporter.shared.configure(container: sharedModelContainer)
                     HealthKitManager.shared.refreshAvailability()
                     if settings.backgroundUpdates {
