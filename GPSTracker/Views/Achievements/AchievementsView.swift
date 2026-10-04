@@ -5,11 +5,27 @@ import SwiftData
 struct AchievementsView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
     @State private var category: AchievementCategory?
+    @State private var withRouteCount = 0
+    @State private var routeCountKey = ""
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
+    private var dataKey: String {
+        "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")"
+    }
+
     private var achievements: [Achievement] {
-        AchievementEngine.evaluate(sessions: sessions)
+        AchievementEngine.evaluate(sessions: sessions, withRouteCount: withRouteCount)
+    }
+
+    @MainActor
+    private func refreshRouteCount() async {
+        let key = dataKey
+        guard routeCountKey != key else { return }
+        let count = await AnalysisDataService.shared.routeCount(key: key)
+        guard key == dataKey else { return }
+        withRouteCount = count
+        routeCountKey = key
     }
 
     private var filtered: [Achievement] {
@@ -35,6 +51,7 @@ struct AchievementsView: View {
                 .padding(.bottom, 24)
             }
         }
+        .task(id: dataKey) { await refreshRouteCount() }
     }
 
     private var summaryCard: some View {
