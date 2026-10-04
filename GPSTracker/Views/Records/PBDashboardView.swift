@@ -12,15 +12,32 @@ struct PBDashboardView: View {
     @State private var cachedRecords = PersonalRecords()
     @State private var cachedEfforts: [BestEffort] = []
     @State private var cacheKey = ""
+    @State private var effortKey = ""
+    @State private var isLoadingEfforts = false
 
     private var records: PersonalRecords { cachedRecords }
 
+    private var dataKey: String {
+        "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")"
+    }
+
     private func rebuildCacheIfNeeded() {
-        let key = "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")"
-        guard cacheKey != key else { return }
-        cacheKey = key
+        guard cacheKey != dataKey else { return }
+        cacheKey = dataKey
+        // 個人紀錄本身只需要 session metadata，這段很輕。
         cachedRecords = StatsEngine.personalRecords(sessions: sessions)
-        cachedEfforts = BestEffortEngine.evaluate(sessions: sessions)
+    }
+
+    @MainActor
+    private func rebuildEffortsIfNeeded() async {
+        let key = dataKey
+        guard effortKey != key else { return }
+        isLoadingEfforts = true
+        let efforts = await AnalysisDataService.shared.bestEfforts(key: key)
+        guard key == dataKey else { return }
+        cachedEfforts = efforts
+        effortKey = key
+        isLoadingEfforts = false
     }
 
     var body: some View {
@@ -42,6 +59,7 @@ struct PBDashboardView: View {
         .screenBackground()
         .onAppear { rebuildCacheIfNeeded() }
         .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
+        .task(id: dataKey) { await rebuildEffortsIfNeeded() }
         .navigationTitle("成就")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -59,8 +77,20 @@ struct PBDashboardView: View {
                 } else {
                     totalsCard
                     streakCard
-                    BestEffortsCard(efforts: cachedEfforts,
-                                    unit: settings.unit)
+                    if isLoadingEfforts {
+                        GlassCard {
+                            HStack(spacing: 12) {
+                                ProgressView()
+                                Text("正在背景計算完整 GPS 軌跡的最佳分段…")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textSecondary)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    } else {
+                        BestEffortsCard(efforts: cachedEfforts,
+                                        unit: settings.unit)
+                    }
                     if records.fastestPace != nil {
                         recordCard(title: "最快平均配速",
                                    value: Fmt.pace(records.fastestPace?.value, unit: settings.unit),
