@@ -137,7 +137,9 @@ actor HealthImportWriter {
     }
 
     @discardableResult
-    func insert(_ payload: HealthImportPayload, cancellation: ImportCancellation) async throws -> Bool {
+    func insert(_ payload: HealthImportPayload,
+                cancellation: ImportCancellation,
+                onProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> Bool {
         precondition(!Thread.isMainThread, "Health import writer must not use the UI executor")
 
         let uuid = payload.healthKitUUID
@@ -195,6 +197,8 @@ actor HealthImportWriter {
             try context.save()
         }
 
+        onProgress?(0, payload.routePoints.count)
+
         do {
             var offset = 0
             while offset < payload.routePoints.count {
@@ -235,6 +239,7 @@ actor HealthImportWriter {
                 try cancellation.check()
                 try context.save()
                 offset = upper
+                onProgress?(offset, payload.routePoints.count)
 
                 // 主動讓出執行權。資料仍完整保存，只把「一次要 SwiftData 吞多少」
                 // 切小，不是抽稀 GPS。
