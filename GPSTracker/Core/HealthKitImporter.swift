@@ -105,7 +105,7 @@ struct HealthImportKeys: Sendable {
 actor HealthImportWriter {
     /// 一批不要太大，避免 SwiftData 一次建立幾萬筆 relationship graph；
     /// 也不要太小，否則 save 次數本身會變成主要成本。
-    private let routeBatchSize = 500
+    private let routeBatchSize = 4000
 
     private func makeContext() -> ModelContext {
         let context = ModelContext(modelContainer)
