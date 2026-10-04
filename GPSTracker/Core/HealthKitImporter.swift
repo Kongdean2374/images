@@ -103,67 +103,175 @@ struct HealthImportKeys: Sendable {
 /// SwiftData relationship graph traversal，造成 3～7 秒 runloop hang，嚴重時看起來就像閃退。
 @ModelActor
 actor HealthImportWriter {
-    func existingKeys() throws -> HealthImportKeys {
-        let sessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
-        return HealthImportKeys(uuids: Set(sessions.compactMap { $0.healthKitUUID }))
+    /// 一批不要太大，避免 SwiftData 一次建立幾萬筆 relationship graph；
+    /// 也不要太小，否則 save 次數本身會變成主要成本。
+    private let routeBatchSize = 500
+
+    private func makeContext() -> ModelContext {
+        let context = ModelContext(modelContainer)
+        context.autosaveEnabled = false
+        return context
     }
 
-    @discardableResult
-    func insert(_ payload: HealthImportPayload, cancellation: ImportCancellation) throws -> Bool {
-        precondition(!Thread.isMainThread, "Health import writer must not use the UI executor")
-        let uuid = payload.healthKitUUID
-        let descriptor = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.healthKitUUID == uuid })
-        if try modelContext.fetchCount(descriptor) > 0 { return false }
-        modelContext.autosaveEnabled = false
-        defer { modelContext.rollback() }
-        try cancellation.check()
-        let type = WorkoutType(rawValue: payload.typeRaw) ?? .manualEntry
-        let session = WorkoutSession(type: type,
-                                     startDate: payload.startDate,
-                                     endDate: payload.endDate,
-                                     duration: payload.duration,
-                                     totalDistance: payload.totalDistance,
-                                     averagePace: payload.averagePace,
-                                     elevationGain: payload.elevationGain,
-                                     elevationLoss: payload.elevationLoss,
-                                     stepCount: payload.stepCount,
-                                     distanceSource: payload.routePoints.count > 1 ? .gps : .pedometer,
-                                     routeKey: nil,
-                                     title: nil)
+    /// App 若在匯入途中被系統終止，下一次匯入先清掉未完成的 staging session。
+    /// 舊版本沒有這個欄位（nil）視為已完成，不影響既有資料。
+    func existingKeys() throws -> HealthImportKeys {
+        let context = makeContext()
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        var uuids = Set<String>()
+        var removedIncomplete = false
 
-        session.calories = payload.calories
-        session.intensityScore = payload.intensityScore
-        session.sportRaw = payload.sportRaw
-        session.healthKitUUID = payload.healthKitUUID
-        session.healthKitSynced = true
-        session.isImported = true
-        session.sourceApp = payload.sourceApp
-        session.healthDetailsJSON = payload.detailsJSON
-        session.notes = "自 \(payload.sourceApp) 匯入"
-
-        if !payload.routePoints.isEmpty {
-            session.routePoints = try payload.routePoints.enumerated().map { index, point in
-                if index.isMultiple(of: 128) { try cancellation.check() }
-                let model = RoutePoint(latitude: point.latitude,
-                           longitude: point.longitude,
-                           altitude: point.altitude,
-                           timestamp: point.timestamp,
-                           speed: point.speed,
-                           distanceFromStart: point.distanceFromStart)
-                model.horizontalAccuracy = point.horizontalAccuracy
-                model.verticalAccuracy = point.verticalAccuracy
-                model.course = point.course
-                model.rawSpeed = point.speed
-                model.speedAccuracy = point.speedAccuracy
-                model.courseAccuracy = point.courseAccuracy
-                return model
+        for session in sessions {
+            if session.healthImportStateRaw == "importing" {
+                context.delete(session)
+                removedIncomplete = true
+            } else if let uuid = session.healthKitUUID {
+                uuids.insert(uuid)
             }
         }
 
-        modelContext.insert(session)
+        if removedIncomplete {
+            try context.save()
+        }
+        return HealthImportKeys(uuids: uuids)
+    }
+
+    @discardableResult
+    func insert(_ payload: HealthImportPayload, cancellation: ImportCancellation) async throws -> Bool {
+        precondition(!Thread.isMainThread, "Health import writer must not use the UI executor")
+
+        let uuid = payload.healthKitUUID
+
+        // 先處理同 UUID。完整紀錄直接略過；未完成 staging 紀錄先清掉再重來。
+        do {
+            let context = makeContext()
+            let descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { $0.healthKitUUID == uuid }
+            )
+            if let existing = try context.fetch(descriptor).first {
+                if existing.healthImportStateRaw == "importing" {
+                    context.delete(existing)
+                    try context.save()
+                } else {
+                    return false
+                }
+            }
+        }
+
         try cancellation.check()
-        try modelContext.save()
-        return true
+        let type = WorkoutType(rawValue: payload.typeRaw) ?? .manualEntry
+        let sessionID = UUID()
+
+        // 先只建立 session metadata。route points 之後用新的 ModelContext 分批追加，
+        // 讓任何一個 context 都不需要同時追蹤整條幾萬點的軌跡。
+        do {
+            let context = makeContext()
+            let session = WorkoutSession(id: sessionID,
+                                         type: type,
+                                         startDate: payload.startDate,
+                                         endDate: payload.endDate,
+                                         duration: payload.duration,
+                                         totalDistance: payload.totalDistance,
+                                         averagePace: payload.averagePace,
+                                         elevationGain: payload.elevationGain,
+                                         elevationLoss: payload.elevationLoss,
+                                         stepCount: payload.stepCount,
+                                         distanceSource: payload.routePoints.count > 1 ? .gps : .pedometer,
+                                         routeKey: nil,
+                                         title: nil)
+
+            session.calories = payload.calories
+            session.intensityScore = payload.intensityScore
+            session.sportRaw = payload.sportRaw
+            session.healthKitUUID = payload.healthKitUUID
+            session.healthKitSynced = true
+            session.isImported = true
+            session.sourceApp = payload.sourceApp
+            session.healthDetailsJSON = payload.detailsJSON
+            session.healthImportStateRaw = "importing"
+            session.notes = "自 \(payload.sourceApp) 匯入"
+
+            context.insert(session)
+            try context.save()
+        }
+
+        do {
+            var offset = 0
+            while offset < payload.routePoints.count {
+                try cancellation.check()
+                try Task.checkCancellation()
+
+                let upper = min(offset + routeBatchSize, payload.routePoints.count)
+                let context = makeContext()
+                let id = sessionID
+                let descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { $0.id == id }
+                )
+                guard let session = try context.fetch(descriptor).first else {
+                    throw HealthImportWriterError.stagingSessionMissing
+                }
+
+                for index in offset..<upper {
+                    if index.isMultiple(of: 64) {
+                        try cancellation.check()
+                    }
+                    let point = payload.routePoints[index]
+                    let model = RoutePoint(latitude: point.latitude,
+                                           longitude: point.longitude,
+                                           altitude: point.altitude,
+                                           timestamp: point.timestamp,
+                                           speed: point.speed,
+                                           distanceFromStart: point.distanceFromStart,
+                                           horizontalAccuracy: point.horizontalAccuracy,
+                                           verticalAccuracy: point.verticalAccuracy,
+                                           course: point.course,
+                                           rawSpeed: point.speed,
+                                           speedAccuracy: point.speedAccuracy,
+                                           courseAccuracy: point.courseAccuracy)
+                    model.session = session
+                    context.insert(model)
+                }
+
+                try cancellation.check()
+                try context.save()
+                offset = upper
+
+                // 主動讓出執行權。資料仍完整保存，只把「一次要 SwiftData 吞多少」
+                // 切小，不是抽稀 GPS。
+                await Task.yield()
+            }
+
+            // 所有 route points 都成功持久化後才標記 complete。
+            let context = makeContext()
+            let id = sessionID
+            let descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { $0.id == id }
+            )
+            guard let session = try context.fetch(descriptor).first else {
+                throw HealthImportWriterError.stagingSessionMissing
+            }
+            try cancellation.check()
+            session.healthImportStateRaw = "complete"
+            try context.save()
+            return true
+        } catch {
+            // 取消、磁碟錯誤或任何中途失敗都不能留下「看似完整」的半條軌跡。
+            // cascade relationship 會連已寫入的 RoutePoint 一起清除。
+            let context = makeContext()
+            let id = sessionID
+            let descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { $0.id == id }
+            )
+            if let session = try? context.fetch(descriptor).first {
+                context.delete(session)
+                try? context.save()
+            }
+            throw error
+        }
+    }
+
+    private enum HealthImportWriterError: Error {
+        case stagingSessionMissing
     }
 }
 
