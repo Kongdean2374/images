@@ -101,8 +101,13 @@ struct HealthImportKeys: Sendable {
 /// SwiftData 大量關聯寫入不能塞在主執行緒。
 /// HealthKit 匯入可能一次帶進數千個 RoutePoint，舊版會在主執行緒做
 /// SwiftData relationship graph traversal，造成 3～7 秒 runloop hang，嚴重時看起來就像閃退。
-@ModelActor
 actor HealthImportWriter {
+    private let modelContainer: ModelContainer
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
     /// 一批不要太大，避免 SwiftData 一次建立幾萬筆 relationship graph；
     /// 也不要太小，否則 save 次數本身會變成主要成本。
     private let routeBatchSize = 4000
