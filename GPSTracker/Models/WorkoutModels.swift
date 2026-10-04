@@ -192,6 +192,8 @@ final class WorkoutSession {
     var healthKitUUID: String?
     /// 這筆紀錄是從健康 App 匯入的
     var isImported: Bool = false
+    /// HealthKit 大型軌跡匯入狀態。nil 代表舊資料／一般紀錄；importing 只用於 staging。
+    var healthImportStateRaw: String?
     /// 原始來源 App 名稱（例如 Apple Watch、Nike Run Club）
     var sourceApp: String?
     /// Versioned, unit-labelled provenance and associated metric series.
