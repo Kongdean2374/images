@@ -71,7 +71,7 @@ struct RootView: View {
             guard !didAutoImport else { return }
             didAutoImport = true
             guard settings.autoImportHealth, HealthKitManager.shared.isReady else { return }
-            await HealthKitImporter.shared.importNew(context: context, existing: sessions)
+            await HealthKitImporter.shared.importNew(existing: sessions)
             if settings.backgroundUpdates {
                 await HealthBackgroundMonitor.shared.checkDailyGoals()
             }

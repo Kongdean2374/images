@@ -151,7 +151,7 @@ struct HealthImportView: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.accentWarm)
                         }
-                        Text("每 25 筆就會存檔一次，中斷後已匯入的都會保留，再按一次匯入就會從沒處理到的繼續。")
+                        Text("每一筆完成後就會立即存檔；大量 GPS 點會在背景資料庫執行，不再卡住畫面。中斷後已完成的紀錄都會保留。")
                             .font(.caption2)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -368,7 +368,6 @@ struct HealthImportView: View {
     private func runImport() async {
         message = nil
         let result = await importer.importWorkouts(range: range,
-                                                   context: context,
                                                    existing: sessions,
                                                    includeRoutes: includeRoutes)
         message = result.summary
@@ -379,7 +378,7 @@ struct HealthImportView: View {
 
     private func runImportNew() async {
         message = nil
-        let result = await importer.importNew(context: context, existing: sessions)
+        let result = await importer.importNew(existing: sessions)
         message = result.imported > 0 ? result.summary : "沒有新的紀錄"
         if result.imported > 0 { CueService.shared.notify(.success) }
     }
