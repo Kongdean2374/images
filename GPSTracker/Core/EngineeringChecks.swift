@@ -14,14 +14,16 @@ enum EngineeringChecks {
             try? ("RUNNING: " + message + "\n")
                 .write(to: output, atomically: true, encoding: .utf8)
         }
-        heartbeat("engineering checks started")
+        let fullStress = ProcessInfo.processInfo.arguments.contains("--engineering-tests-full")
+        let routePointCount = fullStress ? 40_000 : 4_000
+        heartbeat(fullStress ? "full engineering checks started (40k)" : "fast engineering checks started (4k)")
         do {
             let schema = Schema([WorkoutSession.self, RoutePoint.self, LapRecord.self, WorkoutGoal.self])
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             let container = try ModelContainer(for: schema, configurations: [configuration])
             let writer = await Task.detached { HealthImportWriter(modelContainer: container) }.value
             let start = Date(timeIntervalSince1970: 1_700_000_000)
-            let points = (0..<40_000).map { index in
+            let points = (0..<routePointCount).map { index in
                 HealthImportRoutePoint(latitude: 22.6 + Double(index) * 0.000001,
                                        longitude: 120.3, altitude: 10, timestamp: start.addingTimeInterval(Double(index)),
                                        speed: 2, distanceFromStart: Double(index) * 2,
@@ -29,8 +31,9 @@ enum EngineeringChecks {
                                        speedAccuracy: 0.2, courseAccuracy: 1)
             }
             let payload = HealthImportPayload(typeRaw: "gpsRun", sportRaw: nil, startDate: start,
-                                               endDate: start.addingTimeInterval(40_000), duration: 40_000,
-                                               totalDistance: 80_000, averagePace: 500,
+                                               endDate: start.addingTimeInterval(Double(routePointCount)),
+                                               duration: Double(routePointCount),
+                                               totalDistance: Double(routePointCount) * 2, averagePace: 500,
                                                elevationGain: nil, elevationLoss: nil, stepCount: nil,
                                                calories: nil, intensityScore: nil, healthKitUUID: "test-full-route",
                                                sourceApp: "Fixture", detailsJSON: "{}", routePoints: points)
@@ -42,7 +45,7 @@ enum EngineeringChecks {
                 }
             }
             let began = Date()
-            heartbeat("40,000-point writer starting")
+            heartbeat("\(routePointCount)-point writer starting")
             let inserted = try await writer.insert(
                 payload,
                 cancellation: ImportCancellation(),
@@ -65,19 +68,41 @@ enum EngineeringChecks {
 
             let routeCount = saved[0].routePoints.count
             heartbeat("relationship loaded: \(routeCount) points")
-            guard routeCount == 40_000 else {
+            guard routeCount == routePointCount else {
                 throw CheckError.failed("full route point count")
             }
 
-            heartbeat("sorting 40,000 points for fidelity check")
+            heartbeat("sorting \(routePointCount) points for fidelity check")
             let finalAccuracy = saved[0].sortedPoints.last?.courseAccuracy
             guard finalAccuracy == 1 else {
                 throw CheckError.failed("accuracy persistence")
             }
-            lines.append("PASS 40,000 full points + accuracy fields; UI ticks=\(ticks); write seconds=\(Date().timeIntervalSince(began))")
+            lines.append("PASS \(routePointCount) full points + accuracy fields; UI ticks=\(ticks); write seconds=\(Date().timeIntervalSince(began))")
             let duplicate = try await writer.insert(payload, cancellation: ImportCancellation())
             guard !duplicate else { throw CheckError.failed("duplicate UUID") }
             lines.append("PASS duplicate UUID remains one workout")
+
+            // Regression for the Analytics / Achievements tab hang:
+            // the same SwiftData route relationship scan must happen on AnalysisDataWorker,
+            // while the MainActor continues to tick.
+            var analysisTicks = 0
+            let analysisTicker = Task { @MainActor in
+                while !Task.isCancelled {
+                    analysisTicks += 1
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+            }
+            let analysisWorker = await Task.detached(priority: .utility) {
+                AnalysisDataWorker(modelContainer: container)
+            }.value
+            heartbeat("background analysis worker starting")
+            let effortResult = try await analysisWorker.bestEfforts(key: "engineering-\(routePointCount)")
+            let analysisRouteCount = try await analysisWorker.routeCount(key: "engineering-\(routePointCount)")
+            analysisTicker.cancel()
+            guard analysisTicks > 1 else { throw CheckError.failed("analysis worker blocked UI executor") }
+            guard analysisRouteCount == 1 else { throw CheckError.failed("analysis route count") }
+            guard !effortResult.isEmpty else { throw CheckError.failed("background best effort result") }
+            lines.append("PASS background route analysis; UI ticks=\(analysisTicks)")
             let cancelled = ImportCancellation()
             cancelled.cancel()
             do {
