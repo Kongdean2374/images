@@ -14,6 +14,9 @@ struct AnalyticsView: View {
     @State private var exportURL: URL?
     @State private var showExport = false
     @State private var isExporting = false
+    @State private var heavyDataKey = ""
+    @State private var isLoadingRouteAnalysis = false
+    @State private var hasLoadedRouteAnalysis = false
 
     /// 所有重運算的結果都先算好放這裡。
     ///
@@ -41,8 +44,12 @@ struct AnalyticsView: View {
     /// 上次計算時的資料指紋，變了才重算
     @State private var cacheKey = ""
 
+    private var dataKey: String {
+        "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")"
+    }
+
     private var currentKey: String {
-        "\(sessions.count)-\(sessions.first?.id.uuidString ?? "")-\(range.rawValue)"
+        "\(dataKey)-\(range.rawValue)"
     }
 
     private func rebuildCacheIfNeeded() {
@@ -56,13 +63,14 @@ struct AnalyticsView: View {
         var next = Analytics()
         next.buckets = StatsEngine.trend(sessions: sessions, range: range)
         next.comparableGroups = StatsEngine.comparableGroups(sessions: sessions)
-        next.routeClusters = RouteClusterEngine.cluster(sessions: sessions)
+        // routePoints 相關工作不能在 Tab 進場的 MainActor 上做。
+        // 保留上一輪背景結果，新的資料指紋會由 task 重新整理。
+        next.routeClusters = cache.routeClusters
+        next.racePredictions = cache.racePredictions
+        next.balance = cache.balance
+        next.integrity = cache.integrity
         next.weatherPoints = StatsEngine.weatherCorrelation(sessions: sessions)
-        next.racePredictions = RacePredictionEngine.predictions(
-            from: BestEffortEngine.evaluate(sessions: sessions))
-        next.balance = IntensityBalanceEngine.evaluate(sessions: sessions)
         next.loadReport = TrainingLoadEngine.report(sessions: sessions)
-        next.integrity = DataIntegrity.report(sessions: sessions)
         next.cadenceStats = DataIntegrity.cadenceStats(sessions: sessions)
         next.typeShares = StatsEngine.typeDistribution(sessions: sessions)
         next.cadenceSeries = Array(sessions.compactMap { session -> CadencePoint? in
@@ -75,6 +83,35 @@ struct AnalyticsView: View {
         next.hasPaceData = sessions.contains { ($0.averagePace ?? 0) > 0 }
         next.hasIntensityData = sessions.contains { ($0.intensityScore ?? 0) > 0 }
         cache = next
+    }
+
+    @MainActor
+    private func rebuildHeavyAnalysis() async {
+        let key = dataKey
+        guard !sessions.isEmpty else {
+            heavyDataKey = key
+            hasLoadedRouteAnalysis = true
+            isLoadingRouteAnalysis = false
+            return
+        }
+        guard heavyDataKey != key || !hasLoadedRouteAnalysis else { return }
+
+        isLoadingRouteAnalysis = true
+        hasLoadedRouteAnalysis = false
+
+        guard let result = await AnalysisDataService.shared.heavyAnalytics(key: key) else {
+            if key == dataKey { isLoadingRouteAnalysis = false }
+            return
+        }
+        guard key == dataKey else { return }
+
+        cache.routeClusters = result.routeClusters
+        cache.racePredictions = result.racePredictions
+        cache.balance = result.balance
+        cache.integrity = result.integrity
+        heavyDataKey = key
+        hasLoadedRouteAnalysis = true
+        isLoadingRouteAnalysis = false
     }
 
     private var buckets: [TrendBucket] { cache.buckets }
@@ -95,19 +132,24 @@ struct AnalyticsView: View {
                     insightsLink
                     trendCard
                     if hasDurationData { trainingLoadCard }
-                    if hasPaceData {
+                    if isLoadingRouteAnalysis { routeAnalysisLoadingCard }
+                    if hasPaceData && hasLoadedRouteAnalysis {
                         IntensityBalanceCard(balance: cache.balance)
                     }
-                    if !racePredictions.isEmpty {
+                    if hasLoadedRouteAnalysis && !racePredictions.isEmpty {
                         RacePredictionCard(predictions: racePredictions, unit: settings.unit)
                     }
                     goalCard
-                    if !routeClusters.isEmpty { autoRouteCard } else if !comparableGroups.isEmpty { comparisonCard }
+                    if hasLoadedRouteAnalysis && !routeClusters.isEmpty {
+                        autoRouteCard
+                    } else if !comparableGroups.isEmpty {
+                        comparisonCard
+                    }
                     if hasIntensityData { intensityCard }
                     distributionCard
                     if weatherPoints.count >= 2 { weatherCard }
                     cadenceCard
-                    integrityCard
+                    if hasLoadedRouteAnalysis { integrityCard }
                     exportCard
                 }
             }
@@ -118,6 +160,7 @@ struct AnalyticsView: View {
         .onAppear { rebuildCacheIfNeeded() }
         .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
         .onChange(of: range) { _, _ in rebuildCacheIfNeeded() }
+        .task(id: dataKey) { await rebuildHeavyAnalysis() }
         .navigationTitle("圖表分析")
         .sheet(isPresented: $showExport) {
             if let exportURL {
@@ -141,6 +184,22 @@ struct AnalyticsView: View {
 
     // MARK: 區塊
 
+    private var routeAnalysisLoadingCard: some View {
+        GlassCard {
+            HStack(spacing: 12) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("正在背景分析 GPS 軌跡")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("頁面可以正常操作；大量歷史軌跡的最佳分段與路線分群完成後會自動出現。")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
 
     // MARK: 訓練負荷
 
