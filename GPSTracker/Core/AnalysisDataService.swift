@@ -8,15 +8,22 @@ struct HeavyAnalyticsResult: Sendable {
     let integrity: IntegrityReport
 }
 
-@ModelActor
 actor AnalysisDataWorker {
+    private let modelContainer: ModelContainer
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
     private var cachedKey: String?
     private var cachedEfforts: [BestEffort] = []
     private var cachedHeavy: HeavyAnalyticsResult?
     private var cachedRouteCount = 0
 
     private func sessions() throws -> [WorkoutSession] {
-        try modelContext.fetch(FetchDescriptor<WorkoutSession>(
+        let context = ModelContext(modelContainer)
+        context.autosaveEnabled = false
+        return try context.fetch(FetchDescriptor<WorkoutSession>(
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
         ))
     }
