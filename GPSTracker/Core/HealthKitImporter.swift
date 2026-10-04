@@ -140,7 +140,9 @@ actor HealthImportWriter {
     func insert(_ payload: HealthImportPayload,
                 cancellation: ImportCancellation,
                 onProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> Bool {
-        precondition(!Thread.isMainThread, "Health import writer must not use the UI executor")
+        // 不用 Thread.isMainThread 當 concurrency 正確性的判斷。
+        // Swift actor 的 executor 與 OS thread 不是一對一；真正是否堵住 UI 由整合測試 ticker 驗證。
+        onProgress?(0, payload.routePoints.count)
 
         let uuid = payload.healthKitUUID
 
@@ -196,8 +198,6 @@ actor HealthImportWriter {
             context.insert(session)
             try context.save()
         }
-
-        onProgress?(0, payload.routePoints.count)
 
         do {
             var offset = 0
