@@ -2,7 +2,7 @@ import Foundation
 import CoreLocation
 
 /// 自動辨識出來的「同一條路線」
-struct RouteCluster: Identifiable, Hashable {
+struct RouteCluster: Identifiable, Hashable, Sendable {
     let id = UUID()
     let signature: String
     let name: String
