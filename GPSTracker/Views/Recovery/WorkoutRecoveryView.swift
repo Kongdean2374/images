@@ -12,6 +12,7 @@ struct WorkoutRecoveryView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @State private var saved = false
+    @State private var isSaving = false
     @State private var saveErrorMessage: String?
 
     private var title: String {
@@ -53,7 +54,7 @@ struct WorkoutRecoveryView: View {
             Text("上次的運動還沒結束")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(Theme.textPrimary)
-            Text("進度都有自動存檔，一筆都沒少。按「接續」就從中斷的地方繼續跑。")
+            Text("已找到最後一次自動存檔。按「接續」可從這份進度繼續，未寫入的最後幾秒可能無法恢復。")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -106,21 +107,23 @@ struct WorkoutRecoveryView: View {
     private var actions: some View {
         VStack(spacing: 10) {
             Button {
-                ActiveWorkoutStore.shared.clear()
+                // Keep the last good snapshot until the resumed recorder writes a new one.
                 onResume(snapshot)
                 dismiss()
             } label: {
                 Label("接續這場運動", systemImage: "play.fill")
             }
             .buttonStyle(PrimaryButtonStyle())
+            .disabled(isSaving)
 
+            if isSaving { ProgressView("正在完整保存運動與路線…") }
             Button {
                 saveNow()
             } label: {
-                Label(saved ? "已儲存" : "直接存成紀錄", systemImage: "square.and.arrow.down")
+                Label(saved ? "已儲存" : isSaving ? "正在背景儲存…" : "直接存成紀錄", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(SecondaryButtonStyle())
-            .disabled(saved)
+            .disabled(saved || isSaving)
 
             Button(role: .destructive) {
                 ActiveWorkoutStore.shared.clear()
@@ -131,6 +134,7 @@ struct WorkoutRecoveryView: View {
                     .foregroundStyle(Theme.accentWarm)
             }
             .padding(.top, 2)
+            .disabled(isSaving)
         }
     }
 
@@ -150,16 +154,24 @@ struct WorkoutRecoveryView: View {
         }
     }
 
+    @MainActor
     private func saveNow() {
-        let session = ActiveWorkoutStore.shared.buildSession(from: snapshot)
-        // 失敗的話自動存檔會留著，下次開啟還會再問一次
-        if case .failed(let message) = SessionSaver.save(session, context: context) {
-            saveErrorMessage = message
-            return
+        guard !isSaving, !saved else { return }
+        guard !DatabaseHealth.needsAttention else { saveErrorMessage = DatabaseHealth.message; return }
+        isSaving = true
+        let container = context.container
+        let weight = settings.bodyWeight
+        let sync = settings.healthKitEnabled && HealthKitManager.shared.isReady
+        Task {
+            defer { isSaving = false }
+            do {
+                let writer = await BackgroundFactory.make { WorkoutRecoveryWriter(modelContainer: container) }
+                _ = try await writer.save(snapshot: snapshot, bodyWeight: weight, syncHealth: sync)
+                saved = true
+                CueService.shared.impact(.heavy)
+                Task { await CalibrationCoordinator.shared.analyzeIfEnabled() }
+                dismiss()
+            } catch { saveErrorMessage = "儲存失敗，原始運動暫存已保留：" + error.localizedDescription }
         }
-        Task { await HealthKitSync.syncIfEnabled(session) }
-        saved = true
-        CueService.shared.impact(.heavy)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
     }
 }

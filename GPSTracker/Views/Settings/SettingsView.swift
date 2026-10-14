@@ -16,8 +16,7 @@ struct SettingsView: View {
     @State private var notificationsAuthorized = false
     @State private var showOnboardingAgain = false
     @State private var showAnnounceEditor = false
-    @State private var exportURL: URL?
-    @State private var showExport = false
+    @StateObject private var fileExport = WorkoutExportCoordinator()
     @State private var weightText = ""
 
     var body: some View {
@@ -72,21 +71,7 @@ struct SettingsView: View {
         } message: {
             Text("此操作無法復原，共 \(sessions.count) 筆紀錄。")
         }
-        .sheet(isPresented: $showExport) {
-            if let exportURL {
-                VStack(spacing: 16) {
-                    Text("已產生 CSV")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
-                    ShareLink(item: exportURL) {
-                        Label("分享／儲存", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
-                .padding()
-                .presentationDetents([.height(200)])
-            }
-        }
+        .workoutExport(using: fileExport)
     }
 
 
@@ -322,7 +307,7 @@ struct SettingsView: View {
                 NavigationLink {
                     StrideCalibrationView()
                 } label: {
-                    Label("開啟校正中心（自動計算精準度）", systemImage: "wand.and.stars")
+                    Label("開啟校正中心（一鍵匯入並分析）", systemImage: "wand.and.stars")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -346,7 +331,7 @@ struct SettingsView: View {
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
                 Text(StrideCalibration.isCalibrated(profile)
-                     ? String(format: "精準度 %.0f%%・樣本 %d",
+                     ? String(format: "資料充分程度 %.0f%%・樣本 %d",
                               StrideCalibration.confidence(profile) * 100,
                               StrideCalibration.sampleCount(profile))
                      : "尚未校正（使用平均值）")
@@ -694,8 +679,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    exportURL = DataExporter.csv(sessions: sessions)
-                    showExport = exportURL != nil
+                    fileExport.exportHistory()
                 } label: {
                     Label("匯出全部資料 CSV", systemImage: "square.and.arrow.up")
                 }

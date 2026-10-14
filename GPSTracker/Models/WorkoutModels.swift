@@ -106,7 +106,8 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
     /// 步幅校正時歸類為走路或跑步
     var strideProfile: StrideProfile {
         switch self {
-        case .walk, .gpsHike: return .walking
+        case .walk, .gpsHike, .stairs: return .walking
+        case .ruck: return .ruck
         default: return .running
         }
     }
@@ -135,7 +136,7 @@ enum WorkoutType: String, Codable, CaseIterable, Identifiable, Hashable {
 }
 
 enum StrideProfile: String, Codable {
-    case walking, running
+    case walking, running, ruck
 }
 
 /// 距離是怎麼算出來的，讓使用者知道數字可信度
@@ -145,6 +146,8 @@ enum DistanceSource: String, Codable {
     case stride
     case lap
     case manual
+    case mixed
+    case unknown
 
     var displayName: String {
         switch self {
@@ -153,6 +156,8 @@ enum DistanceSource: String, Codable {
         case .stride: return "個人步幅換算"
         case .lap: return "圈數換算"
         case .manual: return "手動輸入"
+        case .mixed: return "GPS 與推估混合"
+        case .unknown: return "來源不明"
         }
     }
 }
@@ -216,6 +221,13 @@ final class WorkoutSession {
     var routeKey: String?
     var title: String?
     var notes: String?
+    /// Optional additive fields: older stores remain readable without destructive migration.
+    var provenanceJSON: String?
+    var calibrationDecisionJSON: String?
+    var trainingExcluded: Bool = false
+    var estimateWindowsJSON: String?
+    var otherSeconds: Double?
+    var carryPositionRaw: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)
     var routePoints: [RoutePoint]
@@ -279,6 +291,16 @@ final class WorkoutSession {
         self.notes = notes
         self.routePoints = []
         self.laps = []
+    }
+
+    var evidence: MeasurementEvidence {
+        get { MeasurementEvidence.decode(provenanceJSON) }
+        set { provenanceJSON = newValue.json }
+    }
+
+    var calibrationDecision: CalibrationDecision? {
+        get { CalibrationDecision.decode(calibrationDecisionJSON) }
+        set { calibrationDecisionJSON = newValue?.json }
     }
 
     var type: WorkoutType {
@@ -396,6 +418,7 @@ final class RoutePoint {
     var timestamp: Date
     /// 平滑後的瞬時速度（公尺/秒）
     var speed: Double
+    var horizontalAccuracy: Double?
     /// 自起點累積距離（公尺）
     var distanceFromStart: Double
     var session: WorkoutSession?
@@ -405,12 +428,14 @@ final class RoutePoint {
          altitude: Double,
          timestamp: Date,
          speed: Double = 0,
-         distanceFromStart: Double = 0) {
+         distanceFromStart: Double = 0,
+         horizontalAccuracy: Double? = nil) {
         self.latitude = latitude
         self.longitude = longitude
         self.altitude = altitude
         self.timestamp = timestamp
         self.speed = speed
+        self.horizontalAccuracy = horizontalAccuracy
         self.distanceFromStart = distanceFromStart
     }
 

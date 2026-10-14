@@ -194,6 +194,46 @@ enum RouteRenderer {
         return result
     }
 
+    /// 軌跡被 Douglas–Peucker 抽稀後，相鄰保留點的時間差可能自然超過 20 秒。
+    /// 不能再直接拿抽稀後的時間戳判定「定位中斷」，否則長路線會被誤切成一堆空白段。
+    /// 這裡先從原始時間戳找出真正的中斷，再把那些中斷映射到保留點索引。
+    static func remapGapIndices(originalTimestamps: [Date],
+                                retainedTimestamps: [Date],
+                                threshold: TimeInterval = 20) -> Set<Int> {
+        guard retainedTimestamps.count > 1 else { return [] }
+
+        var originalGaps: [(start: Date, end: Date)] = []
+        if originalTimestamps.count > 1 {
+            for index in 0..<(originalTimestamps.count - 1) {
+                let start = originalTimestamps[index]
+                let end = originalTimestamps[index + 1]
+                if end.timeIntervalSince(start) > threshold {
+                    originalGaps.append((start, end))
+                }
+            }
+        }
+        guard !originalGaps.isEmpty else { return [] }
+
+        var result: Set<Int> = []
+        var gapCursor = 0
+
+        for index in 0..<(retainedTimestamps.count - 1) {
+            let start = retainedTimestamps[index]
+            let end = retainedTimestamps[index + 1]
+
+            while gapCursor < originalGaps.count && originalGaps[gapCursor].end <= start {
+                gapCursor += 1
+            }
+            guard gapCursor < originalGaps.count else { break }
+
+            let gap = originalGaps[gapCursor]
+            if gap.start >= start && gap.end <= end {
+                result.insert(index)
+            }
+        }
+        return result
+    }
+
     /// 舊介面：只給速度時預設用相對配速尺規
     static func segments(coordinates: [CLLocationCoordinate2D],
                          speeds: [Double]) -> [RouteSegment] {
@@ -291,10 +331,12 @@ struct RouteMapView: View {
             ForEach(segments) { segment in
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    .mapOverlayLevel(level: .aboveRoads)
             }
             if !highlightCoordinates.isEmpty {
                 MapPolyline(coordinates: highlightCoordinates)
                     .stroke(Color.white, style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
+                    .mapOverlayLevel(level: .aboveLabels)
             }
             if showsMarkers, let first = coordinates.first {
                 Annotation("起", coordinate: first) {

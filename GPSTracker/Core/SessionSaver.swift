@@ -19,6 +19,7 @@ enum SessionSaver {
     static func save(_ session: WorkoutSession,
                      context: ModelContext,
                      clearsAutosave: Bool = true) -> Result {
+        guard !DatabaseHealth.needsAttention else { return .failed(DatabaseHealth.message) }
         context.insert(session)
         do {
             try context.save()
@@ -26,6 +27,7 @@ enum SessionSaver {
                 // 只有確定寫進資料庫了，才放心刪掉自動存檔的備份
                 ActiveWorkoutStore.shared.clear()
             }
+            Task { await CalibrationCoordinator.shared.analyzeIfEnabled() }
             return .saved
         } catch {
             // 儲存失敗時保留自動存檔，下次開啟 App 還救得回來

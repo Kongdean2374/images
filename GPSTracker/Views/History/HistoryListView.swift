@@ -63,8 +63,7 @@ struct HistoryListView: View {
     @State private var filter: WorkoutType?
     @State private var pendingDelete: WorkoutSession?
     @State private var searchText = ""
-    @State private var exportURL: URL?
-    @State private var showExportShare = false
+    @StateObject private var fileExport = WorkoutExportCoordinator()
 
     private var filtered: [WorkoutSession] {
         sessions.filter { session in
@@ -153,8 +152,7 @@ struct HistoryListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
-                        exportURL = DataExporter.csv(sessions: sessions)
-                        showExportShare = exportURL != nil
+                        fileExport.exportHistory()
                     } label: {
                         Label("匯出全部 CSV", systemImage: "tablecells")
                     }
@@ -163,16 +161,7 @@ struct HistoryListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showExportShare) {
-            if let exportURL {
-                ShareLink(item: exportURL) {
-                    Label("分享 CSV", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .padding()
-                .presentationDetents([.height(160)])
-            }
-        }
+        .workoutExport(using: fileExport)
     }
 
     private func summary(for items: [WorkoutSession]) -> String {

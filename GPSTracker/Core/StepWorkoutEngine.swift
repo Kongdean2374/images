@@ -22,7 +22,21 @@ final class StepWorkoutEngine: ObservableObject {
     @Published var mode: WorkoutType = .walk
     @Published var target: WorkoutTarget = .none
     /// 負重行軍的負重（公斤）
-    @Published var loadWeight: Double = 0
+    @Published var loadWeight: Double?
+    @Published var carryPosition: CarryPosition = .unknown
+    private var accumulator = StepDistanceAccumulator()
+    private(set) var windows: [EstimateWindow] = []
+    private(set) var pauseLog: [Date] = []
+    private var lastWindowDate: Date?
+    private var stableProfile: StrideProfile = .walking
+    private var pendingProfile: StrideProfile?
+    private var pendingSince: Date?
+    private var baselineStrides: [StrideProfile: Double] = [:]
+    private var baselineCalibrated: [StrideProfile: Bool] = [:]
+    private var actualDistanceConfirmed = false
+    private var stepAlignmentReliable = true
+    private var committedFloorsUp = 0
+    private var committedFloorsDown = 0
     @Published private(set) var targetReached = false
 
     let pedometer = PedometerManager()
@@ -50,16 +64,13 @@ final class StepWorkoutEngine: ObservableObject {
 
     var strideProfile: StrideProfile { mode.strideProfile }
 
-    var strideLength: Double { StrideCalibration.stride(strideProfile) }
+    var strideLength: Double { steps > 0 ? distance / Double(steps) : StrideCalibration.stride(strideProfile) }
 
     var calories: Double {
-        // 負重會顯著提高能量消耗：以體重加上負重，再依負重比例加成
         let bodyWeight = AppSettings.shared.bodyWeight
-        let effectiveWeight = bodyWeight + loadWeight
-        let loadFactor = bodyWeight > 0 ? 1 + (loadWeight / bodyWeight) * 0.35 : 1
-        return IntensityCalculator.calories(type: mode,
-                                            duration: elapsed,
-                                            bodyWeight: effectiveWeight) * loadFactor
+        // A single load contribution; unknown remains nil in storage and exports.
+        return IntensityCalculator.calories(type: mode, duration: elapsed,
+                                            bodyWeight: bodyWeight + max(0, loadWeight ?? 0))
     }
 
     var isCalibrated: Bool { StrideCalibration.isCalibrated(strideProfile) }
@@ -95,6 +106,12 @@ final class StepWorkoutEngine: ObservableObject {
         startDate = Date()
         segmentStart = Date()
         state = .running
+        stableProfile = mode.strideProfile
+        for profile in [StrideProfile.walking, .running, .ruck] {
+            baselineStrides[profile] = StrideCalibration.stride(profile)
+            baselineCalibrated[profile] = StrideCalibration.isCalibrated(profile) || (profile == .ruck && StrideCalibration.isCalibrated(.walking))
+        }
+        lastWindowDate = startDate
 
         pedometer.start(from: startDate)
         altimeter.start()
@@ -110,7 +127,14 @@ final class StepWorkoutEngine: ObservableObject {
 
     func pause() {
         guard state == .running else { return }
+        noteStepBoundary()
         commit()
+        pauseLog.append(Date())
+        motion.pause()
+        altimeter.stop()
+        pedometer.stop()
+        committedFloorsUp = floorsAscended
+        committedFloorsDown = floorsDescended
         state = .paused
         LiveActivityController.shared.update(elapsed: elapsed,
                                              distance: distance,
@@ -125,11 +149,18 @@ final class StepWorkoutEngine: ObservableObject {
     func resume() {
         guard state == .paused else { return }
         segmentStart = Date()
+        pauseLog.append(segmentStart!)
+        accumulator.rebase()
+        lastWindowDate = segmentStart
+        motion.resume(at: segmentStart!)
+        altimeter.start(preservingTotals: true)
         state = .running
+        pedometer.start(from: segmentStart!)
         CueService.shared.impact(.light)
     }
 
     func stop() {
+        if state == .running { noteStepBoundary() }
         commit()
         timer?.invalidate()
         timer = nil
@@ -145,6 +176,15 @@ final class StepWorkoutEngine: ObservableObject {
     func reset() {
         timer?.invalidate()
         timer = nil
+        accumulator = StepDistanceAccumulator()
+        actualDistanceConfirmed = false
+        stepAlignmentReliable = true
+        windows = []
+        pauseLog = []
+        pendingProfile = nil
+        pendingSince = nil
+        committedFloorsUp = 0
+        committedFloorsDown = 0
         elapsed = 0
         steps = 0
         cadence = 0
@@ -163,37 +203,23 @@ final class StepWorkoutEngine: ObservableObject {
 
     // MARK: 內部
 
+    private func noteStepBoundary() {
+        guard let update = pedometer.update, Date().timeIntervalSince(update.endDate) <= 5 else { stepAlignmentReliable = false; return }
+    }
+
     private func bind() {
-        pedometer.$steps
-            .sink { [weak self] value in
-                guard let self, self.state == .running || self.state == .paused else { return }
-                self.steps = value
-                self.recalculateDistance()
-            }
-            .store(in: &cancellables)
-
-        pedometer.$cadence
-            .sink { [weak self] value in self?.cadence = value }
-            .store(in: &cancellables)
-
-        pedometer.$estimatedDistance
-            .sink { [weak self] _ in self?.recalculateDistance() }
-            .store(in: &cancellables)
-
-        pedometer.$floorsAscended
-            .sink { [weak self] value in self?.floorsAscended = value }
-            .store(in: &cancellables)
-
-        pedometer.$floorsDescended
-            .sink { [weak self] value in self?.floorsDescended = value }
-            .store(in: &cancellables)
+        pedometer.$update
+            .sink { [weak self] update in
+                guard let self, self.state == .running, let update else { return }
+                self.ingest(update)
+            }.store(in: &cancellables)
 
         altimeter.$gain
-            .sink { [weak self] value in self?.elevationGain = value }
+            .sink { [weak self] value in if self?.state == .running { self?.elevationGain = value } }
             .store(in: &cancellables)
 
         altimeter.$loss
-            .sink { [weak self] value in self?.elevationLoss = value }
+            .sink { [weak self] value in if self?.state == .running { self?.elevationLoss = value } }
             .store(in: &cancellables)
 
         motion.$current
@@ -201,21 +227,34 @@ final class StepWorkoutEngine: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// 距離優先序：個人步幅（已校正） → 系統估算 → 預設步幅
-    private func recalculateDistance() {
-        guard steps > 0 else { return }
-        if StrideCalibration.isCalibrated(strideProfile) {
-            distance = StrideCalibration.distance(steps: steps, profile: strideProfile)
-            distanceSource = .stride
-        } else if let systemDistance = pedometer.estimatedDistance, systemDistance > 0 {
-            distance = systemDistance
-            distanceSource = .pedometer
-        } else {
-            distance = StrideCalibration.distance(steps: steps, profile: strideProfile)
-            distanceSource = .stride
+    private func ingest(_ update: PedometerManager.Update) {
+        guard let activeStart = segmentStart, update.endDate >= activeStart else { return }
+        // Motion evidence with hysteresis chooses validated whole-workout baselines.
+        // There are no fabricated cadence/stride curves without aligned window truth.
+        let requested: StrideProfile = mode == .ruck ? .ruck : currentMotion == .running ? .running : currentMotion == .walking ? .walking : mode.strideProfile
+        if requested != stableProfile {
+            if pendingProfile != requested { pendingProfile = requested; pendingSince = update.endDate }
+            if let since = pendingSince, update.endDate.timeIntervalSince(since) >= 8 { stableProfile = requested; pendingProfile = nil }
+        } else { pendingProfile = nil; pendingSince = nil }
+        let suppressed = motion.confidence > 0 && [.automotive, .cycling, .stationary].contains(currentMotion)
+        guard let increment = accumulator.ingest(rawSteps: update.steps, systemDistance: update.distance,
+                                                  cadence: update.cadence, date: update.endDate,
+                                                  stride: baselineStrides[stableProfile] ?? StrideCalibration.defaultStride(stableProfile),
+                                                  calibrated: baselineCalibrated[stableProfile] ?? false, suppress: suppressed) else {
+            lastWindowDate = update.endDate
+            return
         }
-        announceIfNeeded()
-        checkTarget()
+        let source = increment.system ? DistanceSource.pedometer : .stride
+        windows.append(EstimateWindow(start: lastWindowDate ?? activeStart, end: update.endDate,
+                                      steps: increment.steps, distance: increment.distance, cadence: update.cadence,
+                                      profile: stableProfile.rawValue, source: source.rawValue, motion: currentMotion.rawValue))
+        lastWindowDate = update.endDate
+        steps = accumulator.steps; distance = accumulator.distance
+        cadence = accumulator.smoothedCadence ?? 0
+        distanceSource = Set(windows.map(\.source)).count > 1 ? .mixed : source
+        floorsAscended = committedFloorsUp + update.floorsUp
+        floorsDescended = committedFloorsDown + update.floorsDown
+        announceIfNeeded(); checkTarget()
     }
 
     private func announceIfNeeded() {
@@ -256,11 +295,13 @@ final class StepWorkoutEngine: ObservableObject {
     // MARK: 輸出
 
     /// 跑步機模式結束後可輸入實際距離，順便校正個人步幅
-    func applyActualDistance(_ actual: Double) {
+    func applyActualDistance(_ actual: Double, externallyMeasured: Bool = false) {
         guard actual > 0 else { return }
         distance = actual
+        actualDistanceConfirmed = externallyMeasured
         distanceSource = .manual
-        StrideCalibration.calibrate(withActualDistance: actual, steps: steps, profile: strideProfile)
+        // User entry alone is not proof of an externally measured distance.
+        // Preserve the entered history; it does not bypass model validation.
     }
 
     func buildSession() -> WorkoutSession {
@@ -273,17 +314,34 @@ final class StepWorkoutEngine: ObservableObject {
                                      averagePace: averagePace,
                                      elevationGain: altimeter.isAvailable ? elevationGain : nil,
                                      elevationLoss: altimeter.isAvailable ? elevationLoss : nil,
-                                     stepCount: steps,
-                                     cadence: cadence,
+                                     stepCount: steps > 0 || pedometer.update != nil ? steps : nil,
+                                     cadence: elapsed > 0 && steps > 0 ? Double(steps) / elapsed * 60 : nil,
                                      floorsAscended: floorsAscended,
                                      floorsDescended: floorsDescended,
-                                     strideLength: strideLength,
+                                     strideLength: steps > 0 ? distance / Double(steps) : nil,
                                      walkingSeconds: durations.walking > 0 ? durations.walking : nil,
                                      runningSeconds: durations.running > 0 ? durations.running : nil,
                                      distanceSource: distanceSource,
                                      routeKey: mode == .treadmill ? "跑步機" : nil)
         session.calories = calories
-        session.loadWeight = loadWeight > 0 ? loadWeight : nil
+        session.loadWeight = loadWeight
+        if let loadWeight { AppSettings.shared.ruckLoad = loadWeight }
+        session.carryPositionRaw = carryPosition.rawValue
+        session.pauseLog = pauseLog.isEmpty ? nil : pauseLog
+        session.otherSeconds = max(0, elapsed - durations.walking - durations.running)
+        session.estimateWindowsJSON = (try? JSONEncoder().encode(windows)).flatMap { String(data: $0, encoding: .utf8) }
+        var evidence = MeasurementEvidence()
+        evidence.method = distanceSource == .pedometer ? .systemEstimate : distanceSource == .mixed ? .mixed : distanceSource == .manual ? .unknown : .strideEstimate
+        if distanceSource == .manual && actualDistanceConfirmed { evidence.method = .knownDistance; evidence.distanceConfirmed = true }
+        evidence.sourceBundle = Bundle.main.bundleIdentifier
+        evidence.generatedByThisApp = true
+        evidence.originSessionID = session.id.uuidString
+        evidence.stepSource = "CoreMotion"
+        evidence.stepsAligned = stepAlignmentReliable
+        evidence.carryPosition = carryPosition
+        evidence.loadWeight = loadWeight
+        evidence.pauseIntervals = WorkoutTime.pauses(start: startDate, end: session.endDate, log: pauseLog)
+        session.evidence = evidence
         session.intensityScore = IntensityCalculator.score(type: mode,
                                                            duration: elapsed,
                                                            distance: distance,

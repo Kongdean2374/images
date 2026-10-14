@@ -11,8 +11,7 @@ struct BackupView: View {
     @StateObject private var manager = BackupManager.shared
 
     @State private var includeRoutes = true
-    @State private var exportURL: URL?
-    @State private var showShare = false
+    @StateObject private var fileExport = WorkoutExportCoordinator()
     @State private var showImporter = false
     @State private var pendingPayload: BackupPayload?
     @State private var restoreMode: RestoreMode = .merge
@@ -45,25 +44,7 @@ struct BackupView: View {
         .screenBackground()
         .navigationTitle("備份與還原")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showShare) {
-            if let exportURL {
-                VStack(spacing: 16) {
-                    Text(exportURL.lastPathComponent)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    Text("把檔案存到「檔案」App、iCloud 雲碟或傳給自己，換手機時就能還原。")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textSecondary)
-                        .multilineTextAlignment(.center)
-                    ShareLink(item: exportURL) {
-                        Label("儲存備份檔", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
-                .padding()
-                .presentationDetents([.height(240)])
-            }
-        }
+        .workoutExport(using: fileExport)
         .fileImporter(isPresented: $showImporter,
                       allowedContentTypes: [.json, .data],
                       allowsMultipleSelection: false) { result in
@@ -75,14 +56,9 @@ struct BackupView: View {
         }
         .alert("確定要還原？", isPresented: $showRestoreConfirm) {
             Button("取消", role: .cancel) {}
-            Button(restoreMode == .replace ? "清空並還原" : "合併還原",
-                   role: restoreMode == .replace ? .destructive : nil) {
-                performRestore()
-            }
+            Button("合併還原") { performRestore() }
         } message: {
-            Text(restoreMode == .replace
-                 ? "會先刪除目前 \(sessions.count) 筆紀錄，再還原備份內容。此動作無法復原。"
-                 : "只會加入備份中沒有的紀錄，現有資料不受影響。")
+            Text("加入備份中沒有的紀錄，保留所有現有資料。")
         }
     }
 
@@ -165,12 +141,10 @@ struct BackupView: View {
                 }
 
                 Button {
-                    exportURL = manager.exportBackup(sessions: sessions,
+                    fileExport.present(manager.exportBackup(sessions: sessions,
                                                      goals: goals,
                                                      includeRoutes: includeRoutes,
-                                                     password: usePassword ? password : nil)
-                    showShare = exportURL != nil
-                    if exportURL == nil { errorMessage = "備份建立失敗" }
+                                                     password: usePassword ? password : nil))
                 } label: {
                     Label(usePassword ? "加密並匯出備份檔" : "匯出備份檔",
                           systemImage: usePassword ? "lock.doc" : "square.and.arrow.up")

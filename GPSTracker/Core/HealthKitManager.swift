@@ -3,7 +3,8 @@ import HealthKit
 import CoreLocation
 
 /// 只允許 continuation 被 resume 一次
-final class ResumeBox {
+// All shared mutable state is protected by lock.
+final class ResumeBox: @unchecked Sendable {
     private var done = false
     private let lock = NSLock()
 
@@ -19,6 +20,9 @@ final class ResumeBox {
 /// 寫入健康 App 用的值型別快照（在主執行緒建立，之後可安全跨執行緒使用）。
 struct WorkoutSnapshot {
     let type: WorkoutType
+    let sessionID: String
+    let evidence: MeasurementEvidence
+    let stepCount: Int?
     let start: Date
     let end: Date
     let duration: TimeInterval
@@ -36,8 +40,11 @@ struct WorkoutSnapshot {
     let sportID: String?
     let locations: [CLLocation]
 
-    @MainActor
+    // Read on the caller's executor while its ModelContext owns the session.
     init(session: WorkoutSession) {
+        sessionID = session.id.uuidString
+        evidence = session.evidence
+        stepCount = session.stepCount
         type = session.type
         sportID = session.sportRaw
         start = session.startDate
@@ -58,8 +65,8 @@ struct WorkoutSnapshot {
             CLLocation(coordinate: CLLocationCoordinate2D(latitude: point.latitude,
                                                           longitude: point.longitude),
                        altitude: point.altitude,
-                       horizontalAccuracy: 5,
-                       verticalAccuracy: 5,
+                       horizontalAccuracy: point.horizontalAccuracy ?? -1,
+                       verticalAccuracy: -1,
                        course: -1,
                        speed: point.speed,
                        timestamp: point.timestamp)
@@ -113,6 +120,7 @@ final class HealthKitManager: ObservableObject {
         types.insert(HKQuantityType(.stepCount))
         types.insert(HKQuantityType(.basalEnergyBurned))
         types.insert(HKSeriesType.workoutRoute())
+        types.insert(HKQuantityType(.stepCount))
         return types
     }
 
@@ -272,7 +280,13 @@ final class HealthKitManager: ObservableObject {
                 samples.append(HKQuantitySample(type: Self.distanceType(for: activity),
                                                 quantity: HKQuantity(unit: .meter(), doubleValue: distance),
                                                 start: start,
-                                                end: end))
+                                                end: end,
+                                                metadata: Self.provenanceMetadata(snapshot)))
+            }
+            if let steps = snapshot.stepCount, steps > 0, snapshot.evidence.stepsAligned {
+                samples.append(HKQuantitySample(type: HKQuantityType(.stepCount),
+                    quantity: HKQuantity(unit: .count(), doubleValue: Double(steps)),
+                    start: start, end: end, metadata: Self.provenanceMetadata(snapshot)))
             }
             if let calories = snapshot.calories, calories > 0 {
                 samples.append(HKQuantitySample(type: HKQuantityType(.activeEnergyBurned),
@@ -303,7 +317,7 @@ final class HealthKitManager: ObservableObject {
             if snapshot.locations.count > 1 {
                 let routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: .local())
                 try await routeBuilder.insertRouteData(snapshot.locations)
-                _ = try await routeBuilder.finishRoute(with: workout, metadata: nil)
+                _ = try await routeBuilder.finishRoute(with: workout, metadata: Self.provenanceMetadata(snapshot))
             }
 
             update {
@@ -356,6 +370,7 @@ final class HealthKitManager: ObservableObject {
         var metadata: [String: Any] = [
             HKMetadataKeyIndoorWorkout: isIndoor
         ]
+        metadata.merge(provenanceMetadata(snapshot)) { _, new in new }
         if let gain = snapshot.elevationGain, gain > 0 {
             metadata[HKMetadataKeyElevationAscended] = HKQuantity(unit: .meter(), doubleValue: gain)
         }
@@ -587,54 +602,96 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
-    /// 歷史體能訓練（走路／跑步／健行），逐筆取距離與期間步數。
-    func workoutStrideSamples(limit: Int = 80, years: Int = 5) async -> [StrideSample] {
-        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
-        let start = Calendar.current.date(byAdding: .year, value: -years, to: Date()) ?? Date()
-        let workouts = await fetchWorkouts(from: start, limit: limit)
+    /// Training is sourced exclusively from persisted, evidence-checked sessions.
+    /// Unattributed aggregate HealthKit distances must never enter calibration.
+    func workoutStrideSamples(limit: Int = 80, years: Int = 5) async -> [StrideSample] { [] }
 
-        var samples: [StrideSample] = []
-        for workout in workouts {
-            let profile: StrideProfile
-            switch workout.workoutActivityType {
-            case .running: profile = .running
-            case .walking, .hiking: profile = .walking
-            default: continue
-            }
-            var distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?
-                .sumQuantity()?.doubleValue(for: .meter())
-            if distance == nil {
-                distance = await sumQuantity(HKQuantityType(.distanceWalkingRunning),
-                                             unit: .meter(),
-                                             from: workout.startDate,
-                                             to: workout.endDate)
-            }
-            guard let distance, distance > 300 else { continue }
-            guard let steps = await sumQuantity(HKQuantityType(.stepCount),
-                                                unit: .count(),
-                                                from: workout.startDate,
-                                                to: workout.endDate), steps > 300 else { continue }
-            samples.append(StrideSample(stride: distance / steps,
-                                        distance: distance,
-                                        steps: Int(steps),
-                                        date: workout.startDate,
-                                        source: .healthWorkout,
-                                        profile: profile))
+    static func provenanceMetadata(_ snapshot: WorkoutSnapshot) -> [String: Any] {
+        ["GPSTracker.sessionID": snapshot.sessionID,
+         "GPSTracker.distanceMethod": snapshot.evidence.method.rawValue,
+         "GPSTracker.evidenceVersion": snapshot.evidence.version,
+         "GPSTracker.stepsAligned": snapshot.evidence.stepsAligned,
+         "GPSTracker.assistedDistance": snapshot.evidence.stepAssistedDistance ?? 0,
+         "GPSTracker.evidence": snapshot.evidence.json ?? "",
+         "GPSTracker.workoutType": snapshot.type.rawValue]
+    }
+
+    /// Metadata never elevates an estimate. Missing metadata remains unknown.
+    func calibrationEvidence(of workout: HKWorkout) async -> MeasurementEvidence {
+        let metadata = workout.metadata ?? [:]
+        var e = MeasurementEvidence.decode(metadata["GPSTracker.evidence"] as? String)
+        e.workoutUUID = workout.uuid.uuidString
+        e.sourceBundle = workout.sourceRevision.source.bundleIdentifier
+        e.device = workout.device?.model ?? workout.sourceRevision.productType
+        e.originSessionID = metadata["GPSTracker.sessionID"] as? String
+        let isOwn = e.sourceBundle == Bundle.main.bundleIdentifier || e.sourceBundle == "com.gpstracker.app"
+        e.generatedByThisApp = isOwn
+        // Only our own versioned measurements are currently an audited whitelist.
+        // Third-party records without distance-method evidence remain displayable history.
+        guard isOwn, metadata["GPSTracker.evidenceVersion"] as? Int == 1,
+              let method = metadata["GPSTracker.distanceMethod"] as? String else {
+            e.method = .unknown; e.distanceConfirmed = false; e.stepsAligned = false
+            return e
         }
-        return samples
+        e.method = MeasurementMethod(rawValue: method) ?? .unknown
+        e.stepAssistedDistance = metadata["GPSTracker.assistedDistance"] as? Double
+        if e.method != .independentGPS && e.method != .knownDistance { e.distanceConfirmed = false }
+        let distances = await associatedQuantities(type: Self.distanceType(for: workout.workoutActivityType), workout: workout)
+        let steps = await associatedQuantities(type: HKQuantityType(.stepCount), workout: workout)
+        e.distanceSampleSources = Array(Set(distances.map { $0.sourceRevision.source.bundleIdentifier })).sorted()
+        let sources = Set(steps.map { $0.sourceRevision.source.bundleIdentifier })
+        e.stepSource = sources.count > 1 ? "mixed" : sources.first
+        func aligned(_ samples: [HKQuantitySample]) -> Bool {
+            !samples.isEmpty && samples.allSatisfy {
+                $0.sourceRevision.source.bundleIdentifier == e.sourceBundle &&
+                abs($0.startDate.timeIntervalSince(workout.startDate)) <= 1 &&
+                abs($0.endDate.timeIntervalSince(workout.endDate)) <= 1 &&
+                ($0.metadata?["GPSTracker.sessionID"] as? String) == e.originSessionID &&
+                ($0.metadata?["GPSTracker.distanceMethod"] as? String) == method
+            }
+        }
+        e.stepsAligned = aligned(steps) && (metadata["GPSTracker.stepsAligned"] as? Bool == true)
+        e.distanceConfirmed = e.distanceConfirmed && aligned(distances)
+        let routes: [HKWorkoutRoute] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: HKSeriesType.workoutRoute(), predicate: HKQuery.predicateForObjects(from: workout),
+                                      limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKWorkoutRoute]) ?? [])
+            }
+            store.execute(query)
+        }
+        e.routeSource = routes.first?.sourceRevision.source.bundleIdentifier
+        if e.method == .independentGPS {
+            e.distanceConfirmed = e.distanceConfirmed && !routes.isEmpty && routes.allSatisfy {
+                $0.sourceRevision.source.bundleIdentifier == e.sourceBundle &&
+                ($0.metadata?["GPSTracker.sessionID"] as? String) == e.originSessionID
+            }
+        }
+        return e
+    }
+
+    private func associatedQuantities(type: HKQuantityType, workout: HKWorkout) async -> [HKQuantitySample] {
+        await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: type, predicate: HKQuery.predicateForObjects(from: workout),
+                                      limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKQuantitySample]) ?? [])
+            }
+            store.execute(query)
+        }
     }
 
     /// 匯入用：取得期間內的所有訓練（含其他 App 寫入的）
     func workouts(from start: Date, to end: Date = Date(), limit: Int = HKObjectQueryNoLimit) async -> [HKWorkout] {
-        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
-        return await withCheckedContinuation { continuation in
+        (try? await completeWorkouts(from: start, to: end, limit: limit)) ?? []
+    }
+    func completeWorkouts(from start: Date, to end: Date = Date(), limit: Int = HKObjectQueryNoLimit) async throws -> [HKWorkout] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { throw CocoaError(.featureUnsupported) }
+        return try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
-                                      predicate: predicate,
-                                      limit: limit,
-                                      sortDescriptors: [sort]) { _, samples, _ in
-                continuation.resume(returning: (samples as? [HKWorkout]) ?? [])
+            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate, limit: limit,
+                                      sortDescriptors: [sort]) { _, samples, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: (samples as? [HKWorkout]) ?? []) }
             }
             store.execute(query)
         }
@@ -676,35 +733,35 @@ final class HealthKitManager: ObservableObject {
 
     /// 讀取訓練的 GPS 路線（其他 App 記錄的軌跡也讀得到）
     func route(of workout: HKWorkout) async -> [CLLocation] {
-        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { return [] }
-        let routes: [HKWorkoutRoute] = await withCheckedContinuation { continuation in
+        (try? await completeRoute(of: workout)) ?? []
+    }
+    func completeRoute(of workout: HKWorkout) async throws -> [CLLocation] {
+        guard HKHealthStore.isHealthDataAvailable(), availability == .ready else { throw CocoaError(.featureUnsupported) }
+        let routes: [HKWorkoutRoute] = try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForObjects(from: workout)
-            let query = HKAnchoredObjectQuery(type: HKSeriesType.workoutRoute(),
-                                              predicate: predicate,
-                                              anchor: nil,
-                                              limit: HKObjectQueryNoLimit) { _, samples, _, _, _ in
-                continuation.resume(returning: (samples as? [HKWorkoutRoute]) ?? [])
+            let query = HKSampleQuery(sampleType: HKSeriesType.workoutRoute(), predicate: predicate,
+                                      limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: (samples as? [HKWorkoutRoute]) ?? []) }
             }
             store.execute(query)
         }
-
         var collected: [CLLocation] = []
         for route in routes {
-            let batch = await routeLocations(in: route)
-            collected.append(contentsOf: batch)
+            try Task.checkCancellation()
+            collected.append(contentsOf: try await routeLocations(in: route))
         }
-        return collected.sorted { $0.timestamp < $1.timestamp }
+        return collected
     }
-
-    private func routeLocations(in route: HKWorkoutRoute) async -> [CLLocation] {
-        await withCheckedContinuation { continuation in
+    private func routeLocations(in route: HKWorkoutRoute) async throws -> [CLLocation] {
+        try await withCheckedThrowingContinuation { continuation in
             let box = ResumeBox()
             var accumulated: [CLLocation] = []
             let query = HKWorkoutRouteQuery(route: route) { _, batch, done, error in
                 if let batch { accumulated.append(contentsOf: batch) }
-                if done || error != nil {
-                    if box.take() { continuation.resume(returning: accumulated) }
-                }
+                if let error {
+                    if box.take() { continuation.resume(throwing: error) }
+                } else if done, box.take() { continuation.resume(returning: accumulated) }
             }
             store.execute(query)
         }

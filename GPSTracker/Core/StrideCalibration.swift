@@ -69,7 +69,7 @@ struct CalibrationResult {
         case ..<0.5: return "粗略"
         case ..<0.75: return "堪用"
         case ..<0.9: return "良好"
-        default: return "非常準確"
+        default: return "資料充分"
         }
     }
 
@@ -90,7 +90,7 @@ struct CalibrationResult {
             items.append("最近一次可用資料距今較久，近期再跑一次會讓數值貼近現況")
         }
         if items.isEmpty {
-            return "資料量與一致性都足夠，目前的步幅已很接近你的真實狀況。"
+            return "資料量與一致性都足夠，仍需獨立場次驗證距離誤差。"
         }
         return "建議：" + items.joined(separator: "；") + "。"
     }
@@ -105,6 +105,8 @@ struct StrideState: Codable {
     var spanDays: Int
     var updated: Date
     var method: String      // auto / learn / manual
+    var modelVersion: Int?
+    var validation: ValidationOutcome?
 }
 
 /// 個人步幅校正。
@@ -120,7 +122,7 @@ enum StrideCalibration {
     private static func stateKey(_ profile: StrideProfile) -> String { "strideState.\(profile.rawValue)" }
 
     static func defaultStride(_ profile: StrideProfile) -> Double {
-        profile == .walking ? 0.72 : 1.05
+        profile == .running ? 1.05 : 0.72
     }
 
     static func state(_ profile: StrideProfile) -> StrideState? {
@@ -136,7 +138,7 @@ enum StrideCalibration {
     }
 
     static func stride(_ profile: StrideProfile) -> Double {
-        let value = state(profile)?.stride ?? 0
+        let value = (state(profile) ?? (profile == .ruck ? state(.walking) : nil))?.stride ?? 0
         return value > 0.2 ? value : defaultStride(profile)
     }
 
@@ -164,69 +166,39 @@ enum StrideCalibration {
         Double(steps) * stride(profile)
     }
 
-    /// 套用一次自動計算的結果
-    static func apply(_ result: CalibrationResult) {
-        save(StrideState(stride: result.stride,
-                         confidence: result.confidence,
-                         sampleCount: result.rawSampleCount,
-                         weightedCount: result.weightedSampleCount,
-                         spanDays: result.spanDays,
-                         updated: Date(),
-                         method: "auto"),
-             profile: result.profile)
+    /// Only independent holdout improvements may replace a model. Old snapshots stay intact.
+    static func applyValidated(_ outcome: ValidationOutcome, profile: StrideProfile) {
+        guard outcome.applied, let stride = outcome.candidateStride, outcome.testCount >= 2 else { return }
+        snapshot(profile)
+        save(StrideState(stride: stride, confidence: min(1, Double(outcome.sampleIDs.count) / 12),
+                         sampleCount: outcome.sampleIDs.count, weightedCount: Double(outcome.sampleIDs.count),
+                         spanDays: 0, updated: Date(), method: "validated", modelVersion: (state(profile)?.modelVersion ?? 0) + 1,
+                         validation: outcome), profile: profile)
     }
 
-    /// 單次運動後的逐步學習（指數移動平均）
-    @discardableResult
-    static func learn(distance: Double, steps: Int, profile: StrideProfile) -> Double? {
-        guard distance > 300, steps > 400 else { return nil }
-        let measured = distance / Double(steps)
-        guard measured > 0.3, measured < 2.2 else { return nil }
-
-        let existing = state(profile)
-        let count = existing?.sampleCount ?? 0
-        let current = count > 0 ? (existing?.stride ?? measured) : measured
-        // 已經靠健康資料算得很準時，單次紀錄只做小幅修正
-        let trust = existing?.confidence ?? 0
-        let baseWeight = count == 0 ? 1.0 : max(0.08, 1.0 / Double(count + 1))
-        let weight = baseWeight * (1 - trust * 0.6)
-        let updated = current * (1 - weight) + measured * weight
-
-        save(StrideState(stride: updated,
-                         confidence: min(1.0, max(trust, Double(count + 1) / 12.0 * 0.6)),
-                         sampleCount: count + 1,
-                         weightedCount: (existing?.weightedCount ?? 0) + 1,
-                         spanDays: existing?.spanDays ?? 0,
-                         updated: Date(),
-                         method: existing?.method == "auto" ? "auto" : "learn"),
-             profile: profile)
-        return updated
+    static func snapshot(_ profile: StrideProfile) {
+        let current = defaults.data(forKey: stateKey(profile)) ?? (try? JSONEncoder().encode(StrideState(stride: defaultStride(profile), confidence: 0, sampleCount: 0, weightedCount: 0, spanDays: 0, updated: Date(), method: "default")))
+        if let data = current { defaults.set(data, forKey: stateKey(profile) + ".previous") }
     }
-
-    /// 手動／跑步機實測校正
-    @discardableResult
-    static func calibrate(withActualDistance distance: Double, steps: Int, profile: StrideProfile) -> Double? {
-        guard distance > 100, steps > 150 else { return nil }
-        let measured = distance / Double(steps)
-        guard measured > 0.3, measured < 2.2 else { return nil }
-        let existing = state(profile)
-        let count = existing?.sampleCount ?? 0
-        let current = count > 0 ? (existing?.stride ?? measured) : measured
-        let updated = current * 0.5 + measured * 0.5
-        save(StrideState(stride: updated,
-                         confidence: max(existing?.confidence ?? 0, 0.5),
-                         sampleCount: count + 1,
-                         weightedCount: (existing?.weightedCount ?? 0) + 1,
-                         spanDays: existing?.spanDays ?? 0,
-                         updated: Date(),
-                         method: "manual"),
-             profile: profile)
-        return updated
+    static func rollback(_ profile: StrideProfile) {
+        let previousKey = stateKey(profile) + ".previous"
+        guard let previous = defaults.data(forKey: previousKey) else { return }
+        let current = defaults.data(forKey: stateKey(profile))
+        defaults.set(previous, forKey: stateKey(profile))
+        if let current { defaults.set(current, forKey: previousKey) }
+    }
+    static func previous(_ profile: StrideProfile) -> StrideState? {
+        guard let data = defaults.data(forKey: stateKey(profile) + ".previous") else { return nil }
+        return try? JSONDecoder().decode(StrideState.self, from: data)
+    }
+    static func restorePrevious(_ state: StrideState, profile: StrideProfile) {
+        if let data = try? JSONEncoder().encode(state) { defaults.set(data, forKey: stateKey(profile) + ".previous") }
     }
 
     /// 直接設定（設定頁手動微調）
     static func setManual(_ value: Double, profile: StrideProfile) {
-        guard value > 0.3, value < 2.2 else { return }
+        guard value.isFinite, value > 0.25, value <= (profile == .running ? 2.8 : 1.5) else { return }
+        snapshot(profile)
         let existing = state(profile)
         save(StrideState(stride: value,
                          confidence: max(0.4, existing?.confidence ?? 0.4),
@@ -240,10 +212,12 @@ enum StrideCalibration {
 
     /// 從備份還原校正狀態
     static func restore(_ state: StrideState, profile: StrideProfile) {
+        snapshot(profile)
         save(state, profile: profile)
     }
 
     static func reset(_ profile: StrideProfile) {
+        snapshot(profile)
         defaults.removeObject(forKey: stateKey(profile))
     }
 }

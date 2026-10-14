@@ -11,21 +11,23 @@ final class AltimeterManager: ObservableObject {
 
     private let altimeter = CMAltimeter()
     private var lastAltitude: Double?
+    private var generation = UUID()
 
     var isAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
 
-    func start() {
+    func start(preservingTotals: Bool = false) {
         guard CMAltimeter.isRelativeAltitudeAvailable(), !isRunning else { return }
         isRunning = true
-        gain = 0
-        loss = 0
+        if !preservingTotals { gain = 0; loss = 0 }
         lastAltitude = nil
+        let token = UUID()
+        generation = token
         altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
             guard let data else { return }
             let altitude = data.relativeAltitude.doubleValue
             let pressure = data.pressure.doubleValue
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, self.isRunning, self.generation == token else { return }
                 self.relativeAltitude = altitude
                 self.pressure = pressure
                 if let last = self.lastAltitude {
@@ -46,6 +48,7 @@ final class AltimeterManager: ObservableObject {
     }
 
     func stop() {
+        generation = UUID()
         altimeter.stopRelativeAltitudeUpdates()
         isRunning = false
     }

@@ -236,6 +236,7 @@ struct RoutePlaybackView: View {
     private func prepare() {
         let sorted = session.sortedPoints
         guard sorted.count > 1 else { return }
+        let originalTimestamps = sorted.map { $0.timestamp }
 
         var working = sorted
         // 點太多先抽稀，視覺上看不出來但畫起來快很多
@@ -254,11 +255,18 @@ struct RoutePlaybackView: View {
         points = working
         coordinates = coords
         fastestRange = best
-        gapIndices = RouteRenderer.gapIndices(timestamps: working.map { $0.timestamp })
+        let mappedGaps = RouteRenderer.remapGapIndices(
+            originalTimestamps: originalTimestamps,
+            retainedTimestamps: working.map { $0.timestamp }
+        )
+        gapIndices = mappedGaps
         if let first = working.first?.timestamp, let last = working.last?.timestamp {
             timeSpan = max(1, last.timeIntervalSince(first))
         }
-        applyColors(points: working, coordinates: coords, mode: colorMode)
+        applyColors(points: working,
+                    coordinates: coords,
+                    mode: colorMode,
+                    gapAfterIndex: mappedGaps)
         ready = true
         lastTick = nil
 
@@ -268,12 +276,16 @@ struct RoutePlaybackView: View {
 
     /// 依目前的上色模式重建尺規與分段
     private func rebuildColors() {
-        applyColors(points: points, coordinates: coordinates, mode: colorMode)
+        applyColors(points: points,
+                    coordinates: coordinates,
+                    mode: colorMode,
+                    gapAfterIndex: gapIndices)
     }
 
     private func applyColors(points source: [RoutePoint],
                              coordinates coords: [CLLocationCoordinate2D],
-                             mode: RouteColorMode) {
+                             mode: RouteColorMode,
+                             gapAfterIndex: Set<Int>) {
         guard !coords.isEmpty, !source.isEmpty else { return }
         let numbers: [Double]
         switch mode {
@@ -283,11 +295,10 @@ struct RoutePlaybackView: View {
         }
         let built = RouteColorScale.make(mode: mode, values: numbers)
         scale = built
-        let gaps = RouteRenderer.gapIndices(timestamps: source.map { $0.timestamp })
         allSegments = RouteRenderer.segments(coordinates: coords,
                                              values: numbers,
                                              scale: built,
-                                             gapAfterIndex: gaps)
+                                             gapAfterIndex: gapAfterIndex)
     }
 
     /// 依實際經過的時間推進，掉幀也不會變慢
@@ -313,6 +324,7 @@ struct RoutePlaybackView: View {
                 MapPolyline(coordinates: Array(coordinates[currentIndex...]))
                     .stroke(Color.white.opacity(0.22),
                             style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [7, 9]))
+                    .mapOverlayLevel(level: .aboveRoads)
             }
 
             // 空白段：用虛線標示「這段沒有軌跡」
@@ -320,6 +332,7 @@ struct RoutePlaybackView: View {
                 MapPolyline(coordinates: line)
                     .stroke(Color.white.opacity(0.55),
                             style: StrokeStyle(lineWidth: 5, lineCap: .round, dash: [2, 10]))
+                    .mapOverlayLevel(level: .aboveRoads)
             }
 
             // 已走過的路線：先畫一層較寬的半透明當作發光底層
@@ -327,11 +340,13 @@ struct RoutePlaybackView: View {
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color.opacity(0.32),
                             style: StrokeStyle(lineWidth: 16, lineCap: .round, lineJoin: .round))
+                    .mapOverlayLevel(level: .aboveRoads)
             }
             ForEach(visibleSegments) { segment in
                 MapPolyline(coordinates: segment.coordinates)
                     .stroke(segment.color,
                             style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                    .mapOverlayLevel(level: .aboveLabels)
             }
 
             if let first = coordinates.first {

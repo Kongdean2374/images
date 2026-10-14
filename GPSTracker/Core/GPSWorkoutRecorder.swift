@@ -13,6 +13,7 @@ struct TrackSample: Identifiable, Hashable {
     var timestamp: Date
     var speed: Double
     var distanceFromStart: Double
+    var horizontalAccuracy: Double? = nil
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -48,6 +49,14 @@ final class GPSWorkoutRecorder: ObservableObject {
     @Published var autoLapDistance: Double = 1000
     @Published private(set) var laps: [LapDraft] = []
 
+    private var rawSamples: [TrackSample] = []
+    private var stepAccumulator = StepDistanceAccumulator()
+    @Published private(set) var effectiveSteps = 0
+    private(set) var gpsMeasuredDistance = 0.0
+    private(set) var stepAssistedDistance = 0.0
+    private var recoveredWithoutStepAlignment = false
+    private var stepAlignmentReliable = true
+    private var recordingID = UUID()
     var startDate: Date = Date()
 
     private let location = LocationManager.shared
@@ -157,7 +166,10 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     func pause() {
         guard state == .recording else { return }
+        if isAssisted { accumulateAssistedDistance(at: Date()); endGap() }
+        noteStepBoundary()
         commitSegment()
+        pedometer.stop()
         pauseLog.append(Date())
         state = .paused
         autosave(force: true)
@@ -169,6 +181,12 @@ final class GPSWorkoutRecorder: ObservableObject {
         guard state == .paused else { return }
         if pauseLog.count.isMultiple(of: 2) == false { pauseLog.append(Date()) }
         segmentStart = Date()
+        stepAccumulator.rebase()
+        pedometer.start(from: segmentStart!)
+        lastAccepted = nil
+        lastAltitude = nil
+        justResumedFromGap = true
+        kalman.reset()
         state = .recording
         isAutoPaused = false
         updateLiveActivity(force: true)
@@ -176,6 +194,8 @@ final class GPSWorkoutRecorder: ObservableObject {
     }
 
     func stop() {
+        if state == .recording { noteStepBoundary() }
+        if isAssisted { accumulateAssistedDistance(at: Date()); endGap() }
         commitSegment()
         state = .finished
         // 注意：這裡「不」清除自動存檔。
@@ -198,10 +218,7 @@ final class GPSWorkoutRecorder: ObservableObject {
                                            "靜止擋下": "\(rejectedDrift)",
                                            "跳點擋下": "\(rejectedJump)",
                                            "空白段": "\(coverageGaps.count)"])
-        // 用這次可信的 GPS 距離校正個人步幅，之後沒訊號時就靠它換算
-        StrideCalibration.learn(distance: distance,
-                                steps: pedometer.steps,
-                                profile: workoutType.strideProfile)
+        // Candidate learning happens after successful session persistence and independent validation.
         LiveActivityController.shared.end()
         CueService.shared.speak("記錄結束")
     }
@@ -209,7 +226,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     private func updateLiveActivity(force: Bool = false) {
         LiveActivityController.shared.update(elapsed: elapsed,
                                              distance: distance,
-                                             steps: pedometer.steps,
+                                             steps: effectiveSteps,
                                              pace: currentPace ?? averagePace,
                                              statusText: isAutoPaused ? "自動暫停"
                                                 : (state == .paused ? "已暫停"
@@ -222,7 +239,15 @@ final class GPSWorkoutRecorder: ObservableObject {
         timer?.invalidate()
         timer = nil
         cancellables.removeAll()
+        recordingID = UUID()
         samples = []
+        rawSamples = []
+        stepAccumulator = StepDistanceAccumulator()
+        effectiveSteps = 0
+        gpsMeasuredDistance = 0
+        stepAssistedDistance = 0
+        recoveredWithoutStepAlignment = false
+        stepAlignmentReliable = true
         elapsed = 0
         distance = 0
         currentPace = nil
@@ -260,7 +285,18 @@ final class GPSWorkoutRecorder: ObservableObject {
 
     // MARK: 內部
 
+    private func noteStepBoundary() {
+        guard let update = pedometer.update, Date().timeIntervalSince(update.endDate) <= 5 else { stepAlignmentReliable = false; return }
+    }
+
     private func subscribe() {
+        pedometer.$update.sink { [weak self] update in
+            guard let self, self.state == .recording, let update,
+                  let start = self.segmentStart, update.endDate >= start else { return }
+            _ = self.stepAccumulator.ingest(rawSteps: update.steps, systemDistance: nil, cadence: update.cadence,
+                                             date: update.endDate, stride: 0, calibrated: true)
+            self.effectiveSteps = self.stepAccumulator.steps
+        }.store(in: &cancellables)
         location.locationSubject
             .sink { [weak self] loc in
                 self?.ingest(loc)
@@ -377,11 +413,11 @@ final class GPSWorkoutRecorder: ObservableObject {
         guard !isAssisted else { return }
         isAssisted = true
         assistReason = reason
-        assistStepBaseline = pedometer.steps
+        assistStepBaseline = effectiveSteps
         assistDistance = 0
         lastAssistTick = date
         assistStride = StrideCalibration.stride(workoutType.strideProfile)
-        currentGapStart = (date, distance, pedometer.steps)
+        currentGapStart = (date, distance, effectiveSteps)
         CueService.shared.impact(.light)
         if settings.voiceCues {
             let how = usesSteps ? "改用計步記錄" : "這段不計距離"
@@ -400,14 +436,15 @@ final class GPSWorkoutRecorder: ObservableObject {
         guard usesSteps else { return }
         guard let last = lastAssistTick else { return }
         let dt = date.timeIntervalSince(last)
-        guard dt > 0, dt < 5 else { return }
+        guard dt > 0 else { return }
 
         // 以計步增量 × 個人步幅推估
-        let newSteps = max(0, pedometer.steps - assistStepBaseline)
+        let newSteps = max(0, effectiveSteps - assistStepBaseline)
         let estimated = Double(newSteps) * assistStride
         let increment = max(0, estimated - assistDistance)
         assistDistance = estimated
         distance += increment
+        stepAssistedDistance += increment
     }
 
     /// 這個運動用計步推估距離才有意義。
@@ -432,13 +469,13 @@ final class GPSWorkoutRecorder: ObservableObject {
         lastAssistTick = nil
 
         // 太短的中斷不留紀錄，免得一堆兩秒的空白
-        guard now.timeIntervalSince(start.date) >= 8 else { return }
+        guard now > start.date else { return }
 
         let gap = CoverageGap(start: start.date,
                               end: now,
                               startDistance: start.distance,
                               endDistance: distance,
-                              steps: usesSteps ? max(0, pedometer.steps - start.steps) : nil,
+                              steps: usesSteps ? max(0, effectiveSteps - start.steps) : nil,
                               sourceRaw: (usesSteps ? DistanceSource.stride : DistanceSource.gps).rawValue,
                               reasonRaw: assistReason.rawValue)
         coverageGaps.append(gap)
@@ -504,6 +541,13 @@ final class GPSWorkoutRecorder: ObservableObject {
     }
 
     private func ingest(_ raw: CLLocation) {
+        // Preserve original received observations, including flagged anomalies. Analysis is separate.
+        if state == .recording || state == .paused, raw.timestamp >= startDate {
+            let sample = TrackSample(latitude: raw.coordinate.latitude, longitude: raw.coordinate.longitude,
+                                     altitude: raw.altitude, timestamp: raw.timestamp, speed: raw.speed,
+                                     distanceFromStart: distance, horizontalAccuracy: raw.horizontalAccuracy)
+            rawSamples.append(sample)
+        }
         guard state == .recording || (state == .paused && isAutoPaused) else { return }
 
         // 先記錄訊號品質，輔助模式靠這個判斷要不要接手
@@ -524,6 +568,8 @@ final class GPSWorkoutRecorder: ObservableObject {
             rejectedAccuracy += 1
             return
         }
+
+        guard raw.timestamp >= (segmentStart ?? startDate), raw.timestamp <= Date().addingTimeInterval(1) else { rejectedStale += 1; return }
 
         // 時間檢查。
         //
@@ -581,7 +627,8 @@ final class GPSWorkoutRecorder: ObservableObject {
                                        altitude: smoothed.altitude,
                                        timestamp: raw.timestamp,
                                        speed: max(0, currentSpeed),
-                                       distanceFromStart: distance)
+                                       distanceFromStart: distance,
+                                 horizontalAccuracy: raw.horizontalAccuracy)
             samples.append(lastAccepted!)
             lastGoodFix = Date()
             lastAltitude = smoothed.altitude
@@ -620,6 +667,8 @@ final class GPSWorkoutRecorder: ObservableObject {
             heading = GeoMath.bearing(from: last.coordinate, to: coord)
         }
         distance += delta
+        gpsMeasuredDistance += delta
+        if !rawSamples.isEmpty { rawSamples[rawSamples.count - 1].distanceFromStart = distance }
 
         if let lastAlt = lastAltitude {
             let diff = smoothed.altitude - lastAlt
@@ -658,13 +707,14 @@ final class GPSWorkoutRecorder: ObservableObject {
                               targetPace: targetPace,
                               autoLapDistance: autoLapDistance,
                               pauseLog: pauseLog,
-                              points: samples.map {
+                              points: (rawSamples.isEmpty ? samples : rawSamples).map {
                                   ActiveWorkoutSnapshot.Point(lat: $0.latitude,
                                                               lon: $0.longitude,
                                                               alt: $0.altitude,
                                                               time: $0.timestamp,
                                                               speed: $0.speed,
-                                                              distance: $0.distanceFromStart)
+                                                              distance: $0.distanceFromStart,
+                                                              accuracy: $0.horizontalAccuracy)
                               },
                               laps: laps.map {
                                   ActiveWorkoutSnapshot.Lap(number: $0.number,
@@ -672,7 +722,8 @@ final class GPSWorkoutRecorder: ObservableObject {
                                                             distance: $0.distance,
                                                             timestamp: $0.timestamp)
                               },
-                              gaps: coverageGaps)
+                              gaps: coverageGaps,
+                              sessionID: recordingID)
     }
 
     /// 把目前進度寫到磁碟。force 用在暫停、進背景這種關鍵時刻。
@@ -688,6 +739,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     /// 從中斷的自動存檔接續記錄
     func restore(from snapshot: ActiveWorkoutSnapshot) {
         reset()
+        recordingID = snapshot.recoveredSessionID
         workoutType = snapshot.type
         sport = snapshot.sport
         startDate = snapshot.startDate
@@ -706,14 +758,17 @@ final class GPSWorkoutRecorder: ObservableObject {
             : 0
         lastLapElapsed = snapshot.elapsed
 
+        recoveredWithoutStepAlignment = true
         samples = snapshot.points.map {
             TrackSample(latitude: $0.lat,
                         longitude: $0.lon,
                         altitude: $0.alt,
                         timestamp: $0.time,
                         speed: $0.speed,
-                        distanceFromStart: $0.distance)
+                        distanceFromStart: $0.distance,
+                        horizontalAccuracy: $0.accuracy)
         }
+        rawSamples = samples
         laps = snapshot.laps.map {
             LapDraft(number: $0.number,
                      duration: $0.duration,
@@ -836,7 +891,7 @@ final class GPSWorkoutRecorder: ObservableObject {
             default: return false
             }
         }()
-        let session = WorkoutSession(type: workoutType,
+        let session = WorkoutSession(id: recordingID, type: workoutType,
                                      startDate: startDate,
                                      endDate: end,
                                      duration: elapsed,
@@ -844,13 +899,13 @@ final class GPSWorkoutRecorder: ObservableObject {
                                      averagePace: distance > 50 ? elapsed / (distance / 1000) : nil,
                                      elevationGain: elevationGain,
                                      elevationLoss: elevationLoss,
-                                     stepCount: footBased && pedometer.steps > 0 ? pedometer.steps : nil,
+                                     stepCount: footBased && effectiveSteps > 0 ? effectiveSteps : nil,
                                      cadence: footBased && pedometer.cadence > 0 ? pedometer.cadence : nil,
                                      floorsAscended: footBased ? pedometer.floorsAscended : nil,
                                      floorsDescended: footBased ? pedometer.floorsDescended : nil,
-                                     strideLength: footBased && pedometer.steps > 400 && distance > 300
-                                        ? distance / Double(pedometer.steps) : nil,
-                                     distanceSource: .gps,
+                                     strideLength: footBased && effectiveSteps > 400 && distance > 300
+                                        ? distance / Double(effectiveSteps) : nil,
+                                     distanceSource: recoveredWithoutStepAlignment ? .unknown : stepAssistedDistance > 0 ? .mixed : .gps,
                                      routeKey: routeKey.isEmpty ? nil : routeKey,
                                      title: sport?.name,
                                      notes: nil)
@@ -878,19 +933,33 @@ final class GPSWorkoutRecorder: ObservableObject {
         session.temperature = temperature
         session.pauseLog = pauseLog.isEmpty ? nil : pauseLog
         session.coverageGaps = coverageGaps
+        var evidence = MeasurementEvidence()
+        evidence.method = recoveredWithoutStepAlignment ? .unknown : stepAssistedDistance > 0 ? .mixed : .independentGPS
+        evidence.originSessionID = session.id.uuidString
+        evidence.generatedByThisApp = true
+        evidence.sourceBundle = Bundle.main.bundleIdentifier
+        evidence.routeSource = "CoreLocation"
+        evidence.stepSource = "CoreMotion"
+        evidence.stepsAligned = !recoveredWithoutStepAlignment && stepAlignmentReliable
+        evidence.distanceConfirmed = !recoveredWithoutStepAlignment
+        evidence.gpsMeasuredDistance = gpsMeasuredDistance
+        evidence.stepAssistedDistance = stepAssistedDistance
+        evidence.pauseIntervals = WorkoutTime.pauses(start: startDate, end: end, log: pauseLog)
+        session.evidence = evidence
         session.laps = laps.map {
             LapRecord(lapNumber: $0.number,
                       lapDuration: $0.duration,
                       distanceOverride: $0.distance,
                       timestamp: $0.timestamp)
         }
-        session.routePoints = samples.map {
+        session.routePoints = (rawSamples.isEmpty ? samples : rawSamples).map {
             RoutePoint(latitude: $0.latitude,
                        longitude: $0.longitude,
                        altitude: $0.altitude,
                        timestamp: $0.timestamp,
                        speed: $0.speed,
-                       distanceFromStart: $0.distanceFromStart)
+                       distanceFromStart: $0.distanceFromStart,
+                       horizontalAccuracy: $0.horizontalAccuracy)
         }
         return session
     }

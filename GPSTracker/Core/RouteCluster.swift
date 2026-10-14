@@ -2,7 +2,7 @@ import Foundation
 import CoreLocation
 
 /// 自動辨識出來的「同一條路線」
-struct RouteCluster: Identifiable, Hashable {
+struct RouteCluster: Identifiable, Hashable, Sendable {
     let id = UUID()
     let signature: String
     let name: String
@@ -41,17 +41,28 @@ enum RouteClusterEngine {
               let last = points.last,
               let distance = session.totalDistance, distance > 500 else { return nil }
 
-        let startKey = "\(grid(first.latitude))_\(grid(first.longitude))"
-        let endKey = "\(grid(last.latitude))_\(grid(last.longitude))"
+        return signature(startLatitude: first.latitude, startLongitude: first.longitude,
+                         endLatitude: last.latitude, endLongitude: last.longitude, distance: distance)
+    }
+
+    static func signature(startLatitude: Double, startLongitude: Double, endLatitude: Double, endLongitude: Double, distance: Double) -> String? {
+        guard startLatitude.isFinite, startLongitude.isFinite, endLatitude.isFinite, endLongitude.isFinite,
+              abs(startLatitude) <= 90, abs(endLatitude) <= 90, abs(startLongitude) <= 180, abs(endLongitude) <= 180,
+              distance.isFinite, distance > 500, distance < Double(Int.max) / 2 else { return nil }
+        let startKey = "\(grid(startLatitude))_\(grid(startLongitude))"
+        let endKey = "\(grid(endLatitude))_\(grid(endLongitude))"
         let distanceKey = Int((distance / distanceBucket).rounded())
         return "\(startKey)|\(endKey)|\(distanceKey)"
     }
 
     /// 把有軌跡的紀錄自動分群，只回傳跑過兩次以上的路線
-    static func cluster(sessions: [WorkoutSession]) -> [RouteCluster] {
+    static func cluster(sessions: [WorkoutSession], signatures: [UUID: String]? = nil) -> [RouteCluster] {
         var groups: [String: [WorkoutSession]] = [:]
         for session in sessions {
-            guard let key = signature(for: session) else { continue }
+            let key: String?
+            if let signatures { key = signatures[session.id] }
+            else { key = signature(for: session) }
+            guard let key else { continue }
             groups[key, default: []].append(session)
         }
 

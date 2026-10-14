@@ -10,6 +10,7 @@ struct RoutePointBackup: Codable {
     var timestamp: Date
     var speed: Double
     var distanceFromStart: Double
+    var horizontalAccuracy: Double? = nil
 }
 
 struct LapBackup: Codable {
@@ -50,6 +51,19 @@ struct SessionBackup: Codable {
     var routeKey: String?
     var title: String?
     var notes: String?
+    var provenanceJSON: String? = nil
+    var calibrationDecisionJSON: String? = nil
+    var estimateWindowsJSON: String? = nil
+    var coverageGapsJSON: String? = nil
+    var carryPositionRaw: String? = nil
+    var sportRaw: String? = nil
+    var trainingExcluded: Bool? = nil
+    var otherSeconds: Double? = nil
+    var loadWeight: Double? = nil
+    var pauseLog: [Date]? = nil
+    var heartRateAfter: Int? = nil
+    var heartRateOneMinute: Int? = nil
+    var setCount: Int? = nil
     var routePoints: [RoutePointBackup]
     var laps: [LapBackup]
 }
@@ -73,6 +87,7 @@ struct SettingsBackup: Codable {
     var preferDarkMode: Bool
     var dailyStepGoal: Int
     var dailyDistanceGoal: Double
+    var lastRuckLoad: Double? = nil
 }
 
 struct BackupPayload: Codable {
@@ -88,6 +103,9 @@ struct BackupPayload: Codable {
     var exercises: [ExerciseItem]
     var intervalPlans: [IntervalPlan]
     var fitnessStandards: FitnessStandards
+    var strideRuck: StrideState? = nil
+    var previousModels: [String: StrideState]? = nil
+    var calibrationReports: [CalibrationReport]? = nil
 
     var routePointCount: Int {
         sessions.reduce(0) { $0 + $1.routePoints.count }
@@ -108,13 +126,13 @@ enum RestoreMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var displayName: String {
-        self == .merge ? "合併（只補沒有的）" : "取代（清空後還原）"
+        "合併（保留現有資料）"
     }
 
     var detail: String {
         self == .merge
             ? "保留現有紀錄，只加入備份中沒有的部分。最安全。"
-            : "刪除裝置上所有現有紀錄，完全還原成備份當下的狀態。"
+            : "為保護現有資料，舊版取代模式亦採無損合併。"
     }
 }
 
@@ -123,9 +141,11 @@ struct RestoreResult {
     var skipped = 0
     var removed = 0
     var goalsAdded = 0
+    var error: String?
     var settingsRestored = false
 
     var summary: String {
+        if let error { return "還原未完成：" + error }
         var parts = ["還原 \(added) 筆紀錄"]
         if skipped > 0 { parts.append("略過重複 \(skipped) 筆") }
         if removed > 0 { parts.append("移除舊資料 \(removed) 筆") }
@@ -140,7 +160,7 @@ final class BackupManager: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var statusText = ""
 
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     // MARK: 匯出
 
@@ -185,6 +205,19 @@ final class BackupManager: ObservableObject {
                               routeKey: session.routeKey,
                               title: session.title,
                               notes: session.notes,
+                              provenanceJSON: session.provenanceJSON,
+                              calibrationDecisionJSON: session.calibrationDecisionJSON,
+                              estimateWindowsJSON: session.estimateWindowsJSON,
+                              coverageGapsJSON: session.coverageGapsJSON,
+                              carryPositionRaw: session.carryPositionRaw,
+                              sportRaw: session.sportRaw,
+                              trainingExcluded: session.trainingExcluded,
+                              otherSeconds: session.otherSeconds,
+                              loadWeight: session.loadWeight,
+                              pauseLog: session.pauseLog,
+                              heartRateAfter: session.heartRateAfter,
+                              heartRateOneMinute: session.heartRateOneMinute,
+                              setCount: session.setCount,
                               routePoints: includeRoutes
                                 ? session.sortedPoints.map {
                                     RoutePointBackup(latitude: $0.latitude,
@@ -192,7 +225,8 @@ final class BackupManager: ObservableObject {
                                                      altitude: $0.altitude,
                                                      timestamp: $0.timestamp,
                                                      speed: $0.speed,
-                                                     distanceFromStart: $0.distanceFromStart)
+                                                     distanceFromStart: $0.distanceFromStart,
+                                                     horizontalAccuracy: $0.horizontalAccuracy)
                                   }
                                 : [],
                               laps: session.sortedLaps.map {
@@ -215,12 +249,18 @@ final class BackupManager: ObservableObject {
                                      mapPitch: settings.mapPitch,
                                      preferDarkMode: settings.preferDarkMode,
                                      dailyStepGoal: settings.dailyStepGoal,
-                                     dailyDistanceGoal: settings.dailyDistanceGoal),
+                                     dailyDistanceGoal: settings.dailyDistanceGoal,
+                                     lastRuckLoad: settings.ruckLoad),
             strideWalking: StrideCalibration.state(.walking),
             strideRunning: StrideCalibration.state(.running),
             exercises: ExerciseLibrary.shared.items,
             intervalPlans: IntervalPlanStore.shared.plans,
-            fitnessStandards: FitnessStandardsStore.load()
+            fitnessStandards: FitnessStandardsStore.load(),
+            strideRuck: StrideCalibration.state(.ruck),
+            previousModels: Dictionary(uniqueKeysWithValues: [StrideProfile.walking, .running, .ruck].compactMap { profile in
+                StrideCalibration.previous(profile).map { (profile.rawValue, $0) }
+            }),
+            calibrationReports: CalibrationReportStore.reports
         )
     }
 
@@ -313,23 +353,10 @@ final class BackupManager: ObservableObject {
 
         var result = RestoreResult()
 
-        if mode == .replace {
-            statusText = "清除現有資料…"
-            for session in existing {
-                context.delete(session)
-                result.removed += 1
-            }
-            for goal in existingGoals {
-                context.delete(goal)
-            }
-            try? context.save()
-        }
-
-        let knownIDs = mode == .replace ? Set<UUID>() : Set(existing.map { $0.id })
-        let knownHealthUUIDs = mode == .replace
-            ? Set<String>()
-            : Set(existing.compactMap { $0.healthKitUUID })
-
+        guard !DatabaseHealth.needsAttention else { result.error = DatabaseHealth.message; return result }
+        var knownIDs = Set(existing.map { $0.id })
+        var knownHealthUUIDs = Set(existing.compactMap { $0.healthKitUUID })
+        // Backward-compatible replace requests now merge; no destructive store reset.
         for (index, backup) in payload.sessions.enumerated() {
             statusText = "還原第 \(index + 1) / \(payload.sessions.count) 筆…"
             progress = Double(index) / Double(max(1, payload.sessions.count))
@@ -373,13 +400,27 @@ final class BackupManager: ObservableObject {
             session.sourceApp = backup.sourceApp
             session.distanceSourceRaw = backup.distanceSource
             session.rpe = backup.rpe
+            session.provenanceJSON = backup.provenanceJSON
+            session.calibrationDecisionJSON = backup.calibrationDecisionJSON
+            session.estimateWindowsJSON = backup.estimateWindowsJSON
+            session.coverageGapsJSON = backup.coverageGapsJSON
+            session.carryPositionRaw = backup.carryPositionRaw
+            session.sportRaw = backup.sportRaw
+            session.trainingExcluded = backup.trainingExcluded ?? false
+            session.otherSeconds = backup.otherSeconds
+            session.loadWeight = backup.loadWeight
+            session.pauseLog = backup.pauseLog
+            session.heartRateAfter = backup.heartRateAfter
+            session.heartRateOneMinute = backup.heartRateOneMinute
+            session.setCount = backup.setCount
             session.routePoints = backup.routePoints.map {
                 RoutePoint(latitude: $0.latitude,
                            longitude: $0.longitude,
                            altitude: $0.altitude,
                            timestamp: $0.timestamp,
                            speed: $0.speed,
-                           distanceFromStart: $0.distanceFromStart)
+                           distanceFromStart: $0.distanceFromStart,
+                           horizontalAccuracy: $0.horizontalAccuracy)
             }
             session.laps = backup.laps.map {
                 LapRecord(lapNumber: $0.lapNumber,
@@ -389,14 +430,17 @@ final class BackupManager: ObservableObject {
             }
             context.insert(session)
             result.added += 1
+            knownIDs.insert(backup.id)
+            if let uuid = backup.healthKitUUID { knownHealthUUIDs.insert(uuid) }
 
             if result.added % 40 == 0 {
-                try? context.save()
+                do { try context.save() }
+                catch { context.rollback(); result.error = error.localizedDescription; return result }
             }
         }
 
         let goalIDs = Set(existingGoals.map { $0.id })
-        for goal in payload.goals where mode == .replace || !goalIDs.contains(goal.id) {
+        for goal in payload.goals where !goalIDs.contains(goal.id) {
             context.insert(WorkoutGoal(id: goal.id,
                                        period: GoalPeriod(rawValue: goal.period) ?? .weekly,
                                        metric: GoalMetric(rawValue: goal.metric) ?? .distance,
@@ -405,7 +449,9 @@ final class BackupManager: ObservableObject {
             result.goalsAdded += 1
         }
 
-        try? context.save()
+        do { try context.save() }
+        catch { context.rollback(); result.error = error.localizedDescription; return result }
+        if let reports = payload.calibrationReports { CalibrationReportStore.restore(reports) }
 
         if restoreSettings {
             let settings = AppSettings.shared
@@ -419,9 +465,14 @@ final class BackupManager: ObservableObject {
             settings.preferDarkMode = payload.settings.preferDarkMode
             settings.dailyStepGoal = payload.settings.dailyStepGoal
             settings.dailyDistanceGoal = payload.settings.dailyDistanceGoal
+            if let load = payload.settings.lastRuckLoad { settings.ruckLoad = load }
 
             if let walking = payload.strideWalking { StrideCalibration.restore(walking, profile: .walking) }
             if let running = payload.strideRunning { StrideCalibration.restore(running, profile: .running) }
+            if let ruck = payload.strideRuck { StrideCalibration.restore(ruck, profile: .ruck) }
+            for (key, state) in payload.previousModels ?? [:] {
+                if let profile = StrideProfile(rawValue: key) { StrideCalibration.restorePrevious(state, profile: profile) }
+            }
             FitnessStandardsStore.save(payload.fitnessStandards)
             result.settingsRestored = true
         }

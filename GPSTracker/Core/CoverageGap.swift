@@ -5,7 +5,7 @@ import Foundation
 /// GPS 失效或精度太差時，App 會自動改用計步推估距離。那段期間不寫入
 /// 任何座標點，所以地圖上會是一段空白；但時間、距離、步數都持續累積，
 /// 回放時再依時間等速通過這段空白，銜接到定位恢復的那一點。
-struct CoverageGap: Codable, Hashable, Identifiable {
+struct CoverageGap: Codable, Hashable, Identifiable, Sendable {
     var id: Date { start }
 
     var start: Date
