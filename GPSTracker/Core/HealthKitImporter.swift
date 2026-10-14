@@ -5,6 +5,9 @@ import SwiftData
 
 /// 匯入結果
 struct ImportResult: Equatable {
+    var scanned = 0
+    var cancelled = false
+    var error: String?
     var imported = 0
     var skipped = 0
     var withRoute = 0
@@ -16,6 +19,8 @@ struct ImportResult: Equatable {
     var isEmpty: Bool { imported == 0 && skipped == 0 }
 
     var summary: String {
+        if let error { return "匯入未完成：" + error }
+        if cancelled { return "已取消，保留已新增 \(imported) 筆紀錄" }
         if imported == 0 && skipped == 0 { return "沒有找到可匯入的訓練紀錄" }
         var parts = ["匯入 \(imported) 筆"]
         if skipped > 0 { parts.append("略過重複 \(skipped) 筆") }
@@ -62,10 +67,22 @@ private struct HealthImportRoutePoint: Sendable {
     let altitude: Double
     let timestamp: Date
     let speed: Double
+    let accuracy: Double
     let distanceFromStart: Double
 }
 
 private struct HealthImportPayload: Sendable {
+    var identity: WorkoutIdentity {
+        WorkoutIdentity(id: evidence.originSessionID ?? healthKitUUID, healthUUID: healthKitUUID,
+                        originID: evidence.originSessionID,
+                        activity: Self.activityKey(typeRaw: typeRaw, sportRaw: sportRaw),
+                        start: startDate, end: endDate, distance: totalDistance)
+    }
+    private static func activityKey(typeRaw: String, sportRaw: String?) -> String {
+        let type = WorkoutType(rawValue: typeRaw) ?? .manualEntry
+        return type.isStepBased || type == .gpsRun || type == .gpsHike ? type.strideProfile.rawValue : sportRaw ?? typeRaw
+    }
+    let evidence: MeasurementEvidence
     let typeRaw: String
     let sportRaw: String?
     let startDate: Date
@@ -85,7 +102,7 @@ private struct HealthImportPayload: Sendable {
 
 private struct HealthImportKeys: Sendable {
     var uuids: Set<String>
-    var fingerprints: Set<String>
+    var identities: [WorkoutIdentity]
 }
 
 /// SwiftData 大量關聯寫入不能塞在主執行緒。
@@ -97,13 +114,14 @@ private actor HealthImportWriter {
         let sessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
         return HealthImportKeys(
             uuids: Set(sessions.compactMap { $0.healthKitUUID }),
-            fingerprints: Set(sessions.map {
-                "\($0.typeRaw)-\(Int($0.startDate.timeIntervalSince1970 / 60))"
-            })
+            identities: sessions.map { CalibrationSessionAnalyzer.identity($0) }
         )
     }
 
-    func insert(_ payload: HealthImportPayload) throws {
+    func insert(_ payload: HealthImportPayload) throws -> Bool {
+        modelContext.autosaveEnabled = false
+        let keys = try existingKeys()
+        if keys.uuids.contains(payload.healthKitUUID) || keys.identities.contains(where: { $0.matches(payload.identity) }) { return false }
         let type = WorkoutType(rawValue: payload.typeRaw) ?? .manualEntry
         let session = WorkoutSession(type: type,
                                      startDate: payload.startDate,
@@ -114,7 +132,7 @@ private actor HealthImportWriter {
                                      elevationGain: payload.elevationGain,
                                      elevationLoss: payload.elevationLoss,
                                      stepCount: payload.stepCount,
-                                     distanceSource: payload.routePoints.count > 1 ? .gps : .pedometer,
+                                     distanceSource: payload.evidence.method == .independentGPS ? .gps : payload.evidence.method == .mixed ? .mixed : payload.evidence.method == .strideEstimate ? .stride : payload.evidence.method == .systemEstimate ? .pedometer : .unknown,
                                      routeKey: nil,
                                      title: nil)
 
@@ -126,6 +144,10 @@ private actor HealthImportWriter {
         session.isImported = true
         session.sourceApp = payload.sourceApp
         session.notes = "自 \(payload.sourceApp) 匯入"
+        session.evidence = payload.evidence
+        session.loadWeight = payload.evidence.loadWeight
+        session.carryPositionRaw = payload.evidence.carryPosition.rawValue
+        session.pauseLog = payload.evidence.pauseIntervals.flatMap { [$0.start, $0.end] }
 
         if !payload.routePoints.isEmpty {
             session.routePoints = payload.routePoints.map { point in
@@ -134,12 +156,14 @@ private actor HealthImportWriter {
                            altitude: point.altitude,
                            timestamp: point.timestamp,
                            speed: point.speed,
-                           distanceFromStart: point.distanceFromStart)
+                           distanceFromStart: point.distanceFromStart,
+                           horizontalAccuracy: point.accuracy)
             }
         }
 
         modelContext.insert(session)
-        try modelContext.save()
+        do { try modelContext.save(); return true }
+        catch { modelContext.rollback(); throw error }
     }
 }
 
@@ -159,10 +183,6 @@ final class HealthKitImporter: ObservableObject {
     private let health = HealthKitManager.shared
     private var writer: HealthImportWriter?
 
-    /// 單一 HealthKit route 若異常巨大，限制持久化點數，避免一次匯入數萬個 SwiftData model。
-    /// 6000 點對一般數小時運動仍保有很高的軌跡細節。
-    private let maxRoutePointsPerWorkout = 6000
-
     /// 中斷匯入。每一筆完成後就會立即存檔，已完成的紀錄不會遺失。
     @MainActor
     func cancel() {
@@ -172,8 +192,9 @@ final class HealthKitImporter: ObservableObject {
     }
 
     @MainActor
-    func configure(container: ModelContainer) {
-        writer = HealthImportWriter(modelContainer: container)
+    func configure(container: ModelContainer) async {
+        guard !DatabaseHealth.needsAttention else { return }
+        writer = await Task.detached { HealthImportWriter(modelContainer: container) }.value
     }
 
     // MARK: 預覽
@@ -199,201 +220,73 @@ final class HealthKitImporter: ObservableObject {
 
     @MainActor
     @discardableResult
-    func importWorkouts(range: ImportRange,
-                        existing: [WorkoutSession],
-                        includeRoutes: Bool = true) async -> ImportResult {
-        guard health.isReady else {
-            statusText = health.availability.displayName
-            return ImportResult()
-        }
-        guard let writer else {
-            statusText = "資料庫尚未就緒"
-            return ImportResult()
-        }
-        guard !isImporting else { return ImportResult() }
-
-        isImporting = true
-        isCancelled = false
-        progress = 0
-        statusText = "讀取健康 App 的訓練紀錄…"
-        defer {
-            isImporting = false
-            isCancelled = false
-            statusText = ""
-        }
-
-        let workouts = await health.workouts(from: range.startDate)
-        guard !workouts.isEmpty else {
-            let empty = ImportResult()
-            lastResult = empty
-            return empty
-        }
-
-        var result = ImportResult()
-        var keys = await currentImportKeys(writer: writer, fallback: existing)
-
-        for (index, workout) in workouts.enumerated() {
-            if isCancelled {
-                result.finishedAt = Date()
-                lastResult = result
-                return result
-            }
-
-            progress = Double(index) / Double(workouts.count)
-            statusText = "處理第 \(index + 1) / \(workouts.count) 筆…"
-
-            let uuid = workout.uuid.uuidString
-            if keys.uuids.contains(uuid) {
-                result.skipped += 1
-                continue
-            }
-
-            let locations = includeRoutes ? await health.route(of: workout) : []
-            let type = HealthKitManager.workoutType(for: workout.workoutActivityType,
-                                                    hasRoute: locations.count > 1)
-            let sport = SportCatalog.sport(for: workout.workoutActivityType)
-            let fp = fingerprint(type: type, start: workout.startDate)
-            if keys.fingerprints.contains(fp) {
-                result.skipped += 1
-                continue
-            }
-
-            let distance = await health.distance(of: workout)
-            let steps = await health.steps(during: workout)
-            let energy = await health.energy(of: workout)
-            let payload = makePayload(workout: workout,
-                                      type: type,
-                                      sport: sport,
-                                      distance: distance,
-                                      steps: steps,
-                                      energy: energy,
-                                      locations: locations)
-
-            do {
-                // 真正昂貴的 SwiftData graph insert 在 ModelActor 執行，不再卡 UI runloop。
-                try await writer.insert(payload)
-            } catch {
-                DiagnosticsLog.shared.log(.error,
-                                          category: "health-import",
-                                          "健康資料匯入寫入失敗",
-                                          detail: ["錯誤": error.localizedDescription,
-                                                   "來源": payload.sourceApp,
-                                                   "開始": Fmt.dateTime(payload.startDate)])
-                result.finishedAt = Date()
-                lastResult = result
-                return result
-            }
-
-            // 成功後立刻更新去重集合，避免同一批 HealthKit 結果互相重複。
-            keys.uuids.insert(uuid)
-            keys.fingerprints.insert(fp)
-
-            result.imported += 1
-            if !payload.routePoints.isEmpty { result.withRoute += 1 }
-            result.sources[payload.sourceApp, default: 0] += 1
-            if result.oldest == nil || workout.startDate < result.oldest! { result.oldest = workout.startDate }
-            if result.newest == nil || workout.startDate > result.newest! { result.newest = workout.startDate }
-
-            progress = Double(index + 1) / Double(workouts.count)
-            await Task.yield()
-        }
-
-        progress = 1
-        result.finishedAt = Date()
-        lastResult = result
-        AppSettings.shared.lastHealthImport = Date().timeIntervalSince1970
-        return result
+    func importWorkouts(range: ImportRange, existing: [WorkoutSession], includeRoutes: Bool = true) async -> ImportResult {
+        await performImport(from: range.startDate, existing: existing, includeRoutes: includeRoutes)
     }
 
-    /// 只抓上次匯入之後的新紀錄（App 啟動與背景更新用）
     @MainActor
     @discardableResult
     func importNew(existing: [WorkoutSession]) async -> ImportResult {
-        guard health.isReady, let writer else { return ImportResult() }
-        guard !isImporting else { return ImportResult() }
+        let since = AppSettings.shared.lastHealthImportDate ?? Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+        return await performImport(from: since.addingTimeInterval(-3600), existing: existing, includeRoutes: true)
+    }
 
-        isImporting = true
-        isCancelled = false
-        progress = 0
-        statusText = "檢查最新健康資料…"
-        defer {
-            isImporting = false
-            isCancelled = false
-            statusText = ""
+    @MainActor
+    private func performImport(from start: Date, existing: [WorkoutSession], includeRoutes: Bool) async -> ImportResult {
+        guard health.isReady, let writer, !isImporting else { return ImportResult(error: "健康權限、資料庫未就緒或已有匯入進行中") }
+        isImporting = true; isCancelled = false; progress = 0
+        defer { isImporting = false; statusText = "" }
+        statusText = "讀取健康 App 歷史…"
+        let workouts: [HKWorkout]
+        do { workouts = try await health.completeWorkouts(from: start) }
+        catch {
+            let result = ImportResult(error: "健康資料讀取失敗，未推進匯入進度：" + error.localizedDescription)
+            lastResult = result
+            return result
         }
-
-        let since = AppSettings.shared.lastHealthImportDate
-            ?? Calendar.current.date(byAdding: .month, value: -1, to: Date())
-            ?? Date()
-
-        let workouts = await health.workouts(from: since.addingTimeInterval(-3600))
-        guard !workouts.isEmpty else {
-            AppSettings.shared.lastHealthImport = Date().timeIntervalSince1970
-            return ImportResult()
-        }
-
         var result = ImportResult()
-        var keys = await currentImportKeys(writer: writer, fallback: existing)
-
-        for (index, workout) in workouts.enumerated() {
-            if isCancelled { break }
-
-            progress = Double(index) / Double(workouts.count)
-
-            let uuid = workout.uuid.uuidString
-            if keys.uuids.contains(uuid) {
-                result.skipped += 1
-                continue
+        do {
+            var keys = try await writer.existingKeys()
+            for (index, workout) in workouts.enumerated() {
+                if isCancelled || Task.isCancelled { result.cancelled = true; break }
+                statusText = "來源與完整路線：第 \(index + 1) / \(workouts.count) 筆…"
+                result.scanned += 1
+                if keys.uuids.contains(workout.uuid.uuidString) { result.skipped += 1; continue }
+                let evidence = await health.calibrationEvidence(of: workout)
+                let locations = includeRoutes ? try await health.completeRoute(of: workout) : []
+                var type = HealthKitManager.workoutType(for: workout.workoutActivityType, hasRoute: locations.count > 1)
+                if evidence.generatedByThisApp, let raw = workout.metadata?["GPSTracker.workoutType"] as? String, let own = WorkoutType(rawValue: raw) { type = own }
+                let distance = await health.distance(of: workout)
+                let steps = await health.steps(during: workout)
+                let energy = await health.energy(of: workout)
+                let sport = SportCatalog.sport(for: workout.workoutActivityType)
+                // Route processing and geometry calculations do not block the UI.
+                let weight = AppSettings.shared.bodyWeight
+                let payload = await Task.detached(priority: .utility) {
+                    Self.makePayload(workout: workout, type: type, sport: sport, distance: distance,
+                                     steps: steps, energy: energy, locations: locations, evidence: evidence, bodyWeight: weight)
+                }.value
+                if isCancelled || Task.isCancelled { result.cancelled = true; break }
+                if keys.identities.contains(where: { $0.matches(payload.identity) }) { result.skipped += 1; continue }
+                if try await writer.insert(payload) {
+                    keys.uuids.insert(payload.healthKitUUID); keys.identities.append(payload.identity)
+                    result.imported += 1
+                    if !payload.routePoints.isEmpty { result.withRoute += 1 }
+                    result.sources[payload.sourceApp, default: 0] += 1
+                    result.oldest = min(result.oldest ?? workout.startDate, workout.startDate)
+                    result.newest = max(result.newest ?? workout.startDate, workout.startDate)
+                } else { result.skipped += 1 }
+                progress = Double(index + 1) / Double(max(1, workouts.count))
+                await Task.yield()
             }
-
-            let locations = await health.route(of: workout)
-            let type = HealthKitManager.workoutType(for: workout.workoutActivityType,
-                                                    hasRoute: locations.count > 1)
-            let sport = SportCatalog.sport(for: workout.workoutActivityType)
-            let fp = fingerprint(type: type, start: workout.startDate)
-            if keys.fingerprints.contains(fp) {
-                result.skipped += 1
-                continue
-            }
-
-            let distance = await health.distance(of: workout)
-            let steps = await health.steps(during: workout)
-            let energy = await health.energy(of: workout)
-            let payload = makePayload(workout: workout,
-                                      type: type,
-                                      sport: sport,
-                                      distance: distance,
-                                      steps: steps,
-                                      energy: energy,
-                                      locations: locations)
-
-            do {
-                try await writer.insert(payload)
-            } catch {
-                DiagnosticsLog.shared.log(.error,
-                                          category: "health-import",
-                                          "最新健康資料寫入失敗",
-                                          detail: ["錯誤": error.localizedDescription,
-                                                   "來源": payload.sourceApp])
-                break
-            }
-
-            keys.uuids.insert(uuid)
-            keys.fingerprints.insert(fp)
-
-            result.imported += 1
-            if !payload.routePoints.isEmpty { result.withRoute += 1 }
-            result.sources[payload.sourceApp, default: 0] += 1
-            if result.oldest == nil || workout.startDate < result.oldest! { result.oldest = workout.startDate }
-            if result.newest == nil || workout.startDate > result.newest! { result.newest = workout.startDate }
-
-            progress = Double(index + 1) / Double(workouts.count)
-            await Task.yield()
+        } catch { result.error = "健康讀取或資料庫寫入失敗，已保留原有資料：" + error.localizedDescription }
+        result.finishedAt = Date(); lastResult = result
+        // Failed/cancelled imports never advance their retry cursor.
+        if !result.cancelled && result.error == nil {
+            progress = 1
+            AppSettings.shared.lastHealthImport = Date().timeIntervalSince1970
+            Task { await CalibrationCoordinator.shared.analyzeIfEnabled() }
         }
-
-        result.finishedAt = Date()
-        AppSettings.shared.lastHealthImport = Date().timeIntervalSince1970
-        if result.imported > 0 { lastResult = result }
         return result
     }
 
@@ -407,15 +300,15 @@ final class HealthKitImporter: ObservableObject {
 
     // MARK: 建立紀錄
 
-    @MainActor
-    private func makePayload(workout: HKWorkout,
+    private static func makePayload(workout: HKWorkout,
                              type: WorkoutType,
                              sport: SportKind?,
                              distance: Double?,
                              steps: Int?,
                              energy: Double?,
-                             locations: [CLLocation]) -> HealthImportPayload {
-        let duration = workout.endDate.timeIntervalSince(workout.startDate)
+                             locations: [CLLocation],
+                             evidence: MeasurementEvidence, bodyWeight: Double) -> HealthImportPayload {
+        let duration = workout.duration
 
         var gain = 0.0
         var loss = 0.0
@@ -444,14 +337,14 @@ final class HealthKitImporter: ObservableObject {
         let met = sport?.met ?? type.metValue
         let calories = energy ?? IntensityCalculator.calories(met: met,
                                                                duration: duration,
-                                                               bodyWeight: AppSettings.shared.bodyWeight)
+                                                               bodyWeight: bodyWeight)
         let intensity = IntensityCalculator.score(met: met,
                                                   duration: duration,
                                                   distance: effectiveDistance,
                                                   averagePace: pace,
                                                   elevationGain: locations.count > 1 ? gain : nil)
 
-        let compacted = compactRoute(locations)
+        let compacted = locations
         var routePoints: [HealthImportRoutePoint] = []
         routePoints.reserveCapacity(compacted.count)
 
@@ -479,25 +372,14 @@ final class HealthKitImporter: ObservableObject {
                 altitude: location.altitude,
                 timestamp: location.timestamp,
                 speed: max(0, effectiveSpeed),
+                accuracy: location.horizontalAccuracy,
                 distanceFromStart: accumulated
             ))
             previous = location
         }
 
-        // 抽稀後幾何距離可能稍短，用健康 App 的總距離校正每個點的累積距離。
-        if let effectiveDistance, accumulated > 0, !routePoints.isEmpty {
-            let factor = effectiveDistance / accumulated
-            routePoints = routePoints.map { point in
-                HealthImportRoutePoint(latitude: point.latitude,
-                                       longitude: point.longitude,
-                                       altitude: point.altitude,
-                                       timestamp: point.timestamp,
-                                       speed: point.speed,
-                                       distanceFromStart: point.distanceFromStart * factor)
-            }
-        }
-
         return HealthImportPayload(
+            evidence: evidence,
             typeRaw: type.rawValue,
             sportRaw: sport?.id,
             startDate: workout.startDate,
@@ -516,44 +398,4 @@ final class HealthKitImporter: ObservableObject {
         )
     }
 
-    /// 等距抽樣，保留第一點與最後一點。只處理異常巨大的 HealthKit route。
-    private func compactRoute(_ locations: [CLLocation]) -> [CLLocation] {
-        guard locations.count > maxRoutePointsPerWorkout,
-              maxRoutePointsPerWorkout > 2 else { return locations }
-
-        let lastIndex = locations.count - 1
-        let denominator = Double(maxRoutePointsPerWorkout - 1)
-        var result: [CLLocation] = []
-        result.reserveCapacity(maxRoutePointsPerWorkout)
-
-        var previousIndex = -1
-        for step in 0..<maxRoutePointsPerWorkout {
-            let raw = Double(step) * Double(lastIndex) / denominator
-            let index = min(lastIndex, max(0, Int(raw.rounded())))
-            guard index != previousIndex else { continue }
-            result.append(locations[index])
-            previousIndex = index
-        }
-
-        if result.last?.timestamp != locations.last?.timestamp, let last = locations.last {
-            result.append(last)
-        }
-        return result
-    }
-
-    @MainActor
-    private func currentImportKeys(writer: HealthImportWriter,
-                                   fallback existing: [WorkoutSession]) async -> HealthImportKeys {
-        if let keys = try? await writer.existingKeys() {
-            return keys
-        }
-        return HealthImportKeys(
-            uuids: Set(existing.compactMap { $0.healthKitUUID }),
-            fingerprints: Set(existing.map { fingerprint(type: $0.type, start: $0.startDate) })
-        )
-    }
-
-    private func fingerprint(type: WorkoutType, start: Date) -> String {
-        "\(type.rawValue)-\(Int(start.timeIntervalSince1970 / 60))"
-    }
 }

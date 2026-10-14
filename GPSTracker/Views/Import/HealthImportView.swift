@@ -34,6 +34,7 @@ struct HealthImportView: View {
                 statusCard
                 rangeCard
                 actionCard
+                NavigationLink("一鍵匯入並分析／最近品質報告") { StrideCalibrationView() }
                 if let result = importer.lastResult, !result.isEmpty { resultCard(result) }
                 fileImportCard
                 autoCard

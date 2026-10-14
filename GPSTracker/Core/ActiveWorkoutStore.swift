@@ -16,6 +16,7 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
         let time: Date
         let speed: Double
         let distance: Double
+        var accuracy: Double? = nil
     }
 
     struct Lap: Codable {

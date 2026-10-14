@@ -25,8 +25,7 @@ struct WorkoutSummaryView: View {
     @State private var rpe: Int = 0
     @State private var hrAfter: String = ""
     @State private var hrOneMinute: String = ""
-    @State private var exportURL: URL?
-    @State private var showFileShare = false
+    @StateObject private var fileExport = WorkoutExportCoordinator()
     @State private var healthMessage: String?
     @State private var isSyncing = false
     @State private var isInspecting = false
@@ -131,21 +130,7 @@ struct WorkoutSummaryView: View {
         .sheet(isPresented: $showShareSheet) {
             shareSheet
         }
-        .sheet(isPresented: $showFileShare) {
-            if let exportURL {
-                VStack(spacing: 16) {
-                    Text(exportURL.lastPathComponent)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textPrimary)
-                    ShareLink(item: exportURL) {
-                        Label("分享／儲存檔案", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
-                .padding()
-                .presentationDetents([.height(200)])
-            }
-        }
+        .workoutExport(using: fileExport)
         .fullScreenCover(isPresented: $showPlayback) {
             RoutePlaybackView(session: session)
         }
@@ -512,6 +497,7 @@ struct WorkoutSummaryView: View {
             .buttonStyle(PrimaryButtonStyle())
 
             healthCard
+            NavigationLink("查看品質與訓練資格") { CalibrationEligibilityView(session: session) }
             exportCard
 
             Button {
@@ -613,23 +599,20 @@ struct WorkoutSummaryView: View {
                 HStack(spacing: 10) {
                     if session.hasRoute {
                         Button {
-                            exportURL = RouteFileExporter.gpxFile(for: session)
-                            showFileShare = exportURL != nil
+                            fileExport.exportSession(id: session.id, format: .gpx)
                         } label: {
                             Label("GPX", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                         }
                         .buttonStyle(SecondaryButtonStyle())
                     }
                     Button {
-                        exportURL = RouteFileExporter.tcxFile(for: session)
-                        showFileShare = exportURL != nil
+                        fileExport.exportSession(id: session.id, format: .tcx)
                     } label: {
                         Label("TCX", systemImage: "doc.text")
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     Button {
-                        exportURL = DataExporter.routeCSV(session: session)
-                        showFileShare = exportURL != nil
+                        fileExport.exportSession(id: session.id, format: .csv)
                     } label: {
                         Label("CSV", systemImage: "tablecells")
                     }

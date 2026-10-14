@@ -10,7 +10,7 @@ enum StrideAutoCalibrator {
 
     /// 樣本過濾條件
     static func isPlausible(_ sample: StrideSample) -> Bool {
-        sample.stride > 0.35 && sample.stride < 2.1
+        sample.stride > 0.25 && sample.stride < (sample.profile == .running ? 2.8 : 1.5)
             && sample.distance > 300
             && sample.steps > 300
     }
@@ -92,25 +92,11 @@ enum StrideAutoCalibrator {
     @MainActor
     static func samples(from sessions: [WorkoutSession]) -> [StrideSample] {
         sessions.compactMap { session in
-            guard let distance = session.totalDistance,
-                  let steps = session.stepCount,
-                  steps > 300,
-                  distance > 300,
-                  session.distanceSource == .gps || session.distanceSource == .manual
-                    || session.isImported else { return nil }
-            let source: StrideSample.Source
-            if session.isImported {
-                source = .healthWorkout
-            } else if session.distanceSource == .manual {
-                source = .manual
-            } else {
-                source = .gpsSession
-            }
-            return StrideSample(stride: distance / Double(steps),
-                                distance: distance,
-                                steps: steps,
-                                date: session.startDate,
-                                source: source,
+            let decision = CalibrationSessionAnalyzer.evaluate(session)
+            guard decision.eligible, session.calibrationDecision?.eligible != false,
+                  let distance = session.totalDistance, let steps = session.stepCount else { return nil }
+            return StrideSample(stride: distance / Double(steps), distance: distance, steps: steps,
+                                date: session.startDate, source: session.isImported ? .healthWorkout : .gpsSession,
                                 profile: session.type.strideProfile)
         }
     }

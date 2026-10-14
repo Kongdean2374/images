@@ -11,8 +11,7 @@ struct AnalyticsView: View {
     @State private var metric: TrendMetric = .distance
     @State private var selectedRouteKey: String?
     @State private var selectedClusterID: String?
-    @State private var exportURL: URL?
-    @State private var showExport = false
+    @StateObject private var fileExport = WorkoutExportCoordinator()
     @State private var isExporting = false
 
     /// 所有重運算的結果都先算好放這裡。
@@ -119,24 +118,7 @@ struct AnalyticsView: View {
         .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
         .onChange(of: range) { _, _ in rebuildCacheIfNeeded() }
         .navigationTitle("圖表分析")
-        .sheet(isPresented: $showExport) {
-            if let exportURL {
-                VStack(spacing: 16) {
-                    Text("報表已產生")
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(exportURL.lastPathComponent)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    ShareLink(item: exportURL) {
-                        Label("分享／儲存", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
-                .padding()
-                .presentationDetents([.height(220)])
-            }
-        }
+        .workoutExport(using: fileExport)
     }
 
     // MARK: 區塊
@@ -609,8 +591,7 @@ struct AnalyticsView: View {
                     .foregroundStyle(Theme.textSecondary)
                 HStack(spacing: 12) {
                     Button {
-                        exportURL = DataExporter.csv(sessions: sessions)
-                        showExport = exportURL != nil
+                        fileExport.exportHistory()
                     } label: {
                         Label("CSV", systemImage: "tablecells")
                     }
@@ -705,7 +686,6 @@ struct AnalyticsView: View {
         if let image = DataExporter.snapshot(of: trend, width: 700, scale: 2) { images.append(image) }
         if let image = DataExporter.snapshot(of: distribution, width: 700, scale: 2) { images.append(image) }
 
-        exportURL = DataExporter.monthlyReport(sessions: sessions, month: Date(), chartImages: images)
-        showExport = exportURL != nil
+        fileExport.present(DataExporter.monthlyReport(sessions: sessions, month: Date(), chartImages: images))
     }
 }

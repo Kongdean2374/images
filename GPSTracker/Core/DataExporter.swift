@@ -7,57 +7,48 @@ enum DataExporter {
 
     // MARK: CSV
 
+    static let summaryHeaders = ["運動UUID", "開始時間", "結束時間", "運動類型", "有效秒數", "牆上秒數", "暫停秒數", "距離公尺", "距離來源", "步數", "平均步頻", "平均配速秒每公里", "平均步幅公尺", "走路秒數", "跑步秒數", "其他未知秒數", "熱量大卡", "爬升公尺", "下降公尺", "上樓層", "下樓層", "負重公斤", "手機位置", "品質等級", "訓練候選資格", "排除原因碼", "來源App", "HealthKitUUID", "備註", "資料列類型", "區段起點", "區段終點", "緯度", "經度", "GPS精度公尺", "海拔公尺", "速度公尺每秒", "累積距離公尺", "增量步數", "增量距離公尺", "區段步頻", "區段來源", "區段動作"]
+
+    static func summaryFields(_ s: WorkoutSession) -> [String] {
+        let iso = ISO8601DateFormatter()
+        let decision = s.calibrationDecision ?? CalibrationDecision(grade: .c, eligible: false, reasons: [.missingData], gpsCoverage: nil, stride: nil)
+        let wall = max(0, s.endDate.timeIntervalSince(s.startDate))
+        return [s.id.uuidString, iso.string(from: s.startDate), iso.string(from: s.endDate), s.type.displayName,
+                ExportEncoding.number(s.duration), ExportEncoding.number(wall), ExportEncoding.number(max(0, wall - s.duration)),
+                ExportEncoding.number(s.totalDistance), s.evidence.method.label, s.stepCount.map(String.init) ?? "",
+                ExportEncoding.number(s.cadence), ExportEncoding.number(s.averagePace), ExportEncoding.number(s.strideLength),
+                ExportEncoding.number(s.walkingSeconds), ExportEncoding.number(s.runningSeconds), ExportEncoding.number(s.otherSeconds),
+                ExportEncoding.number(s.calories), ExportEncoding.number(s.elevationGain), ExportEncoding.number(s.elevationLoss),
+                s.floorsAscended.map(String.init) ?? "", s.floorsDescended.map(String.init) ?? "", ExportEncoding.number(s.loadWeight),
+                s.evidence.carryPosition.label, decision.grade.rawValue, decision.eligible ? "可訓練候選" : "排除／待確認",
+                decision.reasons.map(\.rawValue).joined(separator: ";"), s.sourceApp ?? s.evidence.sourceBundle ?? "", s.healthKitUUID ?? "", s.notes ?? ""]
+    }
     static func csv(sessions: [WorkoutSession]) -> URL? {
-        var lines: [String] = []
-        lines.append("開始時間,結束時間,類型,時長(秒),距離(公尺),平均配速(秒/公里),累積爬升(公尺),累積下降(公尺),步數,次數,熱量(大卡),強度分數,路線,天氣,氣溫,備註")
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        for s in sessions.sorted(by: { $0.startDate > $1.startDate }) {
-            let fields: [String] = [
-                df.string(from: s.startDate),
-                df.string(from: s.endDate),
-                s.type.displayName,
-                String(format: "%.0f", s.duration),
-                s.totalDistance.map { String(format: "%.1f", $0) } ?? "",
-                s.averagePace.map { String(format: "%.1f", $0) } ?? "",
-                s.elevationGain.map { String(format: "%.1f", $0) } ?? "",
-                s.elevationLoss.map { String(format: "%.1f", $0) } ?? "",
-                s.stepCount.map(String.init) ?? "",
-                s.repCount.map(String.init) ?? "",
-                s.calories.map { String(format: "%.0f", $0) } ?? "",
-                s.intensityScore.map { String(format: "%.1f", $0) } ?? "",
-                s.routeKey ?? "",
-                s.weatherNote ?? "",
-                s.temperature.map { String(format: "%.1f", $0) } ?? "",
-                s.notes ?? ""
-            ]
-            lines.append(fields.map(escape).joined(separator: ","))
+        let rows = [summaryHeaders] + sessions.sorted { $0.startDate > $1.startDate }.map {
+            summaryFields($0) + ["summary"] + Array(repeating: "", count: summaryHeaders.count - 30)
         }
-        let text = lines.joined(separator: "\n")
-        return write(text.data(using: .utf8), filename: "workouts-\(stamp()).csv")
+        return write(ExportEncoding.csv(rows).data(using: .utf8), filename: "workouts-\(stamp()).csv")
     }
-
-    /// 單次運動的軌跡點 CSV
-    static func routeCSV(session: WorkoutSession) -> URL? {
-        var lines = ["時間,緯度,經度,海拔(公尺),速度(公尺/秒),累積距離(公尺)"]
-        let df = ISO8601DateFormatter()
+    /// Every single-workout export includes a summary, plus only actual route/window data.
+    static func sessionCSVText(_ session: WorkoutSession) -> String {
+        let base = summaryFields(session)
+        let iso = ISO8601DateFormatter()
+        var rows = [summaryHeaders, base + ["summary"] + Array(repeating: "", count: summaryHeaders.count - 30)]
         for p in session.sortedPoints {
-            lines.append([df.string(from: p.timestamp),
-                          String(format: "%.6f", p.latitude),
-                          String(format: "%.6f", p.longitude),
-                          String(format: "%.1f", p.altitude),
-                          String(format: "%.2f", p.speed),
-                          String(format: "%.1f", p.distanceFromStart)].joined(separator: ","))
+            rows.append(base + ["route", iso.string(from: p.timestamp), "", ExportEncoding.number(p.latitude, digits: 7),
+                ExportEncoding.number(p.longitude, digits: 7), ExportEncoding.number(p.horizontalAccuracy), ExportEncoding.number(p.altitude),
+                ExportEncoding.number(p.speed >= 0 ? p.speed : nil), ExportEncoding.number(p.distanceFromStart), "", "", "", "GPS原始點", ""])
         }
-        return write(lines.joined(separator: "\n").data(using: .utf8),
-                     filename: "route-\(stamp()).csv")
+        if let data = session.estimateWindowsJSON?.data(using: .utf8), let windows = try? JSONDecoder().decode([EstimateWindow].self, from: data) {
+            for w in windows {
+                rows.append(base + ["window", iso.string(from: w.start), iso.string(from: w.end), "", "", "", "", "", "", String(w.steps),
+                                    ExportEncoding.number(w.distance), ExportEncoding.number(w.cadence), w.source, w.motion])
+            }
+        }
+        return ExportEncoding.csv(rows)
     }
-
-    private static func escape(_ field: String) -> String {
-        if field.contains(",") || field.contains("\"") || field.contains("\n") {
-            return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
-        }
-        return field
+    static func routeCSV(session: WorkoutSession) -> URL? {
+        write(sessionCSVText(session).data(using: .utf8), filename: "workout-\(stamp()).csv")
     }
 
     // MARK: PDF 月報表
@@ -161,13 +152,22 @@ enum DataExporter {
         return renderer.uiImage
     }
 
+    private static let errorLock = NSLock()
+    private static var writeError: String?
+    static var lastWriteError: String? { errorLock.lock(); defer { errorLock.unlock() }; return writeError }
+    private static func setError(_ message: String?) { errorLock.lock(); writeError = message; errorLock.unlock() }
     static func write(_ data: Data?, filename: String) -> URL? {
-        guard let data else { return nil }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        setError(nil)
+        guard let data, !data.isEmpty else { setError("匯出內容為空，未建立檔案"); return nil }
+        // Unique directories retain the exact file until iOS finishes sharing it.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("exports/" + UUID().uuidString)
+        let url = directory.appendingPathComponent(filename)
         do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             return url
         } catch {
+            setError("檔案寫入失敗：" + error.localizedDescription)
             return nil
         }
     }

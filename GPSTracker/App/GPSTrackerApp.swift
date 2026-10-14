@@ -21,7 +21,9 @@ struct GPSTrackerApp: App {
                 .environmentObject(settings)
                 .preferredColorScheme(settings.preferDarkMode ? .dark : nil)
                 .task {
-                    HealthKitImporter.shared.configure(container: sharedModelContainer)
+                    await HealthKitImporter.shared.configure(container: sharedModelContainer)
+                    await CalibrationCoordinator.shared.configure(container: sharedModelContainer)
+                    await WorkoutExportRepository.configure(container: sharedModelContainer)
                     HealthKitManager.shared.refreshAvailability()
                     if settings.backgroundUpdates {
                         HealthBackgroundMonitor.shared.start()

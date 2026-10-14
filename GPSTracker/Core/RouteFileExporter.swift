@@ -10,13 +10,7 @@ enum RouteFileExporter {
         return f
     }()
 
-    private static func escape(_ text: String) -> String {
-        text.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&apos;")
-    }
+    private static func escape(_ text: String) -> String { ExportEncoding.xml(text) }
 
     // MARK: GPX
 
@@ -57,49 +51,12 @@ enum RouteFileExporter {
 
     /// TCX 比 GPX 多了時間、距離、熱量與分圈，無軌跡的場次也能匯出。
     static func tcx(for session: WorkoutSession) -> String {
-        let points = session.sortedPoints
-        let sport: String
-        switch session.type {
-        case .walk, .gpsHike: sport = "Other"
-        case .treadmill, .gpsRun, .run, .lapCounter: sport = "Running"
-        default: sport = "Other"
-        }
-
-        var lines: [String] = []
-        lines.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-        lines.append("<TrainingCenterDatabase xmlns=\"http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2\">")
-        lines.append("  <Activities>")
-        lines.append("    <Activity Sport=\"\(sport)\">")
-        lines.append("      <Id>\(iso.string(from: session.startDate))</Id>")
-        lines.append("      <Lap StartTime=\"\(iso.string(from: session.startDate))\">")
-        lines.append(String(format: "        <TotalTimeSeconds>%.1f</TotalTimeSeconds>", session.duration))
-        lines.append(String(format: "        <DistanceMeters>%.1f</DistanceMeters>", session.totalDistance ?? 0))
-        if let calories = session.calories {
-            lines.append("        <Calories>\(Int(calories))</Calories>")
-        }
-        lines.append("        <Intensity>Active</Intensity>")
-        lines.append("        <TriggerMethod>Manual</TriggerMethod>")
-        if points.count > 1 {
-            lines.append("        <Track>")
-            for point in points {
-                lines.append("          <Trackpoint>")
-                lines.append("            <Time>\(iso.string(from: point.timestamp))</Time>")
-                lines.append("            <Position>")
-                lines.append(String(format: "              <LatitudeDegrees>%.7f</LatitudeDegrees>", point.latitude))
-                lines.append(String(format: "              <LongitudeDegrees>%.7f</LongitudeDegrees>", point.longitude))
-                lines.append("            </Position>")
-                lines.append(String(format: "            <AltitudeMeters>%.1f</AltitudeMeters>", point.altitude))
-                lines.append(String(format: "            <DistanceMeters>%.1f</DistanceMeters>", point.distanceFromStart))
-                lines.append("          </Trackpoint>")
-            }
-            lines.append("        </Track>")
-        }
-        lines.append("      </Lap>")
-        lines.append("      <Notes>\(escape(session.notes ?? session.displayTitle))</Notes>")
-        lines.append("    </Activity>")
-        lines.append("  </Activities>")
-        lines.append("</TrainingCenterDatabase>")
-        return lines.joined(separator: "\n")
+        TCXEncoder.encode(TCXRecord(start: session.startDate, end: session.endDate, duration: session.duration,
+            distance: session.totalDistance, calories: session.calories,
+            running: [.treadmill, .gpsRun, .run, .lapCounter].contains(session.type),
+            notes: (session.notes ?? session.displayTitle) + "；距離來源：" + session.evidence.method.label,
+            points: session.sortedPoints.map { TCXRecord.Point(time: $0.timestamp, latitude: $0.latitude,
+                longitude: $0.longitude, altitude: $0.altitude, distance: $0.distanceFromStart) }))
     }
 
     static func tcxFile(for session: WorkoutSession) -> URL? {

@@ -20,6 +20,7 @@ struct StepWorkoutView: View {
     @State private var finishedSession: WorkoutSession?
     @State private var showStopConfirm = false
     @State private var saveErrorMessage: String?
+    @State private var externallyMeasuredDistance = false
     @State private var showTreadmillSheet = false
     @State private var actualDistanceText = ""
 
@@ -42,9 +43,19 @@ struct StepWorkoutView: View {
                         targetCard
                         metronomeCard
                         infoCard
+                        GlassCard {
+                            VStack(alignment: .leading) {
+                                Picker("手機位置（選填）", selection: $engine.carryPosition) {
+                                    ForEach(CarryPosition.allCases) { Text($0.label).tag($0) }
+                                }
+                                Text("無可靠感測證據時採未知；行軍放口袋僅為情境提示。").font(.caption2)
+                                if let error = engine.pedometer.errorMessage { Text(error).foregroundStyle(Theme.amber) }
+                            }
+                        }
                         calibrationCard
                     } else {
                         if engine.target.isActive { targetProgressCard }
+                        if let error = engine.pedometer.errorMessage { Text(error).font(.caption).foregroundStyle(Theme.amber) }
                         metricsCard
                         motionCard
                         metronomeCard
@@ -70,7 +81,7 @@ struct StepWorkoutView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             engine.mode = initialMode
-            if initialMode == .ruck && settings.ruckLoad > 0 { engine.loadWeight = settings.ruckLoad }
+            // Past load is available as an explicit choice; never silently reused.
         }
         .onDisappear {
             if engine.state == .running || engine.state == .paused { engine.stop() }
@@ -187,12 +198,12 @@ struct StepWorkoutView: View {
                         .font(.headline)
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    Text(String(format: "%.0f 公斤", engine.loadWeight))
+                    Text(engine.loadWeight.map { String(format: "%.0f 公斤", $0) } ?? "未知（選填）")
                         .font(.headline.monospacedDigit())
                         .contentTransition(.numericText())
                         .foregroundStyle(Theme.color(for: .ruck))
                 }
-                Slider(value: $engine.loadWeight, in: 0...50, step: 1)
+                Slider(value: Binding(get: { engine.loadWeight ?? 0 }, set: { engine.loadWeight = $0 }), in: 0...50, step: 1)
                     .tint(Theme.color(for: .ruck))
                 HStack(spacing: 8) {
                     ForEach([0.0, 10.0, 15.0, 20.0, 25.0], id: \.self) { value in
@@ -213,7 +224,11 @@ struct StepWorkoutView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                Text("負重會計入熱量估算：以體重加負重計算，再依負重比例加成。20 公斤裝備對 65 公斤的人約多耗 30% 能量。")
+                Button("略過負重（未知）") { engine.loadWeight = nil }
+                if settings.ruckLoad > 0 {
+                    Button("使用上次負重 \(Int(settings.ruckLoad)) kg") { engine.loadWeight = settings.ruckLoad }
+                }
+                Text("負重選填；只在有填時參與熱量估算，不直接改變步幅。")
                     .font(.caption2)
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -436,7 +451,7 @@ struct StepWorkoutView: View {
                         .foregroundStyle(Theme.accent)
                 }
                 if engine.isCalibrated {
-                    Label("已用 \(StrideCalibration.sampleCount(engine.strideProfile)) 次 GPS 紀錄校正過，距離會比系統估算準",
+                    Label("已用 \(StrideCalibration.sampleCount(engine.strideProfile)) 筆校正基礎（可能含舊版資料），資料充分程度不代表實測準確率",
                           systemImage: "checkmark.seal.fill")
                         .font(.caption)
                         .foregroundStyle(Theme.mint)
@@ -590,7 +605,7 @@ struct StepWorkoutView: View {
                 Text("輸入跑步機顯示的距離")
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
-                Text("輸入後會反推你的真實步幅，下次估算更準。留空則使用步數換算的 \(Fmt.distance(engine.distance, unit: settings.unit))。")
+                Text("輸入可更新本次距離；只有確認為實測且通過獨立驗證才會更新模型。留空則使用步數換算的 \(Fmt.distance(engine.distance, unit: settings.unit))。")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
@@ -605,10 +620,13 @@ struct StepWorkoutView: View {
                     Text(Fmt.distanceUnitLabel(settings.unit))
                         .foregroundStyle(Theme.textSecondary)
                 }
+                Toggle("此距離來自跑步機量測或已知實測路線", isOn: $externallyMeasuredDistance)
+                    .font(.caption)
+                Text("未確認時只更新本次摘要，不作訓練真值。確認後仍需獨立場次驗證。").font(.caption2)
                 Button("儲存紀錄") {
                     if let value = Double(actualDistanceText), value > 0 {
                         let meters = settings.unit == .metric ? value * 1000 : value * 1609.344
-                        engine.applyActualDistance(meters)
+                        engine.applyActualDistance(meters, externallyMeasured: externallyMeasuredDistance)
                     }
                     showTreadmillSheet = false
                     save()

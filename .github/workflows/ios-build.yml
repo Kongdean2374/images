@@ -1,14 +1,7 @@
 name: Build Unsigned IPA
 
 on:
-  push:
-    branches:
-      - main
-      - 'claude/**'
-    paths-ignore:
-      - '**/*.jpg'
-      - '**/*.png'
-      - 'README.md'
+  # Manual only: source uploads must not consume macOS runner quota.
   workflow_dispatch:
 
 permissions:

@@ -68,8 +68,7 @@ enum DataIntegrity {
             if (session.weatherNote ?? "").isEmpty { report.missingWeather += 1 }
             if !session.healthKitSynced { report.notSyncedToHealth += 1 }
             if session.type.requiresLocation && session.routePoints.isEmpty { report.gpsWithoutRoute += 1 }
-            if let distance = session.totalDistance, let steps = session.stepCount,
-               distance > 300, steps > 300 {
+            if session.calibrationDecision?.eligible == true {
                 report.calibrationSamples += 1
             }
         }
@@ -78,8 +77,7 @@ enum DataIntegrity {
         for index in 1..<max(1, sorted.count) {
             let previous = sorted[index - 1]
             let current = sorted[index]
-            if current.type == previous.type,
-               abs(current.startDate.timeIntervalSince(previous.startDate)) < 120 {
+            if CalibrationSessionAnalyzer.identity(current).matches(CalibrationSessionAnalyzer.identity(previous)) {
                 report.duplicateSuspects += 1
             }
         }
@@ -127,7 +125,7 @@ enum DataIntegrity {
         }
         if report.duplicateSuspects > 0 {
             issues.append(IntegrityIssue(title: "\(report.duplicateSuspects) 組疑似重複紀錄",
-                                         detail: "同類型且開始時間相近，可能是重複儲存，建議到紀錄列表確認後刪除。",
+                                         detail: "同類型且開始時間相近，可能是重複儲存，保留歷史並在訓練集採用一份，無需刪除。",
                                          severity: .warning,
                                          count: report.duplicateSuspects))
         }
@@ -139,7 +137,7 @@ enum DataIntegrity {
         }
         if report.calibrationSamples < 5 {
             issues.append(IntegrityIssue(title: "可校正樣本只有 \(report.calibrationSamples) 筆",
-                                         detail: "同時含距離與步數的紀錄越多，步幅精準度越高。也可以在校正中心直接讀健康 App 的歷史資料。",
+                                         detail: "只有來源與時間對齊且品質合格的獨立實測才可校正。也可以在校正中心直接讀健康 App 的歷史資料。",
                                          severity: .warning,
                                          count: report.calibrationSamples))
         }
