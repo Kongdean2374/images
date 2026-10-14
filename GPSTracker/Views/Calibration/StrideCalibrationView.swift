@@ -124,11 +124,7 @@ struct CalibrationEligibilityView: View {
                 Text(decision.stride.map { String(format: "此場步幅 %.3f m", $0) } ?? "步幅資料不足")
                 Text(decision.gpsCoverage.map { String(format: "GPS 有效覆蓋 %.1f%%", $0 * 100) } ?? "GPS 有效覆蓋不明")
                 Toggle("排除此筆訓練", isOn: $session.trainingExcluded)
-                    .onChange(of: session.trainingExcluded) { _, _ in
-                        session.calibrationDecision = nil
-                        do { try context.save(); Task { await CalibrationCoordinator.shared.run(importHealth: false) } }
-                        catch { context.rollback(); error = error.localizedDescription }
-                    }
+                    .onChange(of: session.trainingExcluded) { _, _ in persistExclusion() }
                 Text("取消排除仍須通過來源與品質安全門檻，並由獨立驗證決定是否更新模型。")
             }
             Section("來源與時間") {
@@ -145,4 +141,16 @@ struct CalibrationEligibilityView: View {
         }.font(.caption).navigationTitle("品質與訓練資格")
             .alert("儲存失敗", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("好") { error = nil } } message: { Text(error ?? "") }
     }
+    @MainActor
+    private func persistExclusion() {
+        session.calibrationDecision = nil
+        do {
+            try context.save()
+            Task { await CalibrationCoordinator.shared.run(importHealth: false) }
+        } catch {
+            context.rollback()
+            self.error = error.localizedDescription
+        }
+    }
+
 }

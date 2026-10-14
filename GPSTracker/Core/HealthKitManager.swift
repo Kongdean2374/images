@@ -3,7 +3,8 @@ import HealthKit
 import CoreLocation
 
 /// 只允許 continuation 被 resume 一次
-final class ResumeBox {
+// All shared mutable state is protected by lock.
+final class ResumeBox: @unchecked Sendable {
     private var done = false
     private let lock = NSLock()
 

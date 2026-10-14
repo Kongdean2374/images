@@ -21,8 +21,10 @@ struct ValidationOutcome: Codable, Sendable {
 }
 enum CalibrationValidator {
     static func validate(samples: [ValidationSample], baseline: Double) -> ValidationOutcome {
-        let unique = Dictionary(grouping: samples, by: \.workoutID).values.compactMap { $0.first }
-            .filter { $0.distance > 300 && $0.steps > 300 }.sorted { $0.date < $1.date }
+        let grouped: [String: [ValidationSample]] = Dictionary(grouping: samples, by: \.workoutID)
+        let representatives: [ValidationSample] = grouped.values.compactMap { $0.first }
+        let eligible: [ValidationSample] = representatives.filter { $0.distance > 300 && $0.steps > 300 }
+        let unique = eligible.sorted { $0.date < $1.date }
         guard unique.count >= 6 else { return ValidationOutcome(reason: "可信獨立場次不足 6 筆，保留舊模型；尚無足夠驗證") }
         let testCount = max(2, unique.count / 3)
         let tests = Array(unique.suffix(testCount))
