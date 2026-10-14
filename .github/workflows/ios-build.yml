@@ -1,0 +1,146 @@
+name: Build Unsigned IPA
+
+on:
+  # Manual only: source uploads must not consume macOS runner quota.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Archive & package
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          ls /Applications | grep -i xcode || true
+
+      - name: Regenerate Xcode project
+        run: |
+          python3 Scripts/generate_xcodeproj.py
+          xcodebuild -list -project GPSTracker.xcodeproj
+
+      - name: Archive (unsigned)
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project GPSTracker.xcodeproj \
+            -scheme GPSTracker \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/GPSTracker.xcarchive" \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            ENABLE_BITCODE=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            OTHER_SWIFT_FLAGS="\$(inherited) -Xfrontend -warn-long-function-bodies=400 -Xfrontend -warn-long-expression-type-checking=400" \
+            -showBuildTimingSummary \
+            | tee "$RUNNER_TEMP/build.log"
+
+      - name: Package unsigned IPA
+        id: package
+        run: |
+          set -e
+          APP_PATH="$RUNNER_TEMP/GPSTracker.xcarchive/Products/Applications/GPSTracker.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "找不到 .app：$APP_PATH"
+            ls -R "$RUNNER_TEMP/GPSTracker.xcarchive/Products" || true
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/"
+          # Remove existing/ad-hoc signatures only; never create a signature.
+          find "$RUNNER_TEMP/Payload" -type d -name _CodeSignature -prune -exec rm -rf {} +
+          if find "$RUNNER_TEMP/Payload" -name '*.mobileprovision' -print -quit | grep -q .; then
+            echo "Unexpected provisioning profile in unsigned package"
+            exit 1
+          fi
+          while IFS= read -r -d '' binary; do
+            if file -b "$binary" | grep -q 'Mach-O'; then
+              codesign --remove-signature "$binary" || true
+              if codesign -d "$binary" >/dev/null 2>&1; then
+                echo "Signature remains on packaged binary"
+                exit 1
+              fi
+            fi
+          done < <(find "$RUNNER_TEMP/Payload" -type f -print0)
+          EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$RUNNER_TEMP/Payload/GPSTracker.app/Info.plist")
+          BINARY="$RUNNER_TEMP/Payload/GPSTracker.app/$EXECUTABLE"
+          lipo -archs "$BINARY" | grep -q arm64
+          xcrun vtool -show-build "$BINARY" | tee "$RUNNER_TEMP/device-platform.txt"
+          grep -Eq 'platform[[:space:]]+IOS$' "$RUNNER_TEMP/device-platform.txt"
+          mkdir -p build
+          IPA_NAME="GPSTracker-unsigned-${{ github.run_number }}-${GITHUB_SHA:0:8}.ipa"
+          (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/build/$IPA_NAME" Payload)
+          test -s "build/$IPA_NAME"
+          unzip -t "build/$IPA_NAME"
+          unzip -l "build/$IPA_NAME" | grep -q 'Payload/GPSTracker.app/Info.plist'
+          shasum -a 256 "build/$IPA_NAME" | tee "build/$IPA_NAME.sha256"
+          echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "ipa_path=build/$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "ipa_size=$(stat -f%z "build/$IPA_NAME")" >> "$GITHUB_OUTPUT"
+          ls -lh "build/$IPA_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPSTracker-unsigned-ipa
+          path: |
+            build/*.ipa
+            build/*.ipa.sha256
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
+
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA_PATH: ${{ steps.package.outputs.ipa_path }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="unsigned-ipa-$RUN_ID-$RUN_ATTEMPT"
+          NOTES="$RUNNER_TEMP/notes.md"
+          {
+            echo "未簽名 IPA，供側載自簽安裝使用。"
+            echo ""
+            echo "- Commit: $COMMIT_SHA"
+            echo "- 分支: $BRANCH_NAME"
+            echo "- 最低系統需求: iOS 17"
+            echo "- 安裝方式: 用 Sideloadly / AltStore / TrollStore 等工具自簽安裝"
+            echo ""
+            echo "簽名憑證與 provisioning profile 皆未進入 CI 環境。"
+          } > "$NOTES"
+          gh release create "$TAG" "$IPA_PATH" "$IPA_PATH.sha256" \
+            --target "$COMMIT_SHA" \
+            --title "GPS 軌跡記錄器 未簽名 IPA (build $RUN_NUMBER)" \
+            --notes-file "$NOTES"
+          gh release view "$TAG" --json url,assets
