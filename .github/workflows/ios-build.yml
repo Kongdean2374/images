@@ -66,20 +66,45 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/"
-          # 側載自簽用：移除 CI 產生的空簽名資訊
-          rm -rf "$RUNNER_TEMP/Payload/GPSTracker.app/_CodeSignature" || true
+          # Remove existing/ad-hoc signatures only; never create a signature.
+          find "$RUNNER_TEMP/Payload" -type d -name _CodeSignature -prune -exec rm -rf {} +
+          if find "$RUNNER_TEMP/Payload" -name '*.mobileprovision' -print -quit | grep -q .; then
+            echo "Unexpected provisioning profile in unsigned package"
+            exit 1
+          fi
+          while IFS= read -r -d '' binary; do
+            if file -b "$binary" | grep -q 'Mach-O'; then
+              codesign --remove-signature "$binary" || true
+              if codesign -d "$binary" >/dev/null 2>&1; then
+                echo "Signature remains on packaged binary"
+                exit 1
+              fi
+            fi
+          done < <(find "$RUNNER_TEMP/Payload" -type f -print0)
+          EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$RUNNER_TEMP/Payload/GPSTracker.app/Info.plist")
+          BINARY="$RUNNER_TEMP/Payload/GPSTracker.app/$EXECUTABLE"
+          lipo -archs "$BINARY" | grep -q arm64
+          xcrun vtool -show-build "$BINARY" | tee "$RUNNER_TEMP/device-platform.txt"
+          grep -Eq 'platform[[:space:]]+IOS$' "$RUNNER_TEMP/device-platform.txt"
           mkdir -p build
-          IPA_NAME="GPSTracker-unsigned-${{ github.run_number }}.ipa"
+          IPA_NAME="GPSTracker-unsigned-${{ github.run_number }}-${GITHUB_SHA:0:8}.ipa"
           (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/build/$IPA_NAME" Payload)
+          test -s "build/$IPA_NAME"
+          unzip -t "build/$IPA_NAME"
+          unzip -l "build/$IPA_NAME" | grep -q 'Payload/GPSTracker.app/Info.plist'
+          shasum -a 256 "build/$IPA_NAME" | tee "build/$IPA_NAME.sha256"
           echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
           echo "ipa_path=build/$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "ipa_size=$(stat -f%z "build/$IPA_NAME")" >> "$GITHUB_OUTPUT"
           ls -lh "build/$IPA_NAME"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: GPSTracker-unsigned-ipa
-          path: build/*.ipa
+          path: |
+            build/*.ipa
+            build/*.ipa.sha256
           retention-days: 90
           if-no-files-found: error
 
@@ -97,10 +122,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IPA_PATH: ${{ steps.package.outputs.ipa_path }}
           RUN_NUMBER: ${{ github.run_number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           COMMIT_SHA: ${{ github.sha }}
           BRANCH_NAME: ${{ github.ref_name }}
         run: |
-          TAG="build-$RUN_NUMBER"
+          TAG="unsigned-ipa-$RUN_ID-$RUN_ATTEMPT"
           NOTES="$RUNNER_TEMP/notes.md"
           {
             echo "未簽名 IPA，供側載自簽安裝使用。"
@@ -112,7 +139,7 @@ jobs:
             echo ""
             echo "簽名憑證與 provisioning profile 皆未進入 CI 環境。"
           } > "$NOTES"
-          gh release create "$TAG" "$IPA_PATH" \
+          gh release create "$TAG" "$IPA_PATH" "$IPA_PATH.sha256" \
             --target "$COMMIT_SHA" \
             --title "GPS 軌跡記錄器 未簽名 IPA (build $RUN_NUMBER)" \
             --notes-file "$NOTES"
