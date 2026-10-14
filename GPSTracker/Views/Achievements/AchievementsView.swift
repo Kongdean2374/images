@@ -3,13 +3,13 @@ import SwiftData
 
 /// 徽章牆
 struct AchievementsView: View {
-    @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
+    @ObservedObject private var insights = WorkoutInsightsStore.shared
     @State private var category: AchievementCategory?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     private var achievements: [Achievement] {
-        AchievementEngine.evaluate(sessions: sessions)
+        insights.result?.achievements ?? []
     }
 
     private var filtered: [Achievement] {
@@ -74,7 +74,7 @@ struct AchievementsView: View {
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(Theme.textSecondary)
                         } else {
-                            Text("全部達成，太猛了")
+                            Text(achievements.isEmpty ? "正在整理徽章資料" : "全部達成，太猛了")
                                 .font(.caption)
                                 .foregroundStyle(Theme.mint)
                         }

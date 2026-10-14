@@ -1,8 +1,8 @@
 import Foundation
 
 /// 資料完整性檢查：讓使用者知道哪些統計還缺資料、哪裡可以補。
-struct IntegrityIssue: Identifiable, Hashable {
-    enum Severity: Int, Comparable {
+struct IntegrityIssue: Identifiable, Hashable, Sendable {
+    enum Severity: Int, Comparable, Sendable {
         case info = 0, warning = 1, problem = 2
         static func < (lhs: Severity, rhs: Severity) -> Bool { lhs.rawValue < rhs.rawValue }
     }
@@ -14,7 +14,7 @@ struct IntegrityIssue: Identifiable, Hashable {
     let count: Int
 }
 
-struct IntegrityReport {
+struct IntegrityReport: Sendable {
     var total = 0
     var missingDistance = 0
     var missingDuration = 0
@@ -47,7 +47,7 @@ struct IntegrityReport {
 
 enum DataIntegrity {
 
-    static func report(sessions: [WorkoutSession], calendar: Calendar = .current) -> IntegrityReport {
+    static func report(sessions: [WorkoutSession], calendar: Calendar = .current, routeCounts: [UUID: Int]? = nil) -> IntegrityReport {
         var report = IntegrityReport()
         report.total = sessions.count
         guard !sessions.isEmpty else { return report }
@@ -67,7 +67,7 @@ enum DataIntegrity {
             if session.rpe == nil { report.missingRPE += 1 }
             if (session.weatherNote ?? "").isEmpty { report.missingWeather += 1 }
             if !session.healthKitSynced { report.notSyncedToHealth += 1 }
-            if session.type.requiresLocation && session.routePoints.isEmpty { report.gpsWithoutRoute += 1 }
+            if session.type.requiresLocation && (routeCounts?[session.id] ?? session.routePoints.count) == 0 { report.gpsWithoutRoute += 1 }
             if session.calibrationDecision?.eligible == true {
                 report.calibrationSamples += 1
             }

@@ -24,6 +24,8 @@ struct GPSTrackerApp: App {
                     await HealthKitImporter.shared.configure(container: sharedModelContainer)
                     await CalibrationCoordinator.shared.configure(container: sharedModelContainer)
                     await WorkoutExportRepository.configure(container: sharedModelContainer)
+                    WorkoutInsightsStore.shared.configure(container: sharedModelContainer)
+                    AppStartupState.shared.isReady = true
                     HealthKitManager.shared.refreshAvailability()
                     if settings.backgroundUpdates {
                         HealthBackgroundMonitor.shared.start()

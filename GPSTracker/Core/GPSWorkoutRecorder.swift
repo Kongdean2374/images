@@ -56,6 +56,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     private(set) var stepAssistedDistance = 0.0
     private var recoveredWithoutStepAlignment = false
     private var stepAlignmentReliable = true
+    private var recordingID = UUID()
     var startDate: Date = Date()
 
     private let location = LocationManager.shared
@@ -238,6 +239,7 @@ final class GPSWorkoutRecorder: ObservableObject {
         timer?.invalidate()
         timer = nil
         cancellables.removeAll()
+        recordingID = UUID()
         samples = []
         rawSamples = []
         stepAccumulator = StepDistanceAccumulator()
@@ -720,7 +722,8 @@ final class GPSWorkoutRecorder: ObservableObject {
                                                             distance: $0.distance,
                                                             timestamp: $0.timestamp)
                               },
-                              gaps: coverageGaps)
+                              gaps: coverageGaps,
+                              sessionID: recordingID)
     }
 
     /// 把目前進度寫到磁碟。force 用在暫停、進背景這種關鍵時刻。
@@ -736,6 +739,7 @@ final class GPSWorkoutRecorder: ObservableObject {
     /// 從中斷的自動存檔接續記錄
     func restore(from snapshot: ActiveWorkoutSnapshot) {
         reset()
+        recordingID = snapshot.recoveredSessionID
         workoutType = snapshot.type
         sport = snapshot.sport
         startDate = snapshot.startDate
@@ -887,7 +891,7 @@ final class GPSWorkoutRecorder: ObservableObject {
             default: return false
             }
         }()
-        let session = WorkoutSession(type: workoutType,
+        let session = WorkoutSession(id: recordingID, type: workoutType,
                                      startDate: startDate,
                                      endDate: end,
                                      duration: elapsed,

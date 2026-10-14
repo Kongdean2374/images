@@ -4,13 +4,14 @@ import SwiftData
 /// C5 個人紀錄看板
 struct PBDashboardView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
+    @ObservedObject private var insights = WorkoutInsightsStore.shared
     @EnvironmentObject private var settings: AppSettings
     @State private var shine = false
     @State private var showBadges = false
 
     /// 重運算的結果先算好，不要每次重繪都跑一遍滑動視窗
     @State private var cachedRecords = PersonalRecords()
-    @State private var cachedEfforts: [BestEffort] = []
+    private var cachedEfforts: [BestEffort] { insights.result?.efforts ?? [] }
     @State private var cacheKey = ""
 
     private var records: PersonalRecords { cachedRecords }
@@ -20,7 +21,6 @@ struct PBDashboardView: View {
         guard cacheKey != key else { return }
         cacheKey = key
         cachedRecords = StatsEngine.personalRecords(sessions: sessions)
-        cachedEfforts = BestEffortEngine.evaluate(sessions: sessions)
     }
 
     var body: some View {
@@ -33,6 +33,11 @@ struct PBDashboardView: View {
             .padding(.horizontal, 16)
             .padding(.top, 6)
 
+            if insights.isLoading { BackgroundInsightsProgress(store: insights).padding(.horizontal, 16) }
+            if let error = insights.error {
+                Text(error).font(.caption).foregroundStyle(Theme.amber)
+                Button("重新載入") { Task { await insights.loadIfNeeded() } }
+            }
             if showBadges {
                 AchievementsView()
             } else {
@@ -40,7 +45,12 @@ struct PBDashboardView: View {
             }
         }
         .screenBackground()
-        .onAppear { rebuildCacheIfNeeded() }
+        .task(id: insights.revision) {
+            cacheKey = ""
+            rebuildCacheIfNeeded()
+            await insights.loadIfNeeded()
+        }
+        .onDisappear { insights.cancel(); shine = false }
         .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
         .navigationTitle("成就")
         .navigationBarTitleDisplayMode(.inline)

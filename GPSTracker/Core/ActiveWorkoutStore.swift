@@ -6,10 +6,10 @@ import CoreLocation
 /// iOS 會在記憶體吃緊時直接終止背景 App，使用者也可能從多工手勢把它滑掉。
 /// 只靠記憶體裡的狀態，整場運動就這樣沒了——所以每隔幾秒就把目前的進度
 /// 寫到磁碟，下次啟動時再問使用者要繼續、要存成紀錄、還是丟掉。
-struct ActiveWorkoutSnapshot: Codable, Identifiable {
+struct ActiveWorkoutSnapshot: Codable, Identifiable, Sendable {
     var id: Date { startDate }
 
-    struct Point: Codable {
+    struct Point: Codable, Sendable {
         let lat: Double
         let lon: Double
         let alt: Double
@@ -19,7 +19,7 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
         var accuracy: Double? = nil
     }
 
-    struct Lap: Codable {
+    struct Lap: Codable, Sendable {
         let number: Int
         let duration: TimeInterval
         let distance: Double
@@ -42,6 +42,8 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
     var laps: [Lap]
     /// 定位失效的空白段
     var gaps: [CoverageGap]?
+    var sessionID: UUID? = nil
+    var recoveredSessionID: UUID { sessionID ?? RecoveryIdentity.id(start: startDate, type: typeRaw) }
 
     var type: WorkoutType { WorkoutType(rawValue: typeRaw) ?? .gpsRun }
     var sport: SportKind? { SportCatalog.find(sportID) }
@@ -55,21 +57,14 @@ struct ActiveWorkoutSnapshot: Codable, Identifiable {
 final class ActiveWorkoutStore {
     static let shared = ActiveWorkoutStore()
 
-    private let fileName = "active-workout.json"
+    private static let fileName = "active-workout.json"
     private var lastWrite = Date.distantPast
-    /// 寫檔專用佇列：JSON 編碼上萬個座標點不能卡在主執行緒上
-    private let queue = DispatchQueue(label: "com.gpstracker.activeworkout",
-                                      qos: .utility)
-
-    private var url: URL? {
-        guard let directory = try? FileManager.default.url(for: .applicationSupportDirectory,
-                                                           in: .userDomainMask,
-                                                           appropriateFor: nil,
-                                                           create: true) else { return nil }
-        return directory.appendingPathComponent(fileName)
+    private let persistence: SnapshotPersistence<ActiveWorkoutSnapshot>?
+    private init() {
+        let directory = try? FileManager.default.url(for: .applicationSupportDirectory,
+            in: .userDomainMask, appropriateFor: nil, create: true)
+        persistence = directory.map { SnapshotPersistence(url: $0.appendingPathComponent(Self.fileName)) }
     }
-
-    private init() {}
 
     // MARK: 寫入
 
@@ -86,56 +81,31 @@ final class ActiveWorkoutStore {
     /// 節流寫入。`force` 用在暫停、進背景這種關鍵時刻，必定寫入。
     func save(_ snapshot: ActiveWorkoutSnapshot, force: Bool = false) {
         guard shouldWrite(force: force) else { return }
-        guard let url else { return }
         lastWrite = Date()
-        // 編碼與寫檔都丟到背景佇列，主執行緒不會因此掉幀
-        queue.async {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            guard let data = try? encoder.encode(snapshot) else { return }
-            try? data.write(to: url, options: .atomic)
-        }
+        persistence?.save(snapshot)
     }
 
     // MARK: 讀取與清除
 
-    func load() -> ActiveWorkoutSnapshot? {
-        guard let url, let data = try? Data(contentsOf: url) else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(ActiveWorkoutSnapshot.self, from: data) else {
-            clear()
-            return nil
-        }
-        // 超過 24 小時的殘檔直接丟掉，不要在幾天後才跳出來嚇人
-        guard Date().timeIntervalSince(snapshot.savedAt) < 86_400 else {
-            clear()
-            return nil
-        }
-        return snapshot
-    }
-
-    var hasPending: Bool {
-        guard let snapshot = load() else { return false }
-        return snapshot.isWorthRecovering
+    func loadForRecovery() async -> SnapshotRead<ActiveWorkoutSnapshot> {
+        guard let persistence else { return .unreadable }
+        return await persistence.load()
     }
 
     func clear() {
         lastWrite = .distantPast
-        guard let url else { return }
-        try? FileManager.default.removeItem(at: url)
+        persistence?.clear()
     }
 
     // MARK: 轉成正式紀錄
 
     /// 把自動存檔直接還原成一筆完成的運動紀錄
-    @MainActor
-    func buildSession(from snapshot: ActiveWorkoutSnapshot) -> WorkoutSession {
+    static func buildSession(from snapshot: ActiveWorkoutSnapshot, bodyWeight: Double) -> WorkoutSession {
         let end = snapshot.points.last?.time ?? snapshot.savedAt
         let duration = max(snapshot.elapsed, 1)
         let distance = snapshot.distance
 
-        let session = WorkoutSession(type: snapshot.type,
+        let session = WorkoutSession(id: snapshot.recoveredSessionID, type: snapshot.type,
                                      startDate: snapshot.startDate,
                                      endDate: end,
                                      duration: duration,
@@ -143,7 +113,7 @@ final class ActiveWorkoutStore {
                                      averagePace: distance > 50 ? duration / (distance / 1000) : nil,
                                      elevationGain: snapshot.elevationGain,
                                      elevationLoss: snapshot.elevationLoss,
-                                     distanceSource: distance > 0 ? .gps : nil,
+                                     distanceSource: snapshot.gaps?.isEmpty == false ? .mixed : .unknown,
                                      routeKey: snapshot.routeKey.isEmpty ? nil : snapshot.routeKey,
                                      title: snapshot.sport?.name,
                                      notes: "從中斷的紀錄自動回復")
@@ -154,7 +124,7 @@ final class ActiveWorkoutStore {
         let met = snapshot.sport?.met ?? snapshot.type.metValue
         session.calories = IntensityCalculator.calories(met: met,
                                                         duration: duration,
-                                                        bodyWeight: AppSettings.shared.bodyWeight)
+                                                        bodyWeight: bodyWeight)
         session.intensityScore = IntensityCalculator.score(met: met,
                                                            duration: duration,
                                                            distance: distance,
@@ -172,7 +142,8 @@ final class ActiveWorkoutStore {
                        altitude: $0.alt,
                        timestamp: $0.time,
                        speed: $0.speed,
-                       distanceFromStart: $0.distance)
+                       distanceFromStart: $0.distance,
+                       horizontalAccuracy: $0.accuracy)
         }
         return session
     }

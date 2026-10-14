@@ -27,6 +27,12 @@ jobs:
           swift --version
           ls /Applications | grep -i xcode || true
 
+      - name: Test core and native background persistence
+        timeout-minutes: 10
+        run: |
+          swift test
+          python3 Scripts/test_swiftdata_background.py
+
       - name: Regenerate Xcode project
         run: |
           python3 Scripts/generate_xcodeproj.py

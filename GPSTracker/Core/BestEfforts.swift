@@ -1,7 +1,7 @@
 import Foundation
 
 /// 標準距離的最佳成績（從 GPS 軌跡用滑動視窗找出最快的一段）
-struct BestEffort: Identifiable, Hashable {
+struct BestEffort: Identifiable, Hashable, Sendable {
     let id = UUID()
     let distance: Double        // 公尺
     let label: String

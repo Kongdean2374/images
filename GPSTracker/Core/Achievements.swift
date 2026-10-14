@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-enum AchievementTier: Int, Comparable {
+enum AchievementTier: Int, Comparable, Sendable {
     case bronze = 0, silver, gold, platinum
 
     static func < (lhs: AchievementTier, rhs: AchievementTier) -> Bool {
@@ -27,7 +27,7 @@ enum AchievementTier: Int, Comparable {
     }
 }
 
-enum AchievementCategory: String, CaseIterable, Identifiable {
+enum AchievementCategory: String, CaseIterable, Identifiable, Sendable {
     case distance, endurance, consistency, strength, exploration, data
 
     var id: String { rawValue }
@@ -55,7 +55,7 @@ enum AchievementCategory: String, CaseIterable, Identifiable {
     }
 }
 
-struct Achievement: Identifiable, Hashable {
+struct Achievement: Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let detail: String
@@ -83,7 +83,7 @@ struct Achievement: Identifiable, Hashable {
 
 enum AchievementEngine {
 
-    static func evaluate(sessions: [WorkoutSession], calendar: Calendar = .current) -> [Achievement] {
+    static func evaluate(sessions: [WorkoutSession], calendar: Calendar = .current, routeCounts: [UUID: Int]? = nil) -> [Achievement] {
         guard !sessions.isEmpty else { return template() }
 
         let totalDistanceKM = sessions.reduce(0.0) { $0 + ($1.totalDistance ?? 0) } / 1000
@@ -101,7 +101,7 @@ enum AchievementEngine {
         let plankBest = sessions.filter { $0.type == .plank }.map { $0.duration }.max() ?? 0
         let repsTotal = Double(sessions.reduce(0) { $0 + ($1.repCount ?? 0) })
         let testCount = Double(sessions.filter { $0.type == .fitnessTest }.count)
-        let withRoute = Double(sessions.filter { !$0.routePoints.isEmpty }.count)
+        let withRoute = Double(sessions.filter { (routeCounts?[$0.id] ?? $0.routePoints.count) > 0 }.count)
         let ratedCount = Double(sessions.filter { $0.rpe != nil }.count)
 
         var result: [Achievement] = []

@@ -116,13 +116,13 @@ final class DiagnosticsLog {
     }
 
     /// App 啟動時檢查上次是不是被強制終止
-    func checkPreviousRun() {
+    func checkPreviousRun(snapshot: ActiveWorkoutSnapshot?) {
         guard let markerURL else { return }
         let hadCleanExit = FileManager.default.fileExists(atPath: markerURL.path)
         guard !hadCleanExit else { return }
 
         // 沒有乾淨結束標記，而且還留著進行中的自動存檔 → 上次是被中斷的
-        guard let snapshot = ActiveWorkoutStore.shared.load() else {
+        guard let snapshot else {
             // 沒有進行中的資料，補上標記避免每次啟動都報
             markCleanExit()
             return

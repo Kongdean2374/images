@@ -36,8 +36,21 @@ struct FitnessStandards: Codable {}
 '''
 harness = '''
 @main struct IntegrationCheck {
- @MainActor static func main() throws {
+ @MainActor static func main() async throws {
   let start = Date(timeIntervalSince1970: 1700000000)
+  let snapshot = ActiveWorkoutSnapshot(typeRaw: "gpsRun", startDate: start, savedAt: start.addingTimeInterval(7000), elapsed: 7000, distance: 7000,
+      elevationGain: 10, elevationLoss: 5, routeKey: "", autoLapDistance: 1000, pauseLog: [],
+      points: (0..<7001).map { ActiveWorkoutSnapshot.Point(lat: 25, lon: 121, alt: 10, time: start.addingTimeInterval(Double($0)), speed: 1, distance: Double($0), accuracy: 5) }, laps: [])
+  let snapshotEncoder = JSONEncoder(); snapshotEncoder.dateEncodingStrategy = .iso8601
+  let snapshotDecoder = JSONDecoder(); snapshotDecoder.dateDecodingStrategy = .iso8601
+  let legacyRecovery = try snapshotDecoder.decode(ActiveWorkoutSnapshot.self, from: snapshotEncoder.encode(snapshot))
+  precondition(legacyRecovery.sessionID == nil && legacyRecovery.points.count == 7001)
+  let recoveredSession = ActiveWorkoutStore.buildSession(from: legacyRecovery, bodyWeight: 65)
+  precondition(recoveredSession.id == legacyRecovery.recoveredSessionID && recoveredSession.routePoints.count == 7001)
+  precondition(recoveredSession.routePoints[0].horizontalAccuracy == 5)
+  precondition(recoveredSession.distanceSource == .unknown && !CalibrationSessionAnalyzer.evaluate(recoveredSession).eligible)
+  precondition(recoveredSession.id == ActiveWorkoutStore.buildSession(from: legacyRecovery, bodyWeight: 65).id)
+
   let session = WorkoutSession(type: .ruck, startDate: start, endDate: start.addingTimeInterval(600), duration: 500, totalDistance: 720, stepCount: 1000, distanceSource: .stride, notes: "a,\\\"b\\\"\\n&<")
   var e = MeasurementEvidence(); e.method = .strideEstimate; e.generatedByThisApp = true; e.stepsAligned = true
   session.evidence = e
@@ -86,8 +99,9 @@ harness = '''
 '''
 with tempfile.TemporaryDirectory(prefix='gpstracker-integration-') as directory:
     target = Path(directory)
-    (target / 'Fixture.swift').write_text(stubs + models + backup + reports + exports + source('Core/RouteFileExporter.swift') + source('Core/StrideCalibration.swift') + source('Core/CoverageGap.swift') + harness)
-    core = [ROOT / 'GPSTracker/Core/Calibration' / name for name in ('MeasurementPolicy.swift','StrideValidation.swift','WorkoutTime.swift','ExportEncoding.swift')]
+    active = source('Core/ActiveWorkoutStore.swift').replace('import CoreLocation', '')
+    (target / 'Fixture.swift').write_text(stubs + models + backup + reports + exports + source('Core/RouteFileExporter.swift') + source('Core/StrideCalibration.swift') + source('Core/CoverageGap.swift') + source('Core/IntensityCalculator.swift') + active + harness)
+    core = [ROOT / 'GPSTracker/Core/Calibration' / name for name in ('MeasurementPolicy.swift','StrideValidation.swift','WorkoutTime.swift','ExportEncoding.swift','PerformanceWindow.swift','SnapshotPersistence.swift','RecoveryIdentity.swift')]
     subprocess.run([swiftc, '-module-cache-path', str(target / 'modules'), '-o', str(target / 'check'), str(target / 'Fixture.swift'), *map(str,core)], check=True)
     subprocess.run([str(target / 'check'), directory], check=True)
     import csv, xml.etree.ElementTree as ET

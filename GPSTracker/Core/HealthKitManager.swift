@@ -40,7 +40,7 @@ struct WorkoutSnapshot {
     let sportID: String?
     let locations: [CLLocation]
 
-    @MainActor
+    // Read on the caller's executor while its ModelContext owns the session.
     init(session: WorkoutSession) {
         sessionID = session.id.uuidString
         evidence = session.evidence

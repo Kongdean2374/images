@@ -5,6 +5,7 @@ import UIKit
 struct AnalyticsView: View {
     @Query(sort: \WorkoutSession.startDate, order: .reverse) private var sessions: [WorkoutSession]
     @Query private var goals: [WorkoutGoal]
+    @ObservedObject private var insights = WorkoutInsightsStore.shared
     @EnvironmentObject private var settings: AppSettings
 
     @State private var range: TrendRange = .week
@@ -22,12 +23,9 @@ struct AnalyticsView: View {
     private struct Analytics {
         var buckets: [TrendBucket] = []
         var comparableGroups: [String: [WorkoutSession]] = [:]
-        var routeClusters: [RouteCluster] = []
         var weatherPoints: [StatsEngine.WeatherPoint] = []
-        var racePredictions: [RacePrediction] = []
         var balance = IntensityBalance()
         var loadReport = TrainingLoadReport()
-        var integrity = IntegrityReport()
         var cadenceStats: (average: Double, best: Double, samples: Int)?
         var cadenceSeries: [CadencePoint] = []
         var typeShares: [TypeShare] = []
@@ -55,13 +53,9 @@ struct AnalyticsView: View {
         var next = Analytics()
         next.buckets = StatsEngine.trend(sessions: sessions, range: range)
         next.comparableGroups = StatsEngine.comparableGroups(sessions: sessions)
-        next.routeClusters = RouteClusterEngine.cluster(sessions: sessions)
         next.weatherPoints = StatsEngine.weatherCorrelation(sessions: sessions)
-        next.racePredictions = RacePredictionEngine.predictions(
-            from: BestEffortEngine.evaluate(sessions: sessions))
         next.balance = IntensityBalanceEngine.evaluate(sessions: sessions)
         next.loadReport = TrainingLoadEngine.report(sessions: sessions)
-        next.integrity = DataIntegrity.report(sessions: sessions)
         next.cadenceStats = DataIntegrity.cadenceStats(sessions: sessions)
         next.typeShares = StatsEngine.typeDistribution(sessions: sessions)
         next.cadenceSeries = Array(sessions.compactMap { session -> CadencePoint? in
@@ -78,9 +72,9 @@ struct AnalyticsView: View {
 
     private var buckets: [TrendBucket] { cache.buckets }
     private var comparableGroups: [String: [WorkoutSession]] { cache.comparableGroups }
-    private var routeClusters: [RouteCluster] { cache.routeClusters }
+    private var routeClusters: [RouteCluster] { insights.result?.clusters ?? [] }
     private var weatherPoints: [StatsEngine.WeatherPoint] { cache.weatherPoints }
-    private var racePredictions: [RacePrediction] { cache.racePredictions }
+    private var racePredictions: [RacePrediction] { RacePredictionEngine.predictions(from: insights.result?.efforts ?? []) }
     private var hasDurationData: Bool { cache.hasDurationData }
     private var hasPaceData: Bool { cache.hasPaceData }
     private var hasIntensityData: Bool { cache.hasIntensityData }
@@ -88,6 +82,13 @@ struct AnalyticsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+                if insights.isLoading {
+                    BackgroundInsightsProgress(store: insights)
+                }
+                if let error = insights.error {
+                    Text(error).font(.caption).foregroundStyle(Theme.amber)
+                    Button("重新分析") { Task { await insights.loadIfNeeded() } }
+                }
                 if sessions.isEmpty {
                     emptyState
                 } else {
@@ -114,7 +115,12 @@ struct AnalyticsView: View {
             .padding(.bottom, 28)
         }
         .screenBackground()
-        .onAppear { rebuildCacheIfNeeded() }
+        .task(id: insights.revision) {
+            cacheKey = ""
+            rebuildCacheIfNeeded()
+            await insights.loadIfNeeded()
+        }
+        .onDisappear { insights.cancel() }
         .onChange(of: sessions.count) { _, _ in rebuildCacheIfNeeded() }
         .onChange(of: range) { _, _ in rebuildCacheIfNeeded() }
         .navigationTitle("圖表分析")
@@ -231,7 +237,7 @@ struct AnalyticsView: View {
     // MARK: 資料完整性
 
     private var integrityCard: some View {
-        let report = cache.integrity
+        let report = insights.result?.integrity ?? IntegrityReport()
         return GlassCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
