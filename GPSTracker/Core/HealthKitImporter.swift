@@ -194,7 +194,7 @@ final class HealthKitImporter: ObservableObject {
     @MainActor
     func configure(container: ModelContainer) async {
         guard !DatabaseHealth.needsAttention else { return }
-        writer = await Task.detached { HealthImportWriter(modelContainer: container) }.value
+        writer = await BackgroundFactory.make { HealthImportWriter(modelContainer: container) }
     }
 
     // MARK: 預覽

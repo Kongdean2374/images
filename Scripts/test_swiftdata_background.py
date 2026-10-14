@@ -77,7 +77,7 @@ harness = '''
 harness = harness.replace('        precondition(try context.fetchCount(FetchDescriptor<RoutePoint>()) == 21003)',
                           '        let pointCount = try context.fetchCount(FetchDescriptor<RoutePoint>())\n        precondition(pointCount == 21003)')
 names = ['Core/Calibration/MeasurementPolicy.swift', 'Core/Calibration/StrideValidation.swift',
-         'Core/Calibration/WorkoutTime.swift', 'Core/Calibration/PerformanceWindow.swift',
+         'Core/Calibration/WorkoutTime.swift', 'Core/Calibration/PerformanceWindow.swift', 'Core/Calibration/BackgroundFactory.swift',
          'Core/StatsEngine.swift', 'Core/BestEfforts.swift', 'Core/RouteCluster.swift',
          'Core/Achievements.swift', 'Core/DataIntegrity.swift', 'Core/CoverageGap.swift']
 with tempfile.TemporaryDirectory(prefix='gpstracker-native-swiftdata-') as directory:

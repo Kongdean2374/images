@@ -92,7 +92,7 @@ final class WorkoutInsightsStore: ObservableObject {
         let token = UUID(); generation = token
         isLoading = true; progress = 0; error = nil; status = "正在背景整理運動資料…"
         let task = Task { () throws -> WorkoutInsightsResult in
-            let reader = await Task.detached(priority: .utility) { WorkoutInsightsReader(modelContainer: container) }.value
+            let reader = await BackgroundFactory.make { WorkoutInsightsReader(modelContainer: container) }
             try Task.checkCancellation()
             return try await reader.read { done, total in
                 await MainActor.run {

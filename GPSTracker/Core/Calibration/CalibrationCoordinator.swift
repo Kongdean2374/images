@@ -121,7 +121,7 @@ final class CalibrationCoordinator: ObservableObject {
 
     func configure(container: ModelContainer) async {
         guard !DatabaseHealth.needsAttention else { return }
-        writer = await Task.detached { CalibrationAnalysisWriter(modelContainer: container) }.value
+        writer = await BackgroundFactory.make { CalibrationAnalysisWriter(modelContainer: container) }
     }
     func cancel() {
         cancelled = true

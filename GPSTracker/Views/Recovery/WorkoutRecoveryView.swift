@@ -165,7 +165,7 @@ struct WorkoutRecoveryView: View {
         Task {
             defer { isSaving = false }
             do {
-                let writer = await Task.detached(priority: .utility) { WorkoutRecoveryWriter(modelContainer: container) }.value
+                let writer = await BackgroundFactory.make { WorkoutRecoveryWriter(modelContainer: container) }
                 _ = try await writer.save(snapshot: snapshot, bodyWeight: weight, syncHealth: sync)
                 saved = true
                 CueService.shared.impact(.heavy)

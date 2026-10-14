@@ -11,6 +11,7 @@
 
 修改：
 
+- 原生執行緒測試指出單用 Task.detached 建立的 ModelActor 仍可能落在主執行緒；改由明確的背景 DispatchQueue 工廠建立 reader、匯入、校正、匯出及恢復 writer。
 - 背景 ModelActor 計算路線、分段、徽章、品質報告；UI 僅接收值型別結果，不跨執行緒傳遞 SwiftData model。
 - 路線分群僅查起終點；最佳分段逐場用短生命週期 context 讀取，原始路線完全保留。沿用最新 200 場最佳分段的既有範圍，沒有截斷任何原始點。
 - 分析／成就／徽章共用結果快取；資料保存事件 debounce 後失效，離開頁面取消計算，舊 generation 的結果不套用。提供載入進度與失敗重試。

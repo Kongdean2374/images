@@ -25,6 +25,6 @@ enum WorkoutExportRepository {
     private(set) static var writer: WorkoutExportWriter?
     static func configure(container: ModelContainer) async {
         guard !DatabaseHealth.needsAttention else { return }
-        writer = await Task.detached { WorkoutExportWriter(modelContainer: container) }.value
+        writer = await BackgroundFactory.make { WorkoutExportWriter(modelContainer: container) }
     }
 }
